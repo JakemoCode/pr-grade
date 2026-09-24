@@ -21,9 +21,35 @@ The repository is private for now, so the first command needs git access to it.
 | `pr-grade:grade` agent | Applies named lenses to one change and proves each finding by running something. Sonnet at `xhigh`, 50 turns, read-only on the repository. |
 | `scripts/grade_mode.py` | Picks the grading mode from the branch's changed files: `in-thread`, one `subagent`, or `fan-out` with one agent per lens group. |
 | `scripts/grade_block.py check <pr>` | Refuses a PR whose `## Grade` block is missing, below 5/5, missing a lens, in a cheaper mode than its files need, or older than its code. |
-| `templates/` | A lens file and a config to copy into a repository. |
+| `templates/` | A lens file, a config, and a CI workflow to copy into a repository. |
 
 Both scripts use only the Python standard library (3.9 or later). `check` also needs an authenticated `gh`.
+
+## A real grade
+
+This is from the pull request that added the grade check to a repository's own merge flow, with its file names generalized. The change made the local `check-pr` command refuse a PR without a current grade. `/code-review high` came back with ten findings, and none of them was about CI.
+
+`grade_mode.py` put the change at `fan-out`, so three `grade` agents read it. The timing group (L1, L2, L7) returned:
+
+```
+Score: 4/5
+Blocking: The CI job that reruns on every push never reads the grade, so a commit
+pushed after the PR is marked ready merges ungraded.
+
+P1 scripts/check.py:468 - Grade freshness has no backstop after ready
+The grade is checked only by the command the author runs before marking the PR
+ready. The workflow that reruns on every push calls a different entry point, which
+never reads the grade block.
+Ran the CI entry point with gh faked to return a PR whose grade is stale (a code
+file changed after the graded commit):
+  PR #197: closing references match
+  passed: the stale grade was not caught
+
+Verified and clear: L1, L2
+Could not verify: none
+```
+
+The whole enforcement would have been local-only. The fix made the CI entry point grade every ready PR. Re-grading that fix, as the skill requires, found the next defect: the check read the PR's file list in a second call after reading its head SHA, so a push landing between the two paired new files with an old comparison (L7). Every test was green throughout.
 
 ## Set up a repository
 
@@ -31,6 +57,7 @@ Both files are optional. Without them the generic lenses and default paths apply
 
 1. Copy `templates/pr-grade-lenses.md` to `.claude/pr-grade-lenses.md` and restate each lens for the codebase: its real bounded resources, the callers people forget, what a single transaction covers, how a finding is proven. A lens heading added there becomes one `check` requires.
 2. Copy `templates/pr-grade.json` to `.claude/pr-grade.json` and list the silent-failure paths: code where a defect would pass every test, such as checks, gates, persistence, CI, and hooks. `silentCommand` can print more, one path per line, when the repository already keeps that list somewhere. A key you set replaces its default list whole, which is why the template repeats the defaults. `requireGrade.branches`, a regex, limits the check to matching branches; leave it out to check every ready PR.
+3. To enforce the grade, copy `templates/pr-grade-check.yml` to `.github/workflows/pr-grade.yml` and make its check required. It fetches the checker from a pinned pr-grade ref rather than from your repository, so a pull request cannot edit the check that judges it. While this repository is private, it also needs a `PR_GRADE_TOKEN` secret that can read it.
 
 ## How the mode is picked
 
@@ -56,7 +83,7 @@ Could not verify: none
 
 The score counts P1 and P2 findings; a P3 is a note. `check` compares `Graded` with the PR head through GitHub and refuses when a file the grade covers changed after it. It counts only the PR's own files, so merging the base branch does not trip it. It fails closed when GitHub's lists are cut off (3000 PR files, 300 compared files) or the PR moves during the check. The config and lens file come from the base branch, so a PR cannot loosen the rules it is checked against, and both are silent files, so changing them raises the grade.
 
-To make it a merge gate, run `grade_block.py check` in CI on `opened`, `edited`, `synchronize`, `reopened`, and `ready_for_review`. Drafts are skipped.
+The workflow template runs `check` on `opened`, `edited`, `synchronize`, `reopened`, and `ready_for_review`, so a commit pushed after the grade fails until it is graded, and a block pasted into the body is read at once. Drafts are skipped.
 
 ## Tests
 

@@ -189,4 +189,4 @@ Every time, the local suite stayed green. **A fix that satisfies a finding is th
 python3 <base>/scripts/grade_block.py check <pr>
 ```
 
-Run it before marking a PR ready. To make it a merge gate, run a copy of `scripts/` in CI on `opened`, `edited`, `synchronize`, `reopened`, and `ready_for_review`, so a commit pushed after the grade fails until it is graded and a block pasted into the body is read at once. The check reads the config and lens file from the base branch, so a PR cannot loosen its own rules.
+Run it before marking a PR ready. To make it a merge gate, copy [`templates/pr-grade-check.yml`](templates/pr-grade-check.yml) to `.github/workflows/` and make its check required. It runs on `opened`, `edited`, `synchronize`, `reopened`, and `ready_for_review`, so a commit pushed after the grade fails until it is graded and a block pasted into the body is read at once. It runs the checker from a pinned pr-grade ref, and the checker reads the config and lens file from the base branch, so a pull request cannot loosen the rules it is checked against.

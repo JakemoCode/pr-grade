@@ -86,11 +86,12 @@ class SilentTest(Fixture):
         self.configure(silentCommand='printf "src/store.py\\nsrc/other.py\\n"')
         self.assertEqual(self.assess(['src/store.py', 'src/leaf.py'])[1], {'src/store.py': 'named by silentCommand'})
 
-    def test_a_failing_silent_command_stops_the_run(self) -> None:
-        # A mode picked without it could be too cheap.
-        self.configure(silentCommand='exit 3')
-        with self.assertRaises(subprocess.CalledProcessError):
+    def test_a_failing_silent_command_stops_the_run_with_its_message(self) -> None:
+        # A mode picked without it could be too cheap, and the command knows how to fix itself.
+        self.configure(silentCommand="echo 'build the venv first' >&2; exit 3")
+        with self.assertRaises(SystemExit) as stopped:
             self.assess(['src/leaf.py'])
+        self.assertEqual(str(stopped.exception.code), 'silentCommand failed (exit 3): build the venv first')
 
 
 class CoverageTest(Fixture):

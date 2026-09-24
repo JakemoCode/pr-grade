@@ -73,12 +73,14 @@ def code_files(changed: list[str], config: dict) -> list[str]:
 
 
 def silent_reasons(changed: list[str], root: Path, config: dict) -> dict[str, str]:
-    """Each changed silent-failure file, with why it is one. A failing `silentCommand` stops the run:
-    a grade picked without it could be too cheap."""
+    """Each changed silent-failure file, with why it is one. A failing `silentCommand` stops the run with
+    its own message: a grade picked without it could be too cheap."""
     named: set[str] = set()
     if config['silentCommand']:
-        named = set(subprocess.run(config['silentCommand'], shell=True, cwd=root, capture_output=True, text=True,
-                                   check=True).stdout.split())
+        run = subprocess.run(config['silentCommand'], shell=True, cwd=root, capture_output=True, text=True)
+        if run.returncode != 0:
+            sys.exit(f"silentCommand failed (exit {run.returncode}): {run.stderr.strip() or run.stdout.strip()}")
+        named = set(run.stdout.split())
     reasons = {}
     for path in changed:
         pattern = matches(path, config['silent'])

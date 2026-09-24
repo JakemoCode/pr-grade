@@ -1,0 +1,56 @@
+# Refuses a ready pull request whose `## Grade` block is missing, below 5/5, missing a lens, in a
+# cheaper mode than its files need, or older than its code. Copy to .github/workflows/pr-grade.yml
+# and make "PR grade / grade" a required check to turn it into a merge gate.
+#
+# The checker comes from a pinned pr-grade ref, never from this repository, so a pull request cannot
+# edit the check that judges it. It reads .claude/pr-grade.json and .claude/pr-grade-lenses.md from
+# the base branch for the same reason. Pin PR_GRADE_REF to a commit SHA and move it deliberately.
+#
+# If your .claude/pr-grade.json sets `silentCommand`, add whatever it needs (a venv, npm ci) as a
+# step before "Check the grade", or the check stops and says so.
+name: PR grade
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: pr-grade-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  PR_GRADE_REPO: JakemoCode/pr-grade
+  PR_GRADE_REF: main
+
+jobs:
+  grade:
+    # A draft is work in progress; the checker skips drafts too.
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Fetch the pinned checker
+        env:
+          # github.token cannot read another private repository. While pr-grade is private, add a
+          # PR_GRADE_TOKEN secret that can read it.
+          GH_TOKEN: ${{ secrets.PR_GRADE_TOKEN || github.token }}
+        run: |
+          gh api "repos/$PR_GRADE_REPO/tarball/$PR_GRADE_REF" > "$RUNNER_TEMP/pr-grade.tgz"
+          mkdir "$RUNNER_TEMP/pr-grade"
+          tar -xzf "$RUNNER_TEMP/pr-grade.tgz" -C "$RUNNER_TEMP/pr-grade" --strip-components 1
+
+      - name: Check the grade
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python "$RUNNER_TEMP/pr-grade/skills/pr-grade/scripts/grade_block.py"
+          check "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}"

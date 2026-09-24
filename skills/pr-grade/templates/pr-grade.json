@@ -1,0 +1,22 @@
+{
+  "lenses": ".claude/pr-grade-lenses.md",
+  "fanOutAbove": 4,
+  "silent": [
+    ".github/workflows/*",
+    ".husky/*",
+    ".claude/hooks/*",
+    ".claude/settings.json",
+    "*/migrations/*",
+    "src/persistence/*",
+    "scripts/*",
+    "tests/architecture/*",
+    "eslint.config.js",
+    "package.json"
+  ],
+  "silentCommand": null,
+  "tests": ["tests/*", "*/tests/*", "*.test.*", "*.spec.*", "test_*"],
+  "notCode": ["*.md", "docs/*", "LICENSE", "package-lock.json", "*.lock"],
+  "requireGrade": {
+    "branches": "^feat/"
+  }
+}

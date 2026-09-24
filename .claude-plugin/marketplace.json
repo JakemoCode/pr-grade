@@ -1,0 +1,20 @@
+{
+  "name": "jakemocode",
+  "owner": {
+    "name": "Jake Mosher"
+  },
+  "description": "pr-grade, as an installable Claude Code plugin.",
+  "plugins": [
+    {
+      "name": "pr-grade",
+      "source": "./",
+      "description": "Grade a change the way an external reviewer will, before pushing it.",
+      "category": "engineering",
+      "keywords": [
+        "code-review",
+        "pull-request",
+        "quality-gate"
+      ]
+    }
+  ]
+}

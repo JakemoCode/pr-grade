@@ -6,6 +6,7 @@
     "name": "Jake Mosher"
   },
   "repository": "https://github.com/JakemoCode/pr-grade",
+  "license": "MIT",
   "keywords": [
     "code-review",
     "pull-request",

@@ -23,7 +23,8 @@ requires for the PR's files; when the graded commit is not in the PR's history o
 must cover changed after it; when GitHub's lists are cut off; or when the PR moved during the check.
 
 It skips a draft, and a PR whose branch does not match `requireGrade.branches` in the config when that
-key is set.
+key is set. The config and the lens file are read from the PR's base branch, so a PR cannot loosen the
+rules it is checked against.
 """
 from __future__ import annotations
 
@@ -35,7 +36,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from grade_mode import MODES, assess, load_config, repo_root  # noqa: E402
+from grade_mode import CONFIG, MODES, assess, load_config, repo_root  # noqa: E402
 
 DEFAULT_LENSES = [f'L{n}' for n in range(1, 9)]
 # GitHub lists at most this many files, and says nothing when it stops.
@@ -54,24 +55,31 @@ def without_code(markdown: str) -> str:
     return re.sub(r'`[^`\n]*`', '', fenced)
 
 
-def lens_ids(lens_file: Path) -> list[str]:
-    """Every lens the lens file defines, or the skill's eight without one. A lens added to the file is
-    required with no code change."""
-    return LENS_HEADING.findall(lens_file.read_text()) if lens_file.exists() else DEFAULT_LENSES
+def lens_ids(text: str | None) -> list[str]:
+    """Every lens the lens file text defines as a `### L<n>.` heading. A lens added there is required
+    with no code change. The skill's eight apply without a file, or when no heading matches, so a
+    reworded heading can never leave nothing required."""
+    return (LENS_HEADING.findall(text) if text else []) or DEFAULT_LENSES
 
 
 def parse(body: str) -> dict[str, str] | None:
     """The block's fields, or None when the body has no `## Grade` section. A body edited in GitHub's
     web UI comes back with CRLF endings."""
     section = SECTION.search(without_code(body.replace('\r\n', '\n')))
-    return None if section is None else dict(FIELD.findall(section.group(1)))
+    if section is None:
+        return None
+    # The first of each field is the block's own: a pasted agent report below it repeats `Score:`.
+    fields: dict[str, str] = {}
+    for name, value in FIELD.findall(section.group(1)):
+        fields.setdefault(name, value)
+    return fields
 
 
 def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[str], compare: dict | None,
              root: Path, config: dict) -> list[str]:
     """What stops the PR going ready. `pr_files` is every path the PR touches, both sides of a rename.
     `compare` is GitHub's comparison of the graded commit with the PR head: its `status` and the paths
-    it changed, or None when the graded commit could not be read."""
+    it changed, or `error` when it could not be read."""
     if block is None:
         return ['The body has no `## Grade` section. Grade the branch with /pr-grade and put its block in the body.']
     required, reasons, covered = assess(pr_files, root, config)
@@ -92,8 +100,9 @@ def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[
     graded = block.get('Graded', '')
     if not SHA.fullmatch(graded):
         found.append(f'`Graded` must be the full 40-character SHA of the graded commit, not {graded or "nothing"}.')
-    elif compare is None:
-        found.append(f'Graded commit {graded} could not be read on GitHub. Push it, or re-grade.')
+    elif 'error' in compare:
+        found.append(f"Graded commit {graded} could not be compared on GitHub ({compare['error']}). Push it, or "
+                     'check the token can read contents.')
     elif compare['status'] not in ('ahead', 'identical'):
         found.append(f"Graded commit {graded} is not in this PR's history ({compare['status']}). Re-grade the branch.")
     elif len(compare['files']) >= COMPARE_CAP:
@@ -114,38 +123,52 @@ def gh(*args: str) -> str:
     return run.stdout
 
 
-def graded_comparison(repo: str, graded: str, head: str) -> dict | None:
-    """GitHub's comparison of the graded commit with the PR head, or None when it cannot be read."""
+def graded_comparison(repo: str, graded: str, head: str) -> dict:
+    """GitHub's comparison of the graded commit with the PR head, or `error` with gh's message."""
     if not SHA.fullmatch(graded):
-        return None
+        return {'error': 'no graded SHA'}
     try:
-        data = json.loads(gh('api', f'repos/{repo}/compare/{graded}...{head}'))
-    except SystemExit:
+        data = json.loads(gh('api', f'repos/{repo}/compare/{graded}...{head}', '--jq', '{status, files: [.files[]?.filename]}'))
+    except SystemExit as failed:
+        return {'error': str(failed.code)}
+    return {'status': data['status'], 'files': data['files'] or []}
+
+
+def base_file(repo: str, path: str, ref: str) -> str | None:
+    """`path` as the base branch has it, or None when it is absent there. The grade's rules come from
+    the base, so the PR under check cannot loosen them for itself."""
+    run = subprocess.run(['gh', 'api', f'repos/{repo}/contents/{path}?ref={ref}', '-H',
+                          'Accept: application/vnd.github.raw'], capture_output=True, text=True)
+    if run.returncode == 0:
+        return run.stdout
+    if 'Not Found' in run.stderr or '404' in run.stderr:
         return None
-    return {'status': data['status'], 'files': [f['filename'] for f in data.get('files', [])]}
+    sys.exit(f'reading {path} at {ref} failed: {run.stderr.strip()}')
 
 
 def check(pr: int, repo: str, root: Path) -> tuple[bool, list[str]]:
     """Whether the PR needs a grade, and what stops it."""
-    config = load_config(root)
-    view = json.loads(gh('pr', 'view', str(pr), '--repo', repo, '--json', 'body,headRefName,headRefOid,isDraft'))
+    view = json.loads(gh('pr', 'view', str(pr), '--repo', repo, '--json',
+                         'body,baseRefName,headRefName,headRefOid,isDraft'))
+    config = load_config(root, base_file(repo, CONFIG, view['baseRefName']) or '')
     branches = (config.get('requireGrade') or {}).get('branches')
     if view['isDraft'] or (branches and not re.search(branches, view['headRefName'])):
         return False, []
-    rows = gh('api', '--paginate', f'repos/{repo}/pulls/{pr}/files', '--jq',
-              '.[] | [.filename, (.previous_filename // empty)] | @tsv').splitlines()
+    # One JSON array per file, so no path is escaped on the way through.
+    rows = gh('api', '--paginate', f'repos/{repo}/pulls/{pr}/files?per_page=100', '--jq',
+              '.[] | [.filename, (.previous_filename // empty)]').splitlines()
     if len(rows) >= PR_FILE_CAP:
         return True, [f'PR #{pr} touches {PR_FILE_CAP} files, the most GitHub lists, so its grade mode cannot be '
                       'checked. Split it.']
-    paths = [path for row in rows for path in row.split('\t') if path]
+    paths = [path for row in rows for path in json.loads(row)]
     # The files list came from a second read; a push since the first would pair it with an old compare.
     head = json.loads(gh('pr', 'view', str(pr), '--repo', repo, '--json', 'headRefOid'))['headRefOid']
     if head != view['headRefOid']:
         return True, [f"PR #{pr} moved from {view['headRefOid']} to {head} while it was checked. Run the check again."]
     block = parse(view['body'] or '')
     compare = graded_comparison(repo, (block or {}).get('Graded', ''), head)
-    return True, problems(block, pr_files=paths, lenses=lens_ids(root / config['lenses']), compare=compare,
-                          root=root, config=config)
+    lenses = lens_ids(base_file(repo, config['lenses'], view['baseRefName']))
+    return True, problems(block, pr_files=paths, lenses=lenses, compare=compare, root=root, config=config)
 
 
 def main() -> None:

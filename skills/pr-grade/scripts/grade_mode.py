@@ -31,10 +31,12 @@ from pathlib import Path
 
 MODES = ('in-thread', 'subagent', 'fan-out')
 CONFIG = '.claude/pr-grade.json'
+# The grade's own rules are silent: a PR that loosens them is grading itself.
 DEFAULTS = {
     'lenses': '.claude/pr-grade-lenses.md',
     'fanOutAbove': 4,
-    'silent': ['.github/workflows/*', '.husky/*', '.claude/hooks/*', '.claude/settings.json', '*/migrations/*'],
+    'silent': ['.github/workflows/*', '.husky/*', '.claude/hooks/*', '.claude/settings.json', 'migrations/*',
+               '*/migrations/*', CONFIG, '.claude/pr-grade-lenses.md'],
     'silentCommand': None,
     'tests': ['tests/*', 'test/*', '*/tests/*', '*/test/*', '__tests__/*', '*/__tests__/*', '*.test.*', '*.spec.*',
               '*_test.*', 'test_*'],
@@ -50,10 +52,13 @@ def repo_root(start: Path | None = None) -> Path:
     return Path(_git(start or Path.cwd(), 'rev-parse', '--show-toplevel').strip())
 
 
-def load_config(root: Path) -> dict:
-    """The repository's config over the defaults. A key it sets replaces the default list whole."""
-    path = root / CONFIG
-    return {**DEFAULTS, **(json.loads(path.read_text()) if path.exists() else {})}
+def load_config(root: Path, text: str | None = None) -> dict:
+    """The repository's config over the defaults, read from `text` when given, else from `root`. A key it
+    sets replaces the default list whole."""
+    if text is None:
+        path = root / CONFIG
+        text = path.read_text() if path.exists() else None
+    return {**DEFAULTS, **(json.loads(text) if text else {})}
 
 
 def matches(path: str, patterns: list[str]) -> str | None:
@@ -92,12 +97,13 @@ def mode_for(silent: bool, code_count: int, fan_out_above: int) -> str:
 
 
 def assess(changed: list[str], root: Path, config: dict | None = None) -> tuple[str, dict[str, str], list[str]]:
-    """The mode, each silent-failure file with its reason, and every file the grade must cover: the code
-    files and any silent file among the tests, in the order given."""
+    """The mode, each silent-failure file with its reason, and every file the grade must cover: all of
+    them but `notCode`, plus any silent file there. Tests are covered, since a test weakened after the
+    grade can undo the proof a finding rested on."""
     config = config or load_config(root)
     reasons, code = silent_reasons(changed, root, config), code_files(changed, config)
     mode = mode_for(bool(reasons), len(code), config['fanOutAbove'])
-    return mode, reasons, [p for p in changed if p in reasons or p in code]
+    return mode, reasons, [p for p in changed if p in reasons or not matches(p, config['notCode'])]
 
 
 def changed_files(base: str, root: Path) -> list[str]:

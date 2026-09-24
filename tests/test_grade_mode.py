@@ -67,7 +67,8 @@ class ModeTest(Fixture):
 
 class SilentTest(Fixture):
     def test_default_silent_paths(self) -> None:
-        for path in ('.github/workflows/ci.yml', '.husky/pre-push', '.claude/settings.json', 'db/migrations/001.sql'):
+        for path in ('.github/workflows/ci.yml', '.husky/pre-push', '.claude/settings.json', 'db/migrations/001.sql',
+                     'migrations/001.sql', '.claude/pr-grade.json', '.claude/pr-grade-lenses.md'):
             with self.subTest(path=path):
                 self.assertIn(path, self.assess([path])[1])
 
@@ -93,10 +94,13 @@ class SilentTest(Fixture):
 
 
 class CoverageTest(Fixture):
-    def test_the_grade_covers_code_and_silent_tests(self) -> None:
-        self.configure(silent=['tests/architecture/*'])
-        changed = ['tests/architecture/owners.test.ts', 'tests/unit/a.test.ts', 'docs/a.md', 'src/a.py']
-        self.assertEqual(self.assess(changed)[2], ['tests/architecture/owners.test.ts', 'src/a.py'])
+    def test_the_grade_covers_everything_but_not_code(self) -> None:
+        # A test weakened after the grade can undo the proof a finding rested on.
+        changed = ['tests/unit/a.test.ts', 'docs/a.md', 'src/a.py', 'package-lock.json']
+        self.assertEqual(self.assess(changed)[2], ['tests/unit/a.test.ts', 'src/a.py'])
+
+    def test_a_silent_file_among_not_code_is_covered(self) -> None:
+        self.assertEqual(self.assess(['.claude/pr-grade-lenses.md', 'docs/a.md'])[2], ['.claude/pr-grade-lenses.md'])
 
 
 class ChangedFilesTest(Fixture):

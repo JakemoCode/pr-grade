@@ -6,7 +6,10 @@
     ".husky/*",
     ".claude/hooks/*",
     ".claude/settings.json",
+    "migrations/*",
     "*/migrations/*",
+    ".claude/pr-grade.json",
+    ".claude/pr-grade-lenses.md",
     "src/persistence/*",
     "scripts/*",
     "tests/architecture/*",
@@ -14,9 +17,7 @@
     "package.json"
   ],
   "silentCommand": null,
-  "tests": ["tests/*", "*/tests/*", "*.test.*", "*.spec.*", "test_*"],
-  "notCode": ["*.md", "docs/*", "LICENSE", "package-lock.json", "*.lock"],
-  "requireGrade": {
-    "branches": "^feat/"
-  }
+  "tests": ["tests/*", "test/*", "*/tests/*", "*/test/*", "__tests__/*", "*/__tests__/*", "*.test.*", "*.spec.*",
+            "*_test.*", "test_*"],
+  "notCode": ["*.md", "docs/*", "LICENSE", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "*.lock", "go.sum"]
 }

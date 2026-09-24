@@ -30,7 +30,7 @@ Both scripts use only the Python standard library (3.9 or later). `check` also n
 Both files are optional. Without them the generic lenses and default paths apply.
 
 1. Copy `templates/pr-grade-lenses.md` to `.claude/pr-grade-lenses.md` and restate each lens for the codebase: its real bounded resources, the callers people forget, what a single transaction covers, how a finding is proven. A lens heading added there becomes one `check` requires.
-2. Copy `templates/pr-grade.json` to `.claude/pr-grade.json` and list the silent-failure paths: code where a defect would pass every test, such as checks, gates, persistence, CI, and hooks. `silentCommand` can print more, one path per line, when the repository already keeps that list somewhere.
+2. Copy `templates/pr-grade.json` to `.claude/pr-grade.json` and list the silent-failure paths: code where a defect would pass every test, such as checks, gates, persistence, CI, and hooks. `silentCommand` can print more, one path per line, when the repository already keeps that list somewhere. A key you set replaces its default list whole, which is why the template repeats the defaults. `requireGrade.branches`, a regex, limits the check to matching branches; leave it out to check every ready PR.
 
 ## How the mode is picked
 
@@ -54,9 +54,9 @@ Verified and clear: L1, L2, L3, L4, L5, L6, L7, L8
 Could not verify: none
 ```
 
-The score counts P1 and P2 findings; a P3 is a note. `check` compares `Graded` with the PR head through GitHub and refuses when a file the grade covers changed after it. It counts only the PR's own files, so merging the base branch does not trip it. It fails closed when GitHub's lists are cut off (3000 PR files, 300 compared files) or the PR moves during the check.
+The score counts P1 and P2 findings; a P3 is a note. `check` compares `Graded` with the PR head through GitHub and refuses when a file the grade covers changed after it. It counts only the PR's own files, so merging the base branch does not trip it. It fails closed when GitHub's lists are cut off (3000 PR files, 300 compared files) or the PR moves during the check. The config and lens file come from the base branch, so a PR cannot loosen the rules it is checked against, and both are silent files, so changing them raises the grade.
 
-To make it a merge gate, run `grade_block.py check` in CI on `opened`, `edited`, `synchronize`, `reopened`, and `ready_for_review`. Drafts are skipped, and `requireGrade.branches` limits the check to matching branches.
+To make it a merge gate, run `grade_block.py check` in CI on `opened`, `edited`, `synchronize`, `reopened`, and `ready_for_review`. Drafts are skipped.
 
 ## Tests
 

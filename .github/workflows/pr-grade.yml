@@ -54,3 +54,4 @@ jobs:
         run: >-
           python "$RUNNER_TEMP/pr-grade/skills/pr-grade/scripts/grade_block.py"
           check "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}"
+# Throwaway change after the grade.

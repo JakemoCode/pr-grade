@@ -2,6 +2,8 @@
 
 Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an update exists, so every release bumps it. After updating, run `/reload-plugins`.
 
+CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` without raising the version and adding its heading here. Label one `hold-release` to merge it unreleased, when a change lands over several pull requests.
+
 ## 0.3.1
 
 - A re-grade is sized by the fix commits alone: `grade_mode.py --base <the last commit graded>`, and the scanner with the same base for L7. Without `--base` every round was sized by the whole branch, so a two-line fix cost what the first grade did. Every lens still runs, and the loop ends at the first round with no P1 or P2.

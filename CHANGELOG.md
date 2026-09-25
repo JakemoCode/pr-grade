@@ -2,6 +2,11 @@
 
 Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an update exists, so every release bumps it. After updating, run `/reload-plugins`.
 
+## 0.4.0
+
+- A repository that embeds the scripts can pass in its own rules. `grade_mode.assess` takes `named`, exact paths mapped to the reason each is a silent-failure file, and `grade_block.problems` takes `assess`, a selector to use in place of the plugin's.
+- `grade_block.py` loads the `grade_mode.py` beside it by path under a private name, so it no longer picks up, or replaces, a caller's own `grade_mode` module.
+
 ## 0.3.1
 
 - A re-grade is sized by the fix commits alone: `grade_mode.py --base <the last commit graded>`, and the scanner with the same base for L7. Without `--base` every round was sized by the whole branch, so a two-line fix cost what the first grade did. Every lens still runs, and the loop ends at the first round with no P1 or P2.

@@ -140,6 +140,13 @@ class CliTest(unittest.TestCase):
         self.assertIn('cannot parse it', skip['reason'])
         self.assertIn('check_then_act: skipped broken.py', self.run_cli().stderr)
 
+    def test_a_file_too_deep_to_walk_is_skipped_and_the_rest_still_scanned(self) -> None:
+        # Generated code can nest one expression thousands deep; one such file must not end the scan.
+        (self.root / 'generated.py').write_text('def total():\n    return ' + ' + '.join(['1'] * 3000) + '\n')
+        result = self.result()
+        self.assertEqual([s['file'] for s in result['skipped']], ['generated.py'])
+        self.assertEqual([c['function'] for c in result['candidates']], ['a'])
+
 
 if __name__ == '__main__':
     unittest.main()

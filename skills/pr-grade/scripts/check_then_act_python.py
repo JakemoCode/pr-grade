@@ -340,11 +340,15 @@ def parse_python(files: list[str], root: Path) -> tuple[dict, list[dict]]:
                                                     f'{error.msg}); if it uses newer syntax, run check_then_act.py with a newer '
                                                     'python3'})
             continue
-        except (UnicodeDecodeError, ValueError, LookupError) as error:
+        except (OSError, UnicodeDecodeError, ValueError, LookupError, RecursionError, MemoryError) as error:
             skipped.append({'file': file, 'reason': f'cannot read it: {error}'})
             continue
         f = _File(text, tree)
         functions = sorted((node for node in ast.walk(tree) if isinstance(node, FUNCTIONS)),
                            key=lambda node: (node.lineno, node.col_offset))
-        parsed[file] = [_analyze_function(f, node) for node in functions]
+        try:
+            parsed[file] = [_analyze_function(f, node) for node in functions]
+        except RecursionError:
+            # Generated code can nest one expression thousands deep. Skip the file, keep the scan.
+            skipped.append({'file': file, 'reason': 'an expression nests too deep to walk; grade its L7 windows by hand'})
     return parsed, skipped

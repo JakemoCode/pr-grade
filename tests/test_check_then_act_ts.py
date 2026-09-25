@@ -166,21 +166,21 @@ class CliTest(TempRepo):
 
     def test_code_in_a_language_without_an_adapter_is_reported_skipped(self) -> None:
         # Otherwise a branch that changes only such files reads exactly like a clean scan.
-        for name in ('app.py', 'deploy.sh', 'Dockerfile', 'settings.yaml', '.nvmrc', 'types.d.ts'):
+        for name in ('app.rb', 'deploy.sh', 'Dockerfile', 'settings.yaml', '.nvmrc', 'types.d.ts'):
             (self.root / name).write_text('x\n')
         result = self.result()
         # Anything the scanner cannot read is named, whatever its language; a data file is not reported.
-        self.assertEqual(sorted(s['file'] for s in result['skipped']), ['Dockerfile', 'app.py', 'deploy.sh'])
+        self.assertEqual(sorted(s['file'] for s in result['skipped']), ['Dockerfile', 'app.rb', 'deploy.sh'])
         self.assertEqual({s['reason'] for s in result['skipped']}, {cta.UNSUPPORTED})
         run = run_cli(self.root, '--base', 'main', env=self.env())
         self.assertIn('3 files were skipped and not scanned', run.stdout)
 
     def test_an_empty_new_file_in_another_language_is_reported_skipped(self) -> None:
         # Its diff has no hunks, so only the `diff --git` line names it.
-        (self.root / 'empty.py').write_text('')
-        git(self.root, 'add', 'empty.py')
+        (self.root / 'empty.rb').write_text('')
+        git(self.root, 'add', 'empty.rb')
         git(self.root, 'commit', '-q', '-m', 'empty')
-        self.assertEqual(self.result()['skipped'], [{'file': 'empty.py', 'reason': cta.UNSUPPORTED}])
+        self.assertEqual(self.result()['skipped'], [{'file': 'empty.rb', 'reason': cta.UNSUPPORTED}])
 
     def test_a_base_that_does_not_resolve_stops_with_a_message(self) -> None:
         run = run_cli(self.root, '--base', 'origin/missing', env=self.env())

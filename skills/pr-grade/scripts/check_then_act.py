@@ -11,7 +11,9 @@ and an empty list does not clear L7.
 
 TypeScript and JavaScript go through check_then_act_ts.cjs, which needs Node and the repository's own
 `typescript` package (or PR_GRADE_TYPESCRIPT pointing at one). Without them those files are skipped
-with a notice. Any other changed file it cannot read is listed as skipped, unless it is a data format.
+with a notice. Python goes through check_then_act_python.py, which reads it with this interpreter's
+`ast`; a file in syntax newer than this python3 is skipped with a notice. Any other changed file it
+cannot read is listed as skipped, unless it is a data format.
 
 Name lists live under `checkThenAct` in .claude/pr-grade.json; a key you set replaces its default list.
 A plain word matches a method named exactly that word, or starting with it and followed by `_` or a
@@ -31,25 +33,36 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from grade_mode import changed_lines, load_config, matches, repo_root  # noqa: E402
+from check_then_act_python import parse_python  # noqa: E402
 
 TS_ADAPTER = Path(__file__).resolve().parent / 'check_then_act_ts.cjs'
 TS_SUFFIXES = ('.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs')
+PY_SUFFIXES = ('.py',)
 DEFAULTS = {
     'writes': ['append', 'insert', 'update', 'upsert', 'delete', 'remove', 'replace', 'save', 'put', 'set', 'write',
                'create', 'record', 'ensure', 'mark', 'submit', 'publish', 'persist', 'store', 'link', 'unlink', 'add',
                'enqueue', 'increment', 'decrement', 'claim', 'acquire', 'release', 'finalize', 'transition',
                'bulk_create', 'bulk_update'],
-    'secondReads': ['fetch', 'urlopen', 'requests.*', 'httpx.*', 'aiohttp.*', 'urllib.request.*', 'subprocess.*',
+    # [f]etch is a glob, so it matches fetch() alone and not a database helper like fetch_lines().
+    'secondReads': ['[f]etch', 'urlopen', 'requests.*', 'httpx.*', 'aiohttp.*', 'urllib.request.*', 'subprocess.*',
                     'execSync', 'execFileSync', 'spawnSync'],
     'transactions': ['unitOfWork', 'unit_of_work', 'transaction', 'withTransaction', 'runInTransaction',
                      'run_in_transaction', '$transaction', 'atomic', 'begin', 'begin_nested', 'commit', 'rollback'],
     'locks': ['lock', '*_lock', '*Lock', 'mutex', '*Mutex', 'runExclusive', '*.locks.request'],
     'ignore': ['validate', 'parse', 'safeParse', 'hash', 'format', 'serialize', 'stringify', 'compute', 'derive',
-               'setTimeout', 'setInterval', 'setImmediate', 'createHash', 'addEventListener', 'removeEventListener'],
+               'setTimeout', 'setInterval', 'setImmediate', 'createHash', 'addEventListener', 'removeEventListener',
+               # Django looks up a model class, not a row.
+               'apps.get_model', 'get_user_model'],
 }
-# Receivers whose methods never touch shared state.
+# Receivers whose methods never touch shared state. Modules that reach the filesystem, the network, or
+# another process (os, shutil, subprocess, requests) are left out on purpose.
 BUILTIN_RECEIVERS = {'Array', 'Object', 'JSON', 'Math', 'Number', 'String', 'Promise', 'Date', 'Reflect', 'console',
-                     'path', 'Buffer', 'Symbol', 'os.path', 'json', 're', 'math', 'itertools', 'logging', 'logger'}
+                     'path', 'Buffer', 'Symbol', 'os.path', 'json', 're', 'math', 'itertools', 'logging', 'logger',
+                     'builtins', 'argparse', 'sys', 'textwrap', 'functools', 'collections', 'dataclasses', 'typing',
+                     'shlex', 'string', 'base64', 'hashlib', 'uuid', 'fnmatch', 'posixpath', 'datetime', 'enum',
+                     'copy', 'operator', 'pprint', 'difflib', 'statistics', 'decimal', 'fractions', 'struct',
+                     # Clocks: a time is not shared state.
+                     'time', 'timezone'}
 # Methods that mutate the collection they are called on: on this.x or self.x they are member writes.
 MUTATORS = {'set', 'add', 'delete', 'push', 'clear', 'pop', 'splice', 'append', 'extend', 'update', 'remove',
             'discard', 'insert'}
@@ -114,6 +127,7 @@ def analyze(fn: dict, cfg: dict) -> list[dict]:
     for call in fn['calls']:
         callee, root = call['callee'], call['callee'].split('.', 1)[0]
         receiver = _receiver(callee)
+        builtin = receiver in BUILTIN_RECEIVERS or root in BUILTIN_RECEIVERS
         local = root in collections
         parts = callee.split('.')
         # this.cache.set(k, v) mutates the member, and this.store.append(x) may be a store call: count both.
@@ -125,12 +139,11 @@ def analyze(fn: dict, cfg: dict) -> list[dict]:
             kind[call['id']] = None
         elif not call['inHandler'] and not fn['isConstructor'] and (
                 (call['sql'] == 'write' and not call['chainedReceiver'])
-                or (not local and any_match(callee, cfg['writes']))):
+                or (not local and not builtin and any_match(callee, cfg['writes']))):
             kind[call['id']] = 'write'
         elif any_match(callee, cfg['transactions']):
             kind[call['id']] = 'transaction'
-        elif call['sql'] == 'read' or call['awaited'] or (
-                not call['bare'] and not local and receiver not in BUILTIN_RECEIVERS and root not in BUILTIN_RECEIVERS):
+        elif call['sql'] == 'read' or call['awaited'] or (not call['bare'] and not local and not builtin):
             kind[call['id']] = 'read'
         else:
             kind[call['id']] = None
@@ -182,11 +195,15 @@ def analyze(fn: dict, cfg: dict) -> list[dict]:
     writes += [{'kind': 'member', 'span': w['span'], 'line': w['line'], 'callee': w['path'], 'path': w['path'],
                 'scopeIds': w['scopeIds']} for w in member_writes]
 
-    locked = bool(fn.get('inlineCallee')) and any_match(fn['inlineCallee'], cfg['locks'])
+    # What the whole body runs inside: the call a callback is passed to, and any decorators.
+    hosts = [fn['inlineCallee']] if fn.get('inlineCallee') else []
+    hosts += fn.get('wrappers', [])
+    locked = any(any_match(host, cfg['locks']) for host in hosts)
     # A function passed to a transaction runner already runs inside that transaction.
-    in_transaction = bool(fn.get('inlineCallee')) and any_match(fn['inlineCallee'], cfg['transactions'])
+    in_transaction = any(any_match(host, cfg['transactions']) for host in hosts)
     transaction_scopes = [dict(scope, span=_span(scope['span'])) for scope in fn['scopes']
                           if any_match(scope['callee'], cfg['transactions'])]
+    lock_scopes = [_span(scope['span']) for scope in fn['scopes'] if any_match(scope['callee'], cfg['locks'])]
 
     def innermost_transaction(point):
         holding = [scope for scope in transaction_scopes if scope['span'][0] <= point <= scope['span'][1]]
@@ -217,11 +234,16 @@ def analyze(fn: dict, cfg: dict) -> list[dict]:
         if not locked:
             for waited in fn['awaits']:
                 span = _span(waited['span'])
+                # No second caller runs between a check and a write that share a lock with the await.
+                if any(_inside(span, lock) and lock[0] <= start and w_end <= lock[1] for lock in lock_scopes):
+                    continue
                 if keep(span, waited.get('scopeIds', []), waited['reachEnd']):
-                    found.append({'pos': span[0], 'line': waited['line'], 'kind': 'await', 'text': waited['text']})
+                    found.append({'pos': span[0], 'line': waited['line'], 'kind': waited['kind'], 'text': waited['text']})
+        own_reads = {pos for pos, _, _ in check['reads']}
         for call in fn['calls']:
             span = _span(call['span'])
-            if not keep(span, call['scopeIds']):
+            # The read the check tests is where the window opens, not something inside it.
+            if span[0] in own_reads or not keep(span, call['scopeIds']):
                 continue
             if any_match(call['callee'], cfg['secondReads']):
                 found.append({'pos': span[0], 'line': call['line'], 'kind': 'second-read', 'text': call['text']})
@@ -339,14 +361,18 @@ def parse_typescript(files: list[str], root: Path) -> tuple[dict, list[dict], st
     return parsed, skipped, f"{data['typescript']['version']} ({data['typescript']['path']})"
 
 
-def supported(path: str) -> bool:
+def is_typescript(path: str) -> bool:
     return path.endswith(TS_SUFFIXES) and not path.endswith('.d.ts')
+
+
+def supported(path: str) -> bool:
+    return is_typescript(path) or path.endswith(PY_SUFFIXES)
 
 
 UNSUPPORTED = 'no check-then-act adapter for this language yet; grade its L7 windows by hand'
 # Formats that hold no check-then-act window. Every other changed file the scanner cannot read is
 # reported skipped, so a shell script, SQL, or a Dockerfile is named rather than passed over.
-DATA_SUFFIXES = ('.d.ts', '.json', '.jsonc', '.json5', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.env',
+DATA_SUFFIXES = ('.d.ts', '.pyi', '.json', '.jsonc', '.json5', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.env',
                  '.xml', '.csv', '.tsv', '.txt', '.rst', '.adoc', '.mdx', '.html', '.htm', '.css', '.scss', '.sass',
                  '.less', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.pdf', '.woff', '.woff2',
                  '.ttf', '.otf', '.eot', '.map', '.snap', '.graphql', '.proto')
@@ -408,8 +434,10 @@ def scan(root: Path, base: str, whole: bool, paths: list[str]) -> dict:
         files = [f for f in code if supported(f)]
         unsupported = unscannable(code)
         ranges = {f: None if whole else lines[f] for f in files}
-    parsed, skipped, typescript = parse_typescript(files, root)
-    skipped = unsupported + skipped
+    parsed, skipped, typescript = parse_typescript([f for f in files if is_typescript(f)], root)
+    python_parsed, python_skipped = parse_python([f for f in files if not is_typescript(f)], root)
+    parsed.update(python_parsed)
+    skipped = unsupported + skipped + python_skipped
     candidates, functions = [], 0
     for file in files:
         for fn in parsed.get(file, []):
@@ -419,7 +447,7 @@ def scan(root: Path, base: str, whole: bool, paths: list[str]) -> dict:
                 continue
             functions += 1
             for candidate in analyze(fn, cfg):
-                candidates.append({'file': file, 'language': 'typescript', **candidate,
+                candidates.append({'file': file, 'language': 'typescript' if is_typescript(file) else 'python', **candidate,
                                    'inDiff': in_diff(candidate, lines.get(file)) if scope != 'paths' else []})
     return {'version': 1, 'scope': scope, 'base': None if paths else base, 'typescript': typescript,
             'scanned': {'files': len(parsed), 'functions': functions},

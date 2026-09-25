@@ -2,6 +2,12 @@
 
 Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an update exists, so every release bumps it. After updating, run `/reload-plugins`.
 
+## 0.3.1
+
+- A re-grade is sized by the fix commits alone: `grade_mode.py --base <the last commit graded>`, and the scanner with the same base for L7. Without `--base` every round was sized by the whole branch, so a two-line fix cost what the first grade did. Every lens still runs, and the loop ends at the first round with no P1 or P2.
+- When a run fails either way, in the same direction, and the only defect is how the failure reads, such as a traceback where a message belongs, the finding is a P3. That holds in a re-grade whose fix was itself about messages.
+- pr-grade is public. Installing needs no git access, and `templates/pr-grade-check.yml` needs no `PR_GRADE_TOKEN`. The template also pins its actions by commit SHA.
+
 ## 0.3.0
 
 - `scripts/check_then_act.py`: lists the check-then-act windows (lens L7) in the functions a branch changed, so a grader starts from a list instead of hunting by hand. It reads TypeScript and JavaScript through Node with the repository's own `typescript` package, and Python with the standard library's `ast`. It never gates: exit 0 whenever it runs, and an empty list clears nothing. The skill runs it once per grade and hands the output to whoever holds L7.

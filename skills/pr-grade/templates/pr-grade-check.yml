@@ -40,8 +40,8 @@ jobs:
 
       - name: Fetch the pinned checker
         env:
-          # github.token cannot read another private repository. While pr-grade is private, add a
-          # PR_GRADE_TOKEN secret that can read it.
+          # pr-grade is public, so github.token can read it. Only a private fork named in PR_GRADE_REPO
+          # needs a PR_GRADE_TOKEN secret that can read that fork.
           GH_TOKEN: ${{ secrets.PR_GRADE_TOKEN || github.token }}
         run: |
           gh api "repos/$PR_GRADE_REPO/tarball/$PR_GRADE_REF" > "$RUNNER_TEMP/pr-grade.tgz"

@@ -29,14 +29,20 @@ rules it is checked against.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Callable
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from grade_mode import CONFIG, MODES, assess, load_config, repo_root  # noqa: E402
+# Loaded by path under a private name, not imported: a repository that embeds these scripts can have a
+# `grade_mode` of its own, and must neither get it here nor lose it from sys.modules.
+_spec = importlib.util.spec_from_file_location('_pr_grade_mode', Path(__file__).resolve().parent / 'grade_mode.py')
+grade_mode = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(grade_mode)
+CONFIG, MODES, load_config, repo_root = grade_mode.CONFIG, grade_mode.MODES, grade_mode.load_config, grade_mode.repo_root
 
 DEFAULT_LENSES = [f'L{n}' for n in range(1, 9)]
 # GitHub lists at most this many files, and says nothing when it stops.
@@ -76,13 +82,14 @@ def parse(body: str) -> dict[str, str] | None:
 
 
 def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[str], compare: dict | None,
-             root: Path, config: dict) -> list[str]:
+             root: Path, config: dict, assess: Callable[[list[str], Path, dict], tuple] | None = None) -> list[str]:
     """What stops the PR going ready. `pr_files` is every path the PR touches, both sides of a rename.
     `compare` is GitHub's comparison of the graded commit with the PR head: its `status` and the paths
-    it changed, or `error` when it could not be read."""
+    it changed, or `error` when it could not be read. `assess` replaces grade_mode's selector for a
+    repository with rules of its own; it takes and returns what `grade_mode.assess` does."""
     if block is None:
         return ['The body has no `## Grade` section. Grade the branch with /pr-grade and put its block in the body.']
-    required, reasons, covered = assess(pr_files, root, config)
+    required, reasons, covered = (assess or grade_mode.assess)(pr_files, root, config)
     found = []
     mode = block.get('Mode', '')
     if mode not in MODES:

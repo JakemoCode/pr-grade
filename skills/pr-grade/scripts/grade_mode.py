@@ -25,6 +25,7 @@ import argparse
 import fnmatch
 import json
 import posixpath
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -112,9 +113,59 @@ def changed_files(base: str, root: Path) -> list[str]:
     """Every path the branch touches since it left `base`: committed, uncommitted, and untracked, with
     both sides of a rename."""
     fork = _git(root, 'merge-base', base, 'HEAD').strip()
-    tracked = _git(root, 'diff', '--name-only', '--no-renames', fork).splitlines()
-    untracked = _git(root, 'ls-files', '--others', '--exclude-standard').splitlines()
+    # Unquoted paths: git's default C-quotes any non-ASCII name, which then matches no file on disk.
+    tracked = _git(root, '-c', 'core.quotePath=false', 'diff', '--name-only', '--no-renames', fork).splitlines()
+    untracked = _git(root, '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard').splitlines()
     return list(dict.fromkeys([*tracked, *untracked]))
+
+
+HUNK = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@')
+
+
+def _header_path(line: str) -> str | None:
+    """The path in `diff --git a/P b/P`, or None when git quoted it. Without renames both sides are the
+    same path, so the split is at the middle even when the path holds a space."""
+    rest = line[len('diff --git '):]
+    half = (len(rest) - 5) // 2
+    if rest.startswith('a/') and rest[2:2 + half] == rest[len(rest) - half:] and rest[2 + half:len(rest) - half] == ' b/':
+        return rest[2:2 + half]
+    return None
+
+
+def changed_lines(base: str, root: Path) -> dict[str, list[tuple[int, int]] | None]:
+    """The new-side line ranges each changed path touches since it left `base`, uncommitted work
+    included. An untracked file maps to None: all of it is new. A pure deletion marks the lines either
+    side of it, so removing a lock or a re-check still puts the function in scope."""
+    fork = _git(root, 'merge-base', base, 'HEAD').strip()
+    diff = _git(root, '-c', 'core.quotePath=false', 'diff', '-U0', '--no-renames', '--no-color', '--no-ext-diff',
+                '--src-prefix=a/', '--dst-prefix=b/', fork)
+    ranges: dict[str, list[tuple[int, int]] | None] = {}
+    path, in_header = None, False
+    for line in diff.splitlines():
+        # File headers come between `diff --git` and the first hunk; after that a line starting `+++` is
+        # an added line whose text starts `++`.
+        if line.startswith('diff --git '):
+            # An empty new file or a mode-only change has no `+++` line, only this one.
+            path, in_header = _header_path(line), True
+            if path is not None:
+                ranges.setdefault(path, [])
+        elif in_header and line.startswith('deleted file mode'):
+            ranges.pop(path, None)
+            path = None
+        elif in_header and line.startswith('+++ '):
+            # git appends a tab to a path that contains whitespace.
+            path = None if line == '+++ /dev/null' else line[len('+++ b/'):].rstrip('\t')
+            if path is not None:
+                ranges.setdefault(path, [])
+        elif line.startswith('@@'):
+            in_header = False
+            hunk = HUNK.match(line)
+            if hunk and path is not None:
+                start, count = int(hunk[1]), int(hunk[2]) if hunk[2] is not None else 1
+                ranges[path].append((start, start + count - 1) if count else (max(start, 1), start + 1))
+    for untracked in _git(root, '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard').splitlines():
+        ranges[untracked] = None
+    return ranges
 
 
 def main() -> None:

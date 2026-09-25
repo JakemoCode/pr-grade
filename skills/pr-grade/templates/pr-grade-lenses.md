@@ -36,7 +36,7 @@ Replace every `<...>`. Delete a section that adds nothing over the skill; keep i
 
 ### L7. Check then act
 
-<Which operations are atomic here and which are not: what a single transaction covers, where an await or a second read opens a window.>
+<Which operations are atomic here and which are not: what a single transaction covers, where an await or a second read opens a window. Name the transaction and lock callees and the outside clients `check_then_act.py` should know, and add them under `checkThenAct` in `.claude/pr-grade.json`.>
 
 ### L8. Failure direction
 

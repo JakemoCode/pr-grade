@@ -21,9 +21,10 @@ The repository is private for now, so the first command needs git access to it.
 | `pr-grade:grade` agent | Applies named lenses to one change and proves each finding by running something. Sonnet at `xhigh`, 50 turns, read-only on the repository. |
 | `scripts/grade_mode.py` | Picks the grading mode from the branch's changed files: `in-thread`, one `subagent`, or `fan-out` with one agent per lens group. |
 | `scripts/grade_block.py check <pr>` | Refuses a PR whose `## Grade` block is missing, below 5/5, missing a lens, in a cheaper mode than its files need, or older than its code. |
+| `scripts/check_then_act.py` | Lists the check-then-act windows (L7) in the functions a branch changed, for the grader to clear or prove. |
 | `templates/` | A lens file, a config, and a CI workflow to copy into a repository. |
 
-Both scripts use only the Python standard library (3.9 or later). `check` also needs an authenticated `gh`.
+The scripts use only the Python standard library (3.9 or later). `check` also needs an authenticated `gh`, and the check-then-act scanner needs Node for TypeScript and JavaScript.
 
 ## A real grade
 
@@ -85,8 +86,30 @@ The score counts P1 and P2 findings; a P3 is a note. `check` compares `Graded` w
 
 The workflow template runs `check` on `opened`, `edited`, `synchronize`, `reopened`, and `ready_for_review`, so a commit pushed after the grade fails until it is graded, and a block pasted into the body is read at once. Drafts are skipped.
 
+## Check-then-act windows
+
+`check_then_act.py` finds the L7 shape in the functions a branch changed: a check on something read, then an `await`, a transaction boundary, or a configured call to another system, then a write the check was meant to guard. A grader clears each one by naming what makes it harmless, or proves the race. The list never gates anything: it exits 0 whenever it runs, and an empty list clears nothing.
+
+```
+check-then-act candidates (L7): 1 in 6 functions the branch touched. Each is a window to judge, not a finding.
+
+src/gates/completion.ts:44  CompletionGate.evaluate
+  check  51   if (recorded !== undefined) return { evaluation: recorded, reused: true };    reads options.gates.forExecution (48), same store as write 68
+  gap    55   await  await options.snapshots.capture({ ...
+  write  58   options.runs.appendSnapshotAdvanced
+  write  68   options.gates.ensureGateEvaluation
+```
+
+That output is the real window from the "real grade" repository, run against the commit that introduced it: two concurrent evaluations both pass the lookup at line 51. Across that repository's 858 functions the scanner lists 13 windows. Four are a filesystem check before an await in its setup commands, and four re-check the state after the gap through the class's own method, which the scanner lists because it cannot tell that from a guard on an unrelated flag.
+
+- `--whole` scans every function in the changed files, and paths scan those files or directories whole. `--json` gives the same list as data.
+- TypeScript and JavaScript are parsed with the repository's own `typescript` package, or the one `PR_GRADE_TYPESCRIPT` names. Without either, those files are skipped with a notice.
+- The name lists (`writes`, `secondReads`, `transactions`, `locks`, `ignore`) live under `checkThenAct` in `.claude/pr-grade.json`.
+
 ## Tests
 
 ```
-python3 -m unittest discover -s tests -v
+PR_GRADE_TYPESCRIPT=<path>/node_modules/typescript python3 -m unittest discover -s tests -v
 ```
+
+Without `PR_GRADE_TYPESCRIPT` the TypeScript tests are skipped. CI installs TypeScript for them and sets `PR_GRADE_REQUIRE_TS=1`, so a missing compiler fails the run instead.

@@ -15,6 +15,8 @@ The dispatch names the diff range, the lenses to apply, the lens file (`.claude/
 
 Settled means settled. The tests, type checks, and other checks the dispatch lists already passed; their results are inputs. Re-running them spends the turns a proof needs.
 
+When you hold L7, the dispatch may carry the output of `check_then_act.py`. Answer every candidate on it: clear it with the reason the window is harmless, or prove the race. The list is a floor, never a ceiling; look for windows it cannot see as well.
+
 ## Work
 
 1. Read every changed hunk in the range. Grade the change, not a summary of it.
@@ -40,6 +42,7 @@ P<n> <file>:<line> - <title>
 <the command you ran, and its trimmed output>
 Verified and clear: <each of your lens ids that found nothing>
 Could not verify: <each unproven claim, or "none">
+L7 candidates: <each file:line cleared with its reason, or proven as P<n>; or "none given">
 ```
 
 The score counts P1 and P2 findings. A P3 is a note and leaves the score at 5.

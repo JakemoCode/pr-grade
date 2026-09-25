@@ -244,8 +244,8 @@ def analyze(fn: dict, cfg: dict) -> list[dict]:
 
     def revalidated(check, write, gaps) -> bool:
         """A later check on the write's path, reading the same store (or member) again after the last gap.
-        A recheck of something else says nothing about the state the first check read. A recheck through
-        the object's own method (this.stored(x), self.reload()) may read any store, so it counts."""
+        A recheck of something else says nothing about the state the first check read, and a recheck
+        through the object's own method cannot be told apart from one that reads an unrelated flag."""
         last = max(gap['pos'] for gap in gaps)
         for other in checks:
             if other is check or not (last < other['span'][0] < write['span'][0] and other['start'] > last
@@ -254,7 +254,7 @@ def analyze(fn: dict, cfg: dict) -> list[dict]:
             if check['kind'] == 'member':
                 if other['kind'] == 'member' and other['paths'] & check['paths']:
                     return True
-            elif stores(other) & (stores(check) | {'this', 'self'}):
+            elif stores(other) & stores(check):
                 return True
         return False
 

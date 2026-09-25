@@ -123,9 +123,33 @@ function exitKind(statement) {
   return null;
 }
 
-function isLoopOrSwitch(node) {
+function isLoop(node) {
   return ts.isForStatement(node) || ts.isForOfStatement(node) || ts.isForInStatement(node)
-    || ts.isWhileStatement(node) || ts.isDoStatement(node) || ts.isSwitchStatement(node);
+    || ts.isWhileStatement(node) || ts.isDoStatement(node);
+}
+
+// The break and continue statements that end the paths exitKind followed.
+function terminalJumps(statement) {
+  if (!statement) return [];
+  if (LOOP_EXITS.has(statement.kind)) return [statement];
+  if (ts.isBlock(statement)) return terminalJumps(statement.statements[statement.statements.length - 1]);
+  if (ts.isIfStatement(statement)) {
+    return [...terminalJumps(statement.thenStatement), ...terminalJumps(statement.elseStatement)];
+  }
+  return [];
+}
+
+// The statement a jump leaves: its label's statement, else the nearest loop for continue, else the
+// nearest loop or switch for break.
+function jumpTarget(jump) {
+  for (let parent = jump.parent; parent && !ts.isFunctionLike(parent); parent = parent.parent) {
+    if (jump.label) {
+      if (ts.isLabeledStatement(parent) && parent.label.text === jump.label.text) return parent.statement;
+    } else if (isLoop(parent) || (ts.isBreakStatement(jump) && ts.isSwitchStatement(parent))) {
+      return parent;
+    }
+  }
+  return null;
 }
 
 function propertyName(name) {
@@ -268,12 +292,11 @@ function analyzeFile(file, root) {
       return null;
     }
 
-    // Where a guard that exits by break or continue stops covering: the end of its loop or switch.
+    // Where a guard that exits by break or continue stops covering: the end of the statement its jumps
+    // leave. Branches that leave different statements take the later end, which lists more windows.
     function guardEnd(ifStatement) {
-      for (let parent = ifStatement.parent; parent && parent !== fn; parent = parent.parent) {
-        if (isLoopOrSwitch(parent)) return pos(parent.getEnd());
-      }
-      return null;
+      const ends = terminalJumps(ifStatement.thenStatement).map(jumpTarget).filter(Boolean).map((t) => t.getEnd());
+      return ends.length ? pos(Math.max(...ends)) : null;
     }
 
     function recordMemberWrite(target, node, ctx) {

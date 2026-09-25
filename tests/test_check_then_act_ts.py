@@ -174,6 +174,13 @@ class CliTest(TempRepo):
         run = run_cli(self.root, '--base', 'main', env=self.env())
         self.assertIn('1 files were skipped and not scanned', run.stdout)
 
+    def test_an_empty_new_file_in_another_language_is_reported_skipped(self) -> None:
+        # Its diff has no hunks, so only the `diff --git` line names it.
+        (self.root / 'empty.py').write_text('')
+        git(self.root, 'add', 'empty.py')
+        git(self.root, 'commit', '-q', '-m', 'empty')
+        self.assertEqual(self.result()['skipped'], [{'file': 'empty.py', 'reason': cta.UNSUPPORTED}])
+
     def test_a_base_that_does_not_resolve_stops_with_a_message(self) -> None:
         run = run_cli(self.root, '--base', 'origin/missing', env=self.env())
         self.assertEqual(run.returncode, 1)

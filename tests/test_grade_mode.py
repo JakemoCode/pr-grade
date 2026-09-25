@@ -167,6 +167,25 @@ class ChangedLinesTest(Fixture):
         self.edit(lambda lines: lines.insert(2, '++ b/elsewhere.py\n'))
         self.assertEqual(grade_mode.changed_lines('main', self.root), {'a.py': [(3, 3)]})
 
+    def test_a_diff_with_no_hunks_still_names_its_file(self) -> None:
+        # An empty new file or a mode-only change has no `+++` line; dropping it hides a changed file.
+        (self.root / 'empty file.py').write_text('')
+        (self.root / 'a.py').chmod(0o755)
+        git(self.root, 'add', '.')
+        git(self.root, 'commit', '-q', '-m', 'empty and chmod')
+        self.assertEqual(grade_mode.changed_lines('main', self.root), {'a.py': [], 'empty file.py': []})
+        self.assertEqual(set(grade_mode.changed_lines('main', self.root)),
+                         set(grade_mode.changed_files('main', self.root)))
+
+    def test_a_deleted_file_is_not_named(self) -> None:
+        (self.root / 'gone.py').write_text('')
+        git(self.root, 'add', '.')
+        git(self.root, 'commit', '-q', '-m', 'add')
+        git(self.root, 'branch', '-f', 'main')
+        git(self.root, 'rm', '-q', 'gone.py', 'a.py')
+        git(self.root, 'commit', '-q', '-m', 'remove')
+        self.assertEqual(grade_mode.changed_lines('main', self.root), {})
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -122,6 +122,16 @@ def changed_files(base: str, root: Path) -> list[str]:
 HUNK = re.compile(r'^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@')
 
 
+def _header_path(line: str) -> str | None:
+    """The path in `diff --git a/P b/P`, or None when git quoted it. Without renames both sides are the
+    same path, so the split is at the middle even when the path holds a space."""
+    rest = line[len('diff --git '):]
+    half = (len(rest) - 5) // 2
+    if rest.startswith('a/') and rest[2:2 + half] == rest[len(rest) - half:] and rest[2 + half:len(rest) - half] == ' b/':
+        return rest[2:2 + half]
+    return None
+
+
 def changed_lines(base: str, root: Path) -> dict[str, list[tuple[int, int]] | None]:
     """The new-side line ranges each changed path touches since it left `base`, uncommitted work
     included. An untracked file maps to None: all of it is new. A pure deletion marks the lines either
@@ -135,7 +145,13 @@ def changed_lines(base: str, root: Path) -> dict[str, list[tuple[int, int]] | No
         # File headers come between `diff --git` and the first hunk; after that a line starting `+++` is
         # an added line whose text starts `++`.
         if line.startswith('diff --git '):
-            path, in_header = None, True
+            # An empty new file or a mode-only change has no `+++` line, only this one.
+            path, in_header = _header_path(line), True
+            if path is not None:
+                ranges.setdefault(path, [])
+        elif in_header and line.startswith('deleted file mode'):
+            ranges.pop(path, None)
+            path = None
         elif in_header and line.startswith('+++ '):
             # git appends a tab to a path that contains whitespace.
             path = None if line == '+++ /dev/null' else line[len('+++ b/'):].rstrip('\t')

@@ -162,6 +162,8 @@ One score for the change: the honest answer to "would a reviewer merge this with
 
 Rank findings `P1` (fix before merge), `P2` (fix or justify), `P3` (note). The score counts P1 and P2; a P3 is listed and leaves the score at 5, or one standing note would hold a change below 5 forever.
 
+Rank by what the defect does to a run. When a run fails either way, in the same direction, and the only defect is how the failure reads, such as a traceback where a message belongs, the finding is a P3. That holds in a re-grade whose fix was itself about messages, where the next traceback looks like the fix left unfinished.
+
 ## 6. Report it
 
 Report in this shape. The `## Grade` block goes in the PR body exactly as written, one field per line and outside any code block, because `grade_block.py check` reads it:
@@ -169,7 +171,7 @@ Report in this shape. The `## Grade` block goes in the PR body exactly as writte
 ```
 ## Grade
 
-Mode: <the mode grade_mode.py printed>
+Mode: <the mode grade_mode.py printed for the whole branch>
 Graded: <the full SHA of the last commit graded>
 Score: <n>/5
 Blocking: <the one sentence that explains anything below 5, or "nothing">
@@ -185,7 +187,13 @@ Say each finding once.
 
 ## 7. Fix, then re-grade
 
-Apply the fixes, then rerun `grade_mode.py` and grade the fix commits in the mode it prints now. A repair is a change and gets the same treatment, and a fix that touches silent-failure code can need a dearer mode than the change it fixed.
+Commit the fixes, then size the re-grade by the fix commits alone:
+
+```sh
+python3 <base>/scripts/grade_mode.py --base <the last commit graded>
+```
+
+Grade the fix commits in the mode it prints, with every lens, and give L7 the scanner's list for the same commits: `check_then_act.py --base` with the same commit. A repair is a change and gets the same treatment as any other, so a two-line fix to ordinary code is graded in-thread even inside a pull request that needed a fan-out, and a fix that touches silent-failure code gets at least a subagent. Without `--base` the selector sizes the whole branch, and every round costs what the first one did.
 
 This is not ceremony. On the pull request above:
 
@@ -194,6 +202,10 @@ This is not ceremony. On the pull request above:
 - the repair for L1 introduced the L7 defect, found by an external reviewer fifteen minutes later, after these lenses had been run against that very fix.
 
 Every time, the local suite stayed green. **A fix that satisfies a finding is the most likely place for the next one**, and the lens most likely to catch it is the one written from the finding you just repaired.
+
+The loop ends at the first round with no P1 or P2. A P3 can stay listed; one you fix anyway is a change, and its fix is graded like the rest.
+
+The `## Grade` block keeps the whole branch's mode and moves `Graded` to the last fix commit graded. `grade_block.py check` compares `Mode` with every file the pull request touches, so a block that names a fix's lighter mode is refused.
 
 ## 8. Enforce it
 

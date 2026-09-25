@@ -11,7 +11,7 @@ and an empty list does not clear L7.
 
 TypeScript and JavaScript go through check_then_act_ts.cjs, which needs Node and the repository's own
 `typescript` package (or PR_GRADE_TYPESCRIPT pointing at one). Without them those files are skipped
-with a notice. Changed code in any other language is listed as skipped too, never passed over.
+with a notice. Any other changed file it cannot read is listed as skipped, unless it is a data format.
 
 Name lists live under `checkThenAct` in .claude/pr-grade.json; a key you set replaces its default list.
 A plain word matches a method named exactly that word, or starting with it and followed by `_` or a
@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import posixpath
 import shutil
 import subprocess
 import sys
@@ -325,7 +326,10 @@ def parse_typescript(files: list[str], root: Path) -> tuple[dict, list[dict], st
         return {}, [{'file': f, 'reason': run.stderr.strip()} for f in files], None
     if run.returncode != 0:
         sys.exit(f'check_then_act: the TypeScript adapter failed: {run.stderr.strip()}')
-    data = json.loads(run.stdout)
+    try:
+        data = json.loads(run.stdout)
+    except json.JSONDecodeError:
+        sys.exit(f'check_then_act: the TypeScript adapter printed something other than JSON: {run.stdout[:200]!r}')
     parsed, skipped = {}, []
     for entry in data['files']:
         if 'error' in entry:
@@ -340,13 +344,22 @@ def supported(path: str) -> bool:
 
 
 UNSUPPORTED = 'no check-then-act adapter for this language yet; grade its L7 windows by hand'
-# Source in a language the scanner could one day read. Data and config files are never reported skipped.
-OTHER_LANGUAGES = ('.py', '.go', '.rb', '.java', '.kt', '.kts', '.rs', '.cs', '.php', '.swift', '.scala', '.ex',
-                   '.exs', '.erl', '.c', '.cc', '.cpp', '.h', '.hpp', '.m', '.dart', '.lua', '.clj', '.hs', '.ml')
+# Formats that hold no check-then-act window. Every other changed file the scanner cannot read is
+# reported skipped, so a shell script, SQL, or a Dockerfile is named rather than passed over.
+DATA_SUFFIXES = ('.d.ts', '.json', '.jsonc', '.json5', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.env',
+                 '.xml', '.csv', '.tsv', '.txt', '.rst', '.adoc', '.mdx', '.html', '.htm', '.css', '.scss', '.sass',
+                 '.less', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.pdf', '.woff', '.woff2',
+                 '.ttf', '.otf', '.eot', '.map', '.snap', '.graphql', '.proto')
+
+
+def is_data(path: str) -> bool:
+    name = posixpath.basename(path).lower()
+    # A dotfile with no other extension is configuration: .gitignore, .nvmrc, .editorconfig.
+    return name.endswith(DATA_SUFFIXES) or (name.startswith('.') and '.' not in name[1:])
 
 
 def unscannable(paths: list[str]) -> list[dict]:
-    return [{'file': path, 'reason': UNSUPPORTED} for path in paths if path.endswith(OTHER_LANGUAGES)]
+    return [{'file': path, 'reason': UNSUPPORTED} for path in paths if not supported(path) and not is_data(path)]
 
 
 def is_code(path: str, config: dict) -> bool:

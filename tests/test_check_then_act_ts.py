@@ -166,13 +166,14 @@ class CliTest(TempRepo):
 
     def test_code_in_a_language_without_an_adapter_is_reported_skipped(self) -> None:
         # Otherwise a branch that changes only such files reads exactly like a clean scan.
-        (self.root / 'app.py').write_text('def f():\n    pass\n')
-        (self.root / 'settings.yaml').write_text('a: 1\n')
+        for name in ('app.py', 'deploy.sh', 'Dockerfile', 'settings.yaml', '.nvmrc', 'types.d.ts'):
+            (self.root / name).write_text('x\n')
         result = self.result()
-        # Source in another language is named; a data file is not code and is not reported.
-        self.assertEqual(result['skipped'], [{'file': 'app.py', 'reason': cta.UNSUPPORTED}])
+        # Anything the scanner cannot read is named, whatever its language; a data file is not reported.
+        self.assertEqual(sorted(s['file'] for s in result['skipped']), ['Dockerfile', 'app.py', 'deploy.sh'])
+        self.assertEqual({s['reason'] for s in result['skipped']}, {cta.UNSUPPORTED})
         run = run_cli(self.root, '--base', 'main', env=self.env())
-        self.assertIn('1 files were skipped and not scanned', run.stdout)
+        self.assertIn('3 files were skipped and not scanned', run.stdout)
 
     def test_an_empty_new_file_in_another_language_is_reported_skipped(self) -> None:
         # Its diff has no hunks, so only the `diff --git` line names it.
@@ -221,6 +222,22 @@ class ResolutionTest(TempRepo):
         self.assertEqual(run.returncode, 0)
         self.assertIn('no typescript package found', run.stderr)
         self.assertEqual(json.loads(run.stdout)['candidates'], [])
+
+
+class AdapterOutputTest(TempRepo):
+    def test_output_that_is_not_json_stops_with_a_message(self) -> None:
+        # A NODE_OPTIONS preload that prints a banner is enough to cause it.
+        bin_dir = self.root / 'bin'
+        bin_dir.mkdir()
+        (bin_dir / 'node').write_text('#!/bin/sh\necho banner\n')
+        (bin_dir / 'node').chmod(0o755)
+        (self.root / 'a.ts').write_text('export const a = 1;\n')
+        env = self.env(typescript=False)
+        env['PATH'] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+        run = run_cli(self.root, 'a.ts', env=env)
+        self.assertEqual(run.returncode, 1)
+        self.assertIn('printed something other than JSON', run.stderr)
+        self.assertNotIn('Traceback', run.stderr)
 
 
 class PackagingTest(unittest.TestCase):

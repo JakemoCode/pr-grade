@@ -47,4 +47,4 @@ Could not verify: <each unproven claim, or "none">
 L7 candidates: <each file:line cleared with its reason, or proven as P<n>; or "none given">
 ```
 
-The score counts P1 and P2 findings. A P3 is a note and leaves the score at 5.
+The score counts P1 and P2 findings. A P3 is a note and leaves the score at 5. When a run fails either way, in the same direction, and the only defect is how the failure reads (a traceback where a message belongs), the finding is a P3, even when the change you grade was itself fixing messages.

@@ -15,6 +15,8 @@ The dispatch names the diff range, the lenses to apply, the lens file (`.claude/
 
 Settled means settled. The tests, type checks, and other checks the dispatch lists already passed; their results are inputs. Re-running them spends the turns a proof needs.
 
+The dispatch may carry findings a correctness review raised that the author declined to fix, each with a reason. They are known. Report one again only when you can show its reason is wrong, and then name the reason and the run that breaks it.
+
 When you hold L7, the dispatch may carry the output of `check_then_act.py`. Answer every candidate on it: clear it with the reason the window is harmless, or prove the race. The list is a floor, never a ceiling; look for windows it cannot see as well.
 
 ## Work

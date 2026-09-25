@@ -2,6 +2,8 @@ name: Test
 
 on:
   pull_request:
+    # labeled and unlabeled rerun the release check when hold-release is added or removed.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
 
@@ -16,6 +18,9 @@ jobs:
         python: ['3.9', '3.12']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A pull request's merge commit and its first parent, the base branch the release check reads.
+          fetch-depth: 2
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
@@ -31,3 +36,11 @@ jobs:
           # A missing compiler fails the run instead of skipping the TypeScript tests.
           PR_GRADE_REQUIRE_TS: '1'
         run: python -m unittest discover -s tests -v
+      - name: A change that ships raises the version
+        # !cancelled() reports a missing release alongside a unit-test failure, not one run later.
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        env:
+          HOLD: ${{ contains(github.event.pull_request.labels.*.name, 'hold-release') }}
+        run: |
+          if [ "$HOLD" = true ]; then hold=--hold; fi
+          python .github/scripts/check_release.py --base HEAD^1 $hold

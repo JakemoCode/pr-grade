@@ -11,6 +11,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 WORKFLOW = REPO / '.github/workflows/test.yml'
+WORKFLOWS = sorted((REPO / '.github/workflows').glob('*.yml'))
 TEMPLATE = REPO / 'skills/pr-grade/templates/pr-grade-check.yml'
 USES = re.compile(r'uses:\s*([\w.-]+/[\w.-]+)@(\S+)')
 
@@ -21,7 +22,7 @@ def pins(path: Path) -> dict[str, str]:
 
 class PinTest(unittest.TestCase):
     def test_every_action_is_pinned_to_a_full_commit(self) -> None:
-        for path in (WORKFLOW, TEMPLATE):
+        for path in (*WORKFLOWS, TEMPLATE):
             for action, ref in pins(path).items():
                 with self.subTest(file=path.name, action=action):
                     self.assertRegex(ref, r'^[0-9a-f]{40}$')

@@ -1,0 +1,19 @@
+{
+  "silent": [
+    ".github/workflows/*",
+    ".github/scripts/*",
+    ".github/dependabot.yml",
+    ".claude/pr-grade.json",
+    ".claude/pr-grade-lenses.md",
+    ".claude/hooks/*",
+    ".claude/settings.json",
+    "skills/pr-grade/SKILL.md",
+    "agents/grade.md",
+    "skills/pr-grade/scripts/grade_block.py",
+    "skills/pr-grade/scripts/grade_mode.py",
+    "skills/pr-grade/templates/pr-grade-check.yml"
+  ],
+  "requireGrade": {
+    "branches": "^(?!dependabot/)"
+  }
+}

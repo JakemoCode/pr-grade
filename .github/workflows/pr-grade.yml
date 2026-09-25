@@ -1,0 +1,51 @@
+# pr-grade grading itself: templates/pr-grade-check.yml, with PR_GRADE_REF left at main. Here main is
+# the base branch, so a pull request is judged by the checker as it stood before the change, and a
+# change to grade_block.py is first enforced on the pull request after it merges. The check is not
+# required by the ruleset yet. If a merged change breaks it, the pull request fixing it would be
+# judged by the broken version, so it stays advisory until it has run clean on a few pull requests.
+name: PR grade
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: pr-grade-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  PR_GRADE_REPO: JakemoCode/pr-grade
+  PR_GRADE_REF: main
+
+jobs:
+  grade:
+    # A draft is work in progress; the checker skips drafts too.
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Fetch the pinned checker
+        env:
+          # pr-grade is public, so github.token can read it. Only a private fork named in PR_GRADE_REPO
+          # needs a PR_GRADE_TOKEN secret that can read that fork.
+          GH_TOKEN: ${{ secrets.PR_GRADE_TOKEN || github.token }}
+        run: |
+          gh api "repos/$PR_GRADE_REPO/tarball/$PR_GRADE_REF" > "$RUNNER_TEMP/pr-grade.tgz"
+          mkdir "$RUNNER_TEMP/pr-grade"
+          tar -xzf "$RUNNER_TEMP/pr-grade.tgz" -C "$RUNNER_TEMP/pr-grade" --strip-components 1
+
+      - name: Check the grade
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python "$RUNNER_TEMP/pr-grade/skills/pr-grade/scripts/grade_block.py"
+          check "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}"

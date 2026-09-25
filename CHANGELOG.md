@@ -4,6 +4,11 @@ Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an 
 
 CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` without raising the version and adding its heading here. Label one `hold-release` to merge it unreleased, when a change lands over several pull requests.
 
+## 0.4.0
+
+- A repository that embeds the scripts can pass in its own rules. `grade_mode.assess` takes `named`, exact paths mapped to the reason each is a silent-failure file, and `grade_block.problems` takes `assess`, a selector to use in place of the plugin's.
+- `grade_block.py` loads the `grade_mode.py` beside it by path under a private name, so it no longer picks up, or replaces, a caller's own `grade_mode` module. It also no longer adds its directory to `sys.path` or has a module-level `assess`, so a caller that rebound `grade_block.assess`, or imported `grade_mode` after `grade_block` without its own path entry, has to pass `assess=` instead.
+
 ## 0.3.1
 
 - A re-grade is sized by the fix commits alone: `grade_mode.py --base <the last commit graded>`, and the scanner with the same base for L7. Without `--base` every round was sized by the whole branch, so a two-line fix cost what the first grade did. Every lens still runs, and the loop ends at the first round with no P1 or P2.

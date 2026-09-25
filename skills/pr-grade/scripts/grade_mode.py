@@ -73,21 +73,25 @@ def code_files(changed: list[str], config: dict) -> list[str]:
     return [p for p in changed if not matches(p, config['tests']) and not matches(p, config['notCode'])]
 
 
-def silent_reasons(changed: list[str], root: Path, config: dict) -> dict[str, str]:
-    """Each changed silent-failure file, with why it is one. A failing `silentCommand` stops the run with
-    its own message: a grade picked without it could be too cheap."""
-    named: set[str] = set()
+def silent_reasons(changed: list[str], root: Path, config: dict, named: dict[str, str] | None = None) -> dict[str, str]:
+    """Each changed silent-failure file, with why it is one. `named` maps exact paths a caller knows are
+    silent to the reason, for a repository that embeds this selector. A failing `silentCommand` stops the
+    run with its own message: a grade picked without it could be too cheap."""
+    listed: set[str] = set()
     if config['silentCommand']:
         run = subprocess.run(config['silentCommand'], shell=True, cwd=root, capture_output=True, text=True)
         if run.returncode != 0:
             sys.exit(f"silentCommand failed (exit {run.returncode}): {run.stderr.strip() or run.stdout.strip()}")
-        named = set(run.stdout.split())
+        listed = set(run.stdout.split())
+    named = named or {}
     reasons = {}
     for path in changed:
         pattern = matches(path, config['silent'])
         if pattern:
             reasons[path] = f'matches {pattern}'
         elif path in named:
+            reasons[path] = named[path]
+        elif path in listed:
             reasons[path] = 'named by silentCommand'
     return reasons
 
@@ -99,12 +103,13 @@ def mode_for(silent: bool, code_count: int, fan_out_above: int) -> str:
     return MODES[1] if silent or large else MODES[0]
 
 
-def assess(changed: list[str], root: Path, config: dict | None = None) -> tuple[str, dict[str, str], list[str]]:
+def assess(changed: list[str], root: Path, config: dict | None = None,
+           named: dict[str, str] | None = None) -> tuple[str, dict[str, str], list[str]]:
     """The mode, each silent-failure file with its reason, and every file the grade must cover: all of
     them but `notCode`, plus any silent file there. Tests are covered, since a test weakened after the
-    grade can undo the proof a finding rested on."""
+    grade can undo the proof a finding rested on. `named` is as `silent_reasons` takes it."""
     config = config or load_config(root)
-    reasons, code = silent_reasons(changed, root, config), code_files(changed, config)
+    reasons, code = silent_reasons(changed, root, config, named), code_files(changed, config)
     mode = mode_for(bool(reasons), len(code), config['fanOutAbove'])
     return mode, reasons, [p for p in changed if p in reasons or not matches(p, config['notCode'])]
 

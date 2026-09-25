@@ -90,6 +90,15 @@ The score counts P1 and P2 findings; a P3 is a note. `check` compares `Graded` w
 
 The workflow template runs `check` on `opened`, `edited`, `synchronize`, `reopened`, and `ready_for_review`, so a commit pushed after the grade fails until it is graded, and a block pasted into the body is read at once. Drafts are skipped.
 
+### Embedding the checks
+
+A repository that vendors the scripts and has selection rules the config cannot express can pass them in without patching:
+
+- `grade_mode.assess(changed, root, config, named={path: reason})` treats each exact path in `named` as a silent-failure file with that reason. A name is never a pattern, so `package.json` does not match `tests/fixtures/x/package.json`.
+- `grade_block.problems(..., assess=your_assess)` uses your selector in place of `grade_mode.assess`. It takes and returns what `grade_mode.assess` does, and runs only once the body has a grade block.
+
+`grade_block.py` loads the `grade_mode.py` beside it by path under a private name, so a `grade_mode` module of your own is neither picked up nor replaced.
+
 ## Check-then-act windows
 
 `check_then_act.py` finds the L7 shape in the functions a branch changed: a check on something read, then an `await`, a transaction boundary, or a configured call to another system, then a write the check was meant to guard. A grader clears each one by naming what makes it harmless, or proves the race. The list never gates anything: it exits 0 whenever it runs, and an empty list clears nothing.

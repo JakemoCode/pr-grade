@@ -93,6 +93,26 @@ class SilentTest(Fixture):
             self.assess(['src/leaf.py'])
         self.assertEqual(str(stopped.exception.code), 'silentCommand failed (exit 3): build the venv first')
 
+    def test_a_caller_names_silent_files_with_their_reasons(self) -> None:
+        named = {'src/store.py': 'declares guarantees in store.mutations.yaml'}
+        mode, reasons, _ = grade_mode.assess(['src/store.py', 'src/leaf.py'], self.root, named=named)
+        self.assertEqual((mode, reasons), ('subagent', named))
+
+    def test_a_named_file_is_an_exact_path_not_a_pattern(self) -> None:
+        named = {'package.json': 'the build', 'src/*.py': 'every source file'}
+        changed = ['tests/fixtures/x/package.json', 'src/a.py']
+        self.assertEqual(grade_mode.assess(changed, self.root, named=named)[:2], ('in-thread', {}))
+
+    def test_a_named_file_among_not_code_is_covered(self) -> None:
+        named = {'docs/owners.yaml': 'an owner map'}
+        mode, _, covered = grade_mode.assess(['docs/owners.yaml', 'docs/a.md'], self.root, named=named)
+        self.assertEqual((mode, covered), ('subagent', ['docs/owners.yaml']))
+
+    def test_named_files_add_to_silent_command(self) -> None:
+        self.configure(silentCommand='printf "src/other.py\\n"')
+        reasons = grade_mode.assess(['src/store.py', 'src/other.py'], self.root, named={'src/store.py': 'a store'})[1]
+        self.assertEqual(reasons, {'src/store.py': 'a store', 'src/other.py': 'named by silentCommand'})
+
 
 class CoverageTest(Fixture):
     def test_the_grade_covers_everything_but_not_code(self) -> None:

@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -127,6 +128,51 @@ class ProblemsTest(Fixture):
     def test_a_truncated_comparison_is_refused(self) -> None:
         after = {'status': 'ahead', 'files': [f'docs/g_{n}.md' for n in range(300)]}
         self.assertTrue(any('300' in p for p in self.problems(body(), compare=after)))
+
+    def test_a_caller_can_supply_its_own_selector(self) -> None:
+        def assess(pr_files: list[str], root: Path, config: dict) -> tuple[str, dict[str, str], list[str]]:
+            return 'fan-out', {'owners.yaml': 'an owner map'}, pr_files
+        refused = grade_block.problems(grade_block.parse(body()), pr_files=['owners.yaml'], lenses=LENSES,
+                                       compare=CLEAR, root=self.root, config=self.config, assess=assess)
+        self.assertEqual(refused, ['Graded subagent, but this change requires fan-out (owners.yaml: an owner map). '
+                                   'Re-grade.'])
+
+    def test_a_selector_that_returns_an_unknown_mode_is_refused(self) -> None:
+        def assess(pr_files: list[str], root: Path, config: dict) -> tuple[str, dict[str, str], list[str]]:
+            return 'fanout', {}, pr_files
+        refused = grade_block.problems(grade_block.parse(body()), pr_files=['a.py'], lenses=LENSES, compare=CLEAR,
+                                       root=self.root, config=self.config, assess=assess)
+        self.assertEqual(refused, ["The selector returned mode 'fanout', which is not one of in-thread, subagent, "
+                                   'fan-out.'])
+
+    def test_a_missing_block_is_refused_before_the_selector_runs(self) -> None:
+        def assess(*args: object) -> None:
+            raise AssertionError('the selector ran for a body with no grade')
+        refused = grade_block.problems(None, pr_files=['a.py'], lenses=LENSES, compare=CLEAR, root=self.root,
+                                       config=self.config, assess=assess)
+        self.assertEqual(len(refused), 1)
+
+
+class EmbeddingTest(unittest.TestCase):
+    """A repository that embeds the scripts beside its own `grade_mode` module."""
+
+    def test_grade_block_loads_the_selector_beside_it_and_leaves_the_callers_alone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            # The caller's own grade_mode, first on sys.path and already imported, as in EngOS.
+            (Path(tmp) / 'grade_mode.py').write_text("MODES = ('mine',)\n")
+            theirs = type(sys)('grade_mode')
+            path = list(sys.path)
+            with mock.patch.dict(sys.modules, {'grade_mode': theirs}), mock.patch.object(sys, 'path', [tmp, *path]):
+                source = Path(grade_block.__file__)
+                spec = importlib.util.spec_from_file_location('embedded_grade_block', source)
+                embedded = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(embedded)
+                self.assertIs(sys.modules['grade_mode'], theirs)
+                self.assertEqual(sys.path, [tmp, *path])
+            refused = embedded.problems(embedded.parse(body()), pr_files=['.github/workflows/ci.yml', *LEAF],
+                                        lenses=LENSES, compare=CLEAR, root=Path(tmp),
+                                        config=grade_mode.load_config(Path(tmp)))
+        self.assertTrue(any('requires fan-out' in p for p in refused))
 
 
 class LensIdsTest(Fixture):

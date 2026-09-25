@@ -78,6 +78,11 @@ class ProblemsTest(Fixture):
         refused = self.problems(body(), pr_files=('.github/workflows/ci.yml', *LEAF))
         self.assertTrue(any('requires fan-out' in p and 'ci.yml' in p for p in refused))
 
+    def test_a_cheaper_mode_says_mode_is_the_whole_branchs(self) -> None:
+        # After a --base re-grade prints a lighter mode, the fix may be the label, not another grade.
+        refused = self.problems(body(), pr_files=('.github/workflows/ci.yml', *LEAF))
+        self.assertTrue(any('only a `--base` re-grade ran subagent, set Mode to fan-out' in p for p in refused))
+
     def test_a_dearer_mode_than_required_passes(self) -> None:
         self.assertEqual(self.problems(body(Mode='fan-out'), pr_files=('src/a.py',)), [])
 
@@ -134,8 +139,9 @@ class ProblemsTest(Fixture):
             return 'fan-out', {'owners.yaml': 'an owner map'}, pr_files
         refused = grade_block.problems(grade_block.parse(body()), pr_files=['owners.yaml'], lenses=LENSES,
                                        compare=CLEAR, root=self.root, config=self.config, assess=assess)
-        self.assertEqual(refused, ['Graded subagent, but this change requires fan-out (owners.yaml: an owner map). '
-                                   'Re-grade.'])
+        self.assertEqual(len(refused), 1)
+        self.assertTrue(refused[0].startswith('Graded subagent, but this change requires fan-out '
+                                              '(owners.yaml: an owner map).'))
 
     def test_a_selector_that_returns_an_unknown_mode_is_refused(self) -> None:
         def assess(pr_files: list[str], root: Path, config: dict) -> tuple[str, dict[str, str], list[str]]:

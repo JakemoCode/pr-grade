@@ -99,7 +99,9 @@ def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[
         found.append(f"Grade mode {mode!r} is not one of {', '.join(MODES)}.")
     elif MODES.index(mode) < MODES.index(required):
         why = '; '.join(f'{path}: {reason}' for path, reason in sorted(reasons.items())) or 'its code file count'
-        found.append(f'Graded {mode}, but this change requires {required} ({why}). Re-grade.')
+        found.append(f'Graded {mode}, but this change requires {required} ({why}). Re-grade in {required}. If the '
+                     f'branch was graded in {required} and only a `--base` re-grade ran {mode}, set Mode to '
+                     f"{required}, since the block records the whole branch's mode.")
     if block.get('Score') != '5/5':
         found.append(f"Grade score is {block.get('Score') or 'missing'}; the PR goes ready only at 5/5.")
     # Each comma-separated item names its lens first; "L3 (L2 not applicable)" verifies L3 only.

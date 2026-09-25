@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # Bumps the SHA-pinned actions in .github/workflows/; the plugin has no package dependencies. It never
+  # reads the CI template users copy, so tests/test_workflow_pins.py fails a bump until the template follows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']

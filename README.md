@@ -11,8 +11,6 @@ A correctness review asks whether the code does the right thing. The defects tha
 /plugin install pr-grade@jakemocode
 ```
 
-The repository is private for now, so the first command needs git access to it.
-
 ## What you get
 
 | Piece | What it does |
@@ -64,7 +62,7 @@ Both files are optional. Without them the generic lenses and default paths apply
 
 1. Copy `templates/pr-grade-lenses.md` to `.claude/pr-grade-lenses.md` and restate each lens for the codebase: its real bounded resources, the callers people forget, what a single transaction covers, how a finding is proven. A lens heading added there becomes one `check` requires.
 2. Copy `templates/pr-grade.json` to `.claude/pr-grade.json` and list the silent-failure paths: code where a defect would pass every test, such as checks, gates, persistence, CI, and hooks. `silentCommand` can print more, one path per line, when the repository already keeps that list somewhere. A key you set replaces its default list whole, which is why the template repeats the defaults. `requireGrade.branches`, a regex, limits the check to matching branches; leave it out to check every ready PR.
-3. To enforce the grade, copy `templates/pr-grade-check.yml` to `.github/workflows/pr-grade.yml` and make its check required. It fetches the checker from a pinned pr-grade ref rather than from your repository, so a pull request cannot edit the check that judges it. While this repository is private, it also needs a `PR_GRADE_TOKEN` secret that can read it.
+3. To enforce the grade, copy `templates/pr-grade-check.yml` to `.github/workflows/pr-grade.yml` and make its check required. It fetches the checker from a pinned pr-grade ref rather than from your repository, so a pull request cannot edit the check that judges it.
 
 ## How the mode is picked
 

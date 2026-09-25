@@ -5,7 +5,7 @@ Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an 
 ## 0.4.0
 
 - A repository that embeds the scripts can pass in its own rules. `grade_mode.assess` takes `named`, exact paths mapped to the reason each is a silent-failure file, and `grade_block.problems` takes `assess`, a selector to use in place of the plugin's.
-- `grade_block.py` loads the `grade_mode.py` beside it by path under a private name, so it no longer picks up, or replaces, a caller's own `grade_mode` module.
+- `grade_block.py` loads the `grade_mode.py` beside it by path under a private name, so it no longer picks up, or replaces, a caller's own `grade_mode` module. It also no longer adds its directory to `sys.path` or has a module-level `assess`, so a caller that rebound `grade_block.assess`, or imported `grade_mode` after `grade_block` without its own path entry, has to pass `assess=` instead.
 
 ## 0.3.1
 

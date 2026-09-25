@@ -37,10 +37,11 @@ import sys
 from pathlib import Path
 from typing import Callable
 
-# Loaded by path under a private name, not imported: a repository that embeds these scripts can have a
-# `grade_mode` of its own, and must neither get it here nor lose it from sys.modules.
+# The selector beside this file, loaded by path under a private name. A repository that embeds these
+# scripts can have a `grade_mode` module of its own, which this neither picks up nor replaces.
 _spec = importlib.util.spec_from_file_location('_pr_grade_mode', Path(__file__).resolve().parent / 'grade_mode.py')
 grade_mode = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = grade_mode
 _spec.loader.exec_module(grade_mode)
 CONFIG, MODES, load_config, repo_root = grade_mode.CONFIG, grade_mode.MODES, grade_mode.load_config, grade_mode.repo_root
 
@@ -90,6 +91,8 @@ def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[
     if block is None:
         return ['The body has no `## Grade` section. Grade the branch with /pr-grade and put its block in the body.']
     required, reasons, covered = (assess or grade_mode.assess)(pr_files, root, config)
+    if required not in MODES:
+        return [f"The selector returned mode {required!r}, which is not one of {', '.join(MODES)}."]
     found = []
     mode = block.get('Mode', '')
     if mode not in MODES:

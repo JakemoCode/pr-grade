@@ -137,6 +137,14 @@ class ProblemsTest(Fixture):
         self.assertEqual(refused, ['Graded subagent, but this change requires fan-out (owners.yaml: an owner map). '
                                    'Re-grade.'])
 
+    def test_a_selector_that_returns_an_unknown_mode_is_refused(self) -> None:
+        def assess(pr_files: list[str], root: Path, config: dict) -> tuple[str, dict[str, str], list[str]]:
+            return 'fanout', {}, pr_files
+        refused = grade_block.problems(grade_block.parse(body()), pr_files=['a.py'], lenses=LENSES, compare=CLEAR,
+                                       root=self.root, config=self.config, assess=assess)
+        self.assertEqual(refused, ["The selector returned mode 'fanout', which is not one of in-thread, subagent, "
+                                   'fan-out.'])
+
     def test_a_missing_block_is_refused_before_the_selector_runs(self) -> None:
         def assess(*args: object) -> None:
             raise AssertionError('the selector ran for a body with no grade')

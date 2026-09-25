@@ -1,6 +1,7 @@
 version: 2
 updates:
-  # Keeps the SHA-pinned actions in the workflows current; the plugin has no package dependencies.
+  # Bumps the SHA-pinned actions in .github/workflows/; the plugin has no package dependencies. It never
+  # reads the CI template users copy, so tests/test_workflow_pins.py fails a bump until the template follows.
   - package-ecosystem: github-actions
     directory: /
     schedule:

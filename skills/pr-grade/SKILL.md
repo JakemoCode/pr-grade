@@ -28,6 +28,8 @@ Without them the generic lenses below apply, and the selector uses its defaults.
 
 For every function you modified rather than added, list its callers with the repository's own search, for example `grep -rn '<functionName>' --include='*.<ext>' .` with vendored directories excluded. Write the list down. L4 uses it, and it is the lens that most often fires.
 
+Grade after a correctness review, never alongside one. Run the review the repository uses, fix what it proves, and commit. Keep each finding you declined, with the reason. This skill was built against Claude Code's `/code-review`, but any review that returns findings works the same way: another plugin, a second model, or a person's comments. Grading first spends the graders' turns re-finding what the review catches: on one pull request, four of the graders' seven findings were already in the review. With no review, grade anyway; the lenses do not depend on one.
+
 ## 2. Pick the mode
 
 Commit the change, then run the selector from inside the repository, with this skill's base directory in place of `<base>`:
@@ -50,7 +52,9 @@ python3 <base>/scripts/check_then_act.py
 
 It scans the functions the branch changed and prints each check, the await or boundary after it, and the writes that rely on it. TypeScript and JavaScript need Node and the repository's own `typescript` package, and Python needs nothing; the scanner says which files it skipped and why.
 
-A grading agent needs the diff range, the lens file path, its lenses, the scanner's output when it holds L7, and a list of what is already settled: the tests, type checks, and other deterministic checks that already passed. Their results are inputs, never questions to reopen, and re-running them is how a grader runs out of turns before it reports.
+A grading agent needs the diff range, the lens file path, its lenses, the scanner's output when it holds L7, the review findings you declined with their reasons, and a list of what is already settled: the tests, type checks, and other deterministic checks that already passed. Their results are inputs, never questions to reopen, and re-running them is how a grader runs out of turns before it reports.
+
+Pass the declined findings as the review returned them, in whatever form it used. Leave out the ones you fixed: the fix is in the diff, and a grader should judge it without being told it is right.
 
 ## 3. The eight lenses
 

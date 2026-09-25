@@ -52,6 +52,12 @@ Could not verify: none
 
 The whole enforcement would have been local-only. The fix made the CI entry point grade every ready PR. Re-grading that fix, as the skill requires, found the next defect: the check read the PR's file list in a second call after reading its head SHA, so a push landing between the two paired new files with an old comparison (L7). Every test was green throughout.
 
+## Run a code review first
+
+pr-grade looks for what a correctness review misses, so it runs after one. Run your review, fix what it proves, and commit. Then run `/pr-grade` and hand it the findings you declined, each with a reason; the graders treat those as known and spend their turns elsewhere.
+
+It was built against Claude Code's `/code-review`, and nothing depends on that command. Any review that returns findings works: another review plugin, a second model, or a person's comments. Without a review it still runs, but the graders spend turns finding what the review would have caught first.
+
 ## Set up a repository
 
 Both files are optional. Without them the generic lenses and default paths apply.

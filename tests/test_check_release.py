@@ -62,6 +62,12 @@ class ReleaseTest(unittest.TestCase):
         self.write('agents/grade.md', 'new\n')
         self.assertEqual(len(self.problems()), 1)
 
+    def test_a_skill_moved_out_of_skills_is_refused(self) -> None:
+        git(self.root, 'mv', 'skills/p/SKILL.md', 'README.skill.md')
+        found = self.problems()
+        self.assertEqual(len(found), 1)
+        self.assertIn('skills/p/SKILL.md', found[0])
+
     def test_a_new_version_with_its_heading_passes(self) -> None:
         self.write('skills/p/SKILL.md', 'changed\n')
         self.release('0.3.2')

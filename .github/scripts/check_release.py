@@ -16,9 +16,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills/pr-grade/scripts'))
+from grade_mode import _git, changed_files  # noqa: E402
 
 MANIFEST = '.claude-plugin/plugin.json'
 CHANGELOG = 'CHANGELOG.md'
@@ -26,23 +28,12 @@ SHIPPED = ('skills/', 'agents/', MANIFEST)
 VERSION = re.compile(r'(\d+)\.(\d+)\.(\d+)')
 
 
-def _git(root: Path, *args: str) -> str:
-    return subprocess.run(['git', *args], cwd=root, check=True, capture_output=True, text=True).stdout
-
-
-def changed(root: Path, fork: str) -> list[str]:
-    """Every path the branch touches since `fork`: committed, uncommitted, and untracked."""
-    tracked = _git(root, '-c', 'core.quotePath=false', 'diff', '--name-only', fork).splitlines()
-    untracked = _git(root, '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard').splitlines()
-    return list(dict.fromkeys([*tracked, *untracked]))
-
-
 def problems(root: Path, base: str, *, hold: bool = False) -> list[str]:
     fork = _git(root, 'merge-base', base, 'HEAD').strip()
     before = json.loads(_git(root, 'show', f'{fork}:{MANIFEST}'))['version']
     after = json.loads((root / MANIFEST).read_text())['version']
     if after == before:
-        shipped = [path for path in changed(root, fork) if path.startswith(SHIPPED)]
+        shipped = [path for path in changed_files(fork, root) if path.startswith(SHIPPED)]
         if not shipped or hold:
             return []
         return [f"{', '.join(shipped)} changed, but {MANIFEST} is still {before}, so no installed copy gets it. "
@@ -70,7 +61,7 @@ def main() -> None:
     for problem in found:
         print(problem, file=sys.stderr)
     if not found:
-        print('held: this change ships in a later release' if args.hold else 'release: ok')
+        print('release: ok (hold-release)' if args.hold else 'release: ok')
     sys.exit(1 if found else 0)
 
 

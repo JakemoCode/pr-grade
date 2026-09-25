@@ -37,7 +37,8 @@ jobs:
           PR_GRADE_REQUIRE_TS: '1'
         run: python -m unittest discover -s tests -v
       - name: A change that ships raises the version
-        if: github.event_name == 'pull_request'
+        # !cancelled() reports a missing release alongside a unit-test failure, not one run later.
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
           HOLD: ${{ contains(github.event.pull_request.labels.*.name, 'hold-release') }}
         run: |

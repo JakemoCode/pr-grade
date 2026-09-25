@@ -11,7 +11,7 @@ You grade one change through the lenses you are given, the way an external revie
 
 ## Inputs
 
-The dispatch names the diff range, the lenses to apply, the lens file (`.claude/pr-grade-lenses.md`, which wins over the skill where they differ), and what is already settled. Read the lens file and the lens definitions in the pr-grade skill's `SKILL.md`, sections 3 to 5.
+The dispatch names the diff range, the lenses to apply, the lens file (`.claude/pr-grade-lenses.md`, which wins over the skill where they differ), what is already settled, and any review findings the author declined. Read the lens file and the lens definitions in the pr-grade skill's `SKILL.md`, sections 3 to 5.
 
 Settled means settled. The tests, type checks, and other checks the dispatch lists already passed; their results are inputs. Re-running them spends the turns a proof needs.
 

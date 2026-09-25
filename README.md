@@ -24,7 +24,7 @@ The repository is private for now, so the first command needs git access to it.
 | `scripts/check_then_act.py` | Lists the check-then-act windows (L7) in the functions a branch changed, for the grader to clear or prove. |
 | `templates/` | A lens file, a config, and a CI workflow to copy into a repository. |
 
-The scripts use only the Python standard library (3.9 or later). `check` also needs an authenticated `gh`, and the check-then-act scanner needs Node for TypeScript and JavaScript.
+The scripts use only the Python standard library (3.9 or later). `check` also needs an authenticated `gh`, and the check-then-act scanner needs Node for TypeScript and JavaScript. It reads Python with the standard library.
 
 ## A real grade
 
@@ -100,10 +100,12 @@ src/gates/completion.ts:44  CompletionGate.evaluate
   write  68   options.gates.ensureGateEvaluation
 ```
 
-That output is the real window from the "real grade" repository, run against the commit that introduced it: two concurrent evaluations both pass the lookup at line 51. Across that repository's 858 functions the scanner lists 13 windows. Four are a filesystem check before an await in its setup commands, and four re-check the state after the gap through the class's own method, which the scanner lists because it cannot tell that from a guard on an unrelated flag.
+That output is the real window from the "real grade" repository, run against the commit that introduced it: two concurrent evaluations both pass the lookup at line 51. Across that repository's 858 functions the scanner lists 13 windows. Four are a filesystem check before an await in its setup commands, and four re-check the state after the gap through the class's own method, which the scanner lists because it cannot tell that from a guard on an unrelated flag. On Python, saleor's checkout, order, and payment packages (986 functions, at commit `5ff5648`) give 8 windows, most of them a batch check made before the `transaction.atomic()` block that writes the batch.
 
 - `--whole` scans every function in the changed files, and paths scan those files or directories whole. `--json` gives the same list as data.
 - TypeScript and JavaScript are parsed with the repository's own `typescript` package, or the one `PR_GRADE_TYPESCRIPT` names. Without either, those files are skipped with a notice.
+- Python is parsed with the `ast` module of the `python3` running the scanner. A file in newer syntax than that interpreter reads is skipped with a notice to run a newer one. `with transaction.atomic()`, `@transaction.atomic`, and `async with <lock>` are read as the transaction and lock scopes they are.
+- Any other changed file the scanner cannot read is listed as skipped, unless it is a data format such as JSON or YAML.
 - The name lists (`writes`, `secondReads`, `transactions`, `locks`, `ignore`) live under `checkThenAct` in `.claude/pr-grade.json`.
 
 ## Tests

@@ -43,8 +43,7 @@ DEFAULTS = {
                'create', 'record', 'ensure', 'mark', 'submit', 'publish', 'persist', 'store', 'link', 'unlink', 'add',
                'enqueue', 'increment', 'decrement', 'claim', 'acquire', 'release', 'finalize', 'transition',
                'bulk_create', 'bulk_update'],
-    # [f]etch is a glob, so it matches fetch() alone and not a database helper like fetch_lines().
-    'secondReads': ['[f]etch', 'urlopen', 'requests.*', 'httpx.*', 'aiohttp.*', 'urllib.request.*', 'subprocess.*',
+    'secondReads': ['fetch', 'urlopen', 'requests.*', 'httpx.*', 'aiohttp.*', 'urllib.request.*', 'subprocess.*',
                     'execSync', 'execFileSync', 'spawnSync'],
     'transactions': ['unitOfWork', 'unit_of_work', 'transaction', 'withTransaction', 'runInTransaction',
                      'run_in_transaction', '$transaction', 'atomic', 'begin', 'begin_nested', 'commit', 'rollback'],
@@ -54,15 +53,20 @@ DEFAULTS = {
                # Django looks up a model class, not a row.
                'apps.get_model', 'get_user_model'],
 }
-# Receivers whose methods never touch shared state. Modules that reach the filesystem, the network, or
-# another process (os, shutil, subprocess, requests) are left out on purpose.
-BUILTIN_RECEIVERS = {'Array', 'Object', 'JSON', 'Math', 'Number', 'String', 'Promise', 'Date', 'Reflect', 'console',
-                     'path', 'Buffer', 'Symbol', 'os.path', 'json', 're', 'math', 'itertools', 'logging', 'logger',
-                     'builtins', 'argparse', 'sys', 'textwrap', 'functools', 'collections', 'dataclasses', 'typing',
-                     'shlex', 'string', 'base64', 'hashlib', 'uuid', 'fnmatch', 'posixpath', 'datetime', 'enum',
-                     'copy', 'operator', 'pprint', 'difflib', 'statistics', 'decimal', 'fractions', 'struct',
-                     # Clocks: a time is not shared state.
-                     'time', 'timezone'}
+# Receivers whose methods never touch shared state, per language: in Node `path` is a module of pure
+# functions, in Python it is usually a Path that reads and writes files. Modules that reach the
+# filesystem, the network, or another process (os, os.path, shutil, subprocess, requests) are left out
+# on purpose.
+BUILTIN_RECEIVERS = {
+    'typescript': {'Array', 'Object', 'JSON', 'Math', 'Number', 'String', 'Promise', 'Date', 'Reflect', 'console',
+                   'path', 'Buffer', 'Symbol', 'os.path', 'json', 're', 'math', 'itertools', 'logging', 'logger'},
+    'python': {'builtins', 'json', 're', 'math', 'itertools', 'logging', 'logger', 'argparse', 'sys', 'textwrap',
+               'functools', 'collections', 'dataclasses', 'typing', 'shlex', 'string', 'base64', 'hashlib', 'uuid',
+               'fnmatch', 'posixpath', 'datetime', 'enum', 'copy', 'operator', 'pprint', 'difflib', 'statistics',
+               'decimal', 'fractions', 'struct',
+               # Clocks: a time is not shared state.
+               'time', 'timezone'},
+}
 # Methods that mutate the collection they are called on: on this.x or self.x they are member writes.
 MUTATORS = {'set', 'add', 'delete', 'push', 'clear', 'pop', 'splice', 'append', 'extend', 'update', 'remove',
             'discard', 'insert'}
@@ -119,6 +123,7 @@ def analyze(fn: dict, cfg: dict) -> list[dict]:
     """The check-then-act candidates in one function's syntax facts."""
     calls = {call['id']: call for call in fn['calls']}
     collections = {name for a in fn['assigns'] if a['collection'] for name in a['names']}
+    builtin_receivers = BUILTIN_RECEIVERS[fn.get('language', 'typescript')]
     scope_calls = {scope.get('callId') for scope in fn['scopes']}
 
     kind: dict[int, str | None] = {}
@@ -127,13 +132,14 @@ def analyze(fn: dict, cfg: dict) -> list[dict]:
     for call in fn['calls']:
         callee, root = call['callee'], call['callee'].split('.', 1)[0]
         receiver = _receiver(callee)
-        builtin = receiver in BUILTIN_RECEIVERS or root in BUILTIN_RECEIVERS
+        builtin = receiver in builtin_receivers or root in builtin_receivers
         local = root in collections
         parts = callee.split('.')
         # this.cache.set(k, v) mutates the member, and this.store.append(x) may be a store call: count both.
         if (len(parts) == 3 and parts[0] in ('this', 'self') and parts[2] in MUTATORS
                 and not call['inHandler'] and not fn['isConstructor']):
-            member_writes.append({'path': f'{parts[0]}.{parts[1]}', 'span': _span(call['span']), 'line': call['line'],
+            member_writes.append({'path': f"{parts[0]}.{parts[1].replace('[]', '')}", 'span': _span(call['span']),
+                                  'line': call['line'],
                                   'inline': call['inline'], 'scopeIds': call['scopeIds']})
         if any_match(callee, cfg['ignore']):
             kind[call['id']] = None

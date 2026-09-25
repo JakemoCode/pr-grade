@@ -283,13 +283,18 @@ function analyzeFile(file, root) {
 
     // The end of the innermost block that always leaves the function (or of the return or throw)
     // around an await: nothing after it is reachable from the await. A block that only breaks out of a
-    // loop or switch still reaches the code after it.
+    // loop or switch still reaches the code after it, and a finally block still runs on the way out.
     function reachEnd(node) {
-      for (let parent = node.parent; parent && parent !== fn.body && parent !== fn; parent = parent.parent) {
-        if (ts.isReturnStatement(parent) || ts.isThrowStatement(parent)) return pos(parent.getEnd());
-        if (ts.isBlock(parent) && exitKind(parent) === 'function') return pos(parent.getEnd());
+      let end = null;
+      for (let child = node, parent = node.parent; parent && parent !== fn.body && parent !== fn;
+        child = parent, parent = parent.parent) {
+        if (end === null && (ts.isReturnStatement(parent) || ts.isThrowStatement(parent))) end = parent.getEnd();
+        else if (end === null && ts.isBlock(parent) && exitKind(parent) === 'function') end = parent.getEnd();
+        if (end !== null && ts.isTryStatement(parent) && parent.finallyBlock && child !== parent.finallyBlock) {
+          end = parent.getEnd();
+        }
       }
-      return null;
+      return end === null ? null : pos(end);
     }
 
     // Where a guard that exits by break or continue stops covering: the end of the statement its jumps

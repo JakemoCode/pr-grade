@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import ast
 import builtins
+import io
+import re
 import sys
+import tokenize
 from pathlib import Path
 
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 LOOPS = (ast.For, ast.AsyncFor, ast.While)
 BUILTINS = set(dir(builtins))
 COLLECTION_CALLS = {'dict', 'list', 'set', 'tuple', 'defaultdict', 'OrderedDict', 'Counter', 'deque'}
+MATCH = getattr(ast, 'Match', None)
 TRIES = tuple(getattr(ast, name) for name in ('Try', 'TryStar') if hasattr(ast, name))
 COLLECTION_LITERALS =(ast.List, ast.Dict, ast.Set, ast.Tuple, ast.ListComp, ast.DictComp, ast.SetComp)
 
@@ -62,21 +66,42 @@ def exit_kind(body: list) -> str | None:
     if isinstance(last, (ast.Break, ast.Continue)):
         return 'loop'
     if isinstance(last, ast.If):
-        then, otherwise = exit_kind(last.body), exit_kind(last.orelse)
-        if not then or not otherwise:
-            return None
-        return 'function' if then == otherwise == 'function' else 'loop'
+        return _every_path([exit_kind(last.body), exit_kind(last.orelse)])
+    if isinstance(last, (ast.With, ast.AsyncWith)):
+        return exit_kind(last.body)
+    if isinstance(last, TRIES):
+        if exit_kind(last.finalbody) == 'function':
+            return 'function'
+        # The else block runs only when the body falls through.
+        return _every_path([exit_kind(last.body) or exit_kind(last.orelse),
+                            *(exit_kind(handler.body) for handler in last.handlers)])
+    if MATCH and isinstance(last, MATCH) and last.cases:
+        final = last.cases[-1]
+        catch_all = final.guard is None and isinstance(final.pattern, ast.MatchAs) and final.pattern.pattern is None
+        return _every_path([exit_kind(case.body) for case in last.cases]) if catch_all else None
     return None
+
+
+def _every_path(kinds: list) -> str | None:
+    if not all(kinds):
+        return None
+    return 'function' if all(kind == 'function' for kind in kinds) else 'loop'
 
 
 class _File:
     def __init__(self, text: str, tree: ast.AST):
-        self.lines = text.splitlines()
-        # Every name the file defines or imports at any depth, so a def set() is not taken for the builtin.
-        self.bound = {node.name for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                                                                 ast.ClassDef))}
-        self.bound |= {(alias.asname or alias.name).split('.')[0] for node in ast.walk(tree)
-                       if isinstance(node, (ast.Import, ast.ImportFrom)) for alias in node.names}
+        # Only these are line breaks to Python; str.splitlines also splits on form feeds and \u2028.
+        self.lines = re.split(r'\r\n|\r|\n', text)
+        # Names the module binds at top level, so a module-level def set() is not taken for the builtin. A
+        # method named set does not shadow it.
+        self.bound = set()
+        for node in getattr(tree, 'body', []):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                self.bound.add(node.name)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                self.bound |= {(alias.asname or alias.name).split('.')[0] for alias in node.names}
+            elif isinstance(node, ast.Assign):
+                self.bound |= {t.id for t in node.targets if isinstance(t, ast.Name)}
         self.parents: dict[ast.AST, ast.AST] = {}
         for parent in ast.walk(tree):
             for child in ast.iter_child_nodes(parent):
@@ -111,17 +136,22 @@ class _File:
 
     def reach_end(self, node) -> list | None:
         """The end of the innermost statement list around an await that always leaves the function (or of
-        the return or raise holding it): nothing after it is reachable from the await."""
+        the return or raise holding it): nothing after it is reachable from the await. A finally block
+        still runs on the way out, so the reach extends through the try that owns one."""
+        end = None
         child, parent = node, self.parents.get(node)
         while parent is not None and not isinstance(child, FUNCTIONS):
-            if isinstance(parent, (ast.Return, ast.Raise)):
-                return [parent.end_lineno, parent.end_col_offset]
-            for field in ('body', 'orelse', 'finalbody', 'handlers'):
-                statements = getattr(parent, field, None)
-                if isinstance(statements, list) and child in statements and exit_kind(statements) == 'function':
-                    return [statements[-1].end_lineno, statements[-1].end_col_offset]
+            if end is None and isinstance(parent, (ast.Return, ast.Raise)):
+                end = [parent.end_lineno, parent.end_col_offset]
+            elif end is None:
+                for field in ('body', 'orelse', 'finalbody', 'handlers'):
+                    statements = getattr(parent, field, None)
+                    if isinstance(statements, list) and child in statements and exit_kind(statements) == 'function':
+                        end = [statements[-1].end_lineno, statements[-1].end_col_offset]
+            if end is not None and isinstance(parent, TRIES) and parent.finalbody and child not in parent.finalbody:
+                end = [parent.end_lineno, parent.end_col_offset]
             child, parent = parent, self.parents.get(parent)
-        return None
+        return end
 
     def is_chained_receiver(self, call) -> bool:
         """The call is the receiver of another call: conn.execute(sql) in conn.execute(sql).fetchone()."""
@@ -129,9 +159,12 @@ class _File:
         return (isinstance(parent, ast.Attribute) and parent.value is call
                 and isinstance(self.parents.get(parent), ast.Call) and self.parents[parent].func is parent)
 
-    def is_inline_callback(self, fn) -> bool:
+    def callback_host(self, fn) -> ast.Call | None:
+        """The call a function is passed to inline, as a positional or a keyword argument."""
         parent = self.parents.get(fn)
-        return isinstance(parent, ast.Call) and (fn in parent.args or any(k.value is fn for k in parent.keywords))
+        if isinstance(parent, ast.keyword):
+            parent = self.parents.get(parent)
+        return parent if isinstance(parent, ast.Call) and parent.func is not fn else None
 
     def name_of(self, fn) -> str:
         cls = self.class_name(fn)
@@ -140,18 +173,21 @@ class _File:
         parent = self.parents.get(fn)
         if isinstance(parent, ast.Assign) and len(parent.targets) == 1 and isinstance(parent.targets[0], ast.Name):
             return parent.targets[0].id
-        if self.is_inline_callback(fn):
-            enclosing = self.parents.get(parent)
+        call = self.callback_host(fn)
+        if call is not None:
+            enclosing = self.parents.get(call)
             while enclosing is not None and not isinstance(enclosing, FUNCTIONS):
                 enclosing = self.parents.get(enclosing)
             host = self.name_of(enclosing) if enclosing is not None else '<module>'
-            return f'{host} > {dotted(parent.func)} callback'
+            return f'{host} > {dotted(call.func)} callback'
         return f'<anonymous>@{fn.lineno}'
 
 
 def _analyze_function(f: _File, fn) -> dict:
-    ir = {'name': f.name_of(fn), 'span': f.span(fn), 'isConstructor': getattr(fn, 'name', '') == '__init__',
-          'inlineCallee': dotted(f.parents[fn].func) if f.is_inline_callback(fn) else None,
+    host = f.callback_host(fn)
+    ir = {'name': f.name_of(fn), 'language': 'python', 'span': f.span(fn),
+          'isConstructor': getattr(fn, 'name', '') == '__init__',
+          'inlineCallee': dotted(host.func) if host is not None else None,
           # A decorator wraps the whole body the way a callback's host does: @transaction.atomic, @locked.
           'wrappers': [dotted(d) for d in getattr(fn, 'decorator_list', [])],
           'calls': [], 'awaits': [], 'assigns': [], 'conds': [], 'memberWrites': [], 'scopes': []}
@@ -234,6 +270,10 @@ def _analyze_function(f: _File, fn) -> dict:
             ir['awaits'].append({'span': f.span(node.iter), 'line': node.lineno, 'kind': 'for-await',
                                  'reachEnd': f.reach_end(node),
                                  'text': f.text(node), 'inline': ctx['inline'], 'scopeIds': ctx['scopeIds']})
+        elif isinstance(node, ast.comprehension) and node.is_async:
+            ir['awaits'].append({'span': f.span(node.iter), 'line': node.iter.lineno, 'kind': 'for-await',
+                                 'reachEnd': f.reach_end(node.iter), 'text': f.text(f.parents[node]),
+                                 'inline': ctx['inline'], 'scopeIds': ctx['scopeIds']})
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             for item in node.items:
                 context = item.context_expr
@@ -289,14 +329,18 @@ def parse_python(files: list[str], root: Path) -> tuple[dict, list[dict]]:
     parsed, skipped = {}, []
     for file in files:
         try:
-            text = (root / file).read_text(encoding='utf-8')
-            tree = ast.parse(text, filename=file)
+            # Bytes, so a byte order mark or a coding declaration decides the encoding as it does for Python.
+            source = (root / file).read_bytes()
+            tree = ast.parse(source, filename=file)
+            text = tokenize.TextIOWrapper(io.BytesIO(source), encoding=tokenize.detect_encoding(
+                io.BytesIO(source).readline)[0]).read()
         except SyntaxError as error:
             version = '.'.join(map(str, sys.version_info[:2]))
             skipped.append({'file': file, 'reason': f'python {version} cannot parse it (line {error.lineno}: '
-                                                    f'{error.msg}); run check_then_act.py with a newer python3'})
+                                                    f'{error.msg}); if it uses newer syntax, run check_then_act.py with a newer '
+                                                    'python3'})
             continue
-        except (UnicodeDecodeError, ValueError) as error:
+        except (UnicodeDecodeError, ValueError, LookupError) as error:
             skipped.append({'file': file, 'reason': f'cannot read it: {error}'})
             continue
         f = _File(text, tree)

@@ -27,7 +27,8 @@ CONFIGURED = {'second_read_fixture.py': {'secondReads': ['call_billing']}}
 def expected(fixture: Path) -> tuple | None:
     """The one candidate a fixture's `# expect:` markers describe, or None when it has none."""
     checks, gaps, writes = [], [], []
-    for number, line in enumerate(fixture.read_text().splitlines(), 1):
+    # Markers are ASCII, whatever the file's encoding; count lines the way Python does.
+    for number, line in enumerate(re.split(r'\r\n|\r|\n', fixture.read_bytes().decode('latin-1')), 1):
         marker = MARKER.search(line)
         if marker is None:
             continue
@@ -62,6 +63,20 @@ class FixtureTest(unittest.TestCase):
             with self.subTest(fixture=fixture.name):
                 want = expected(fixture)
                 self.assertEqual([shape(c) for c in candidates_for(fixture, cfg)], [] if want is None else [want])
+
+
+@unittest.skipUnless(sys.version_info >= (3, 10), 'match needs python 3.10')
+class MatchTest(unittest.TestCase):
+    def test_a_guard_ending_in_an_exhaustive_match_guards_what_follows(self) -> None:
+        fixture = REPO / 'tests/fixtures/check_then_act/py310/guard_ends_in_match_fixture.py'
+        self.assertEqual([shape(c) for c in candidates_for(fixture)], [expected(fixture)])
+
+
+class LineTextTest(unittest.TestCase):
+    def test_a_gap_shows_the_text_of_its_own_line(self) -> None:
+        # Python counts only \n, \r\n and \r as line breaks; a form feed must not shift the text.
+        [candidate] = candidates_for(FIXTURES / 'form_feed_fixture.py')
+        self.assertEqual(candidate['gaps'][0]['text'], 'await repo.sync(order_id)  # expect: gap await')
 
 
 def git(root: Path, *args: str) -> None:

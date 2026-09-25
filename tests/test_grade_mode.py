@@ -120,5 +120,53 @@ class ChangedFilesTest(Fixture):
                          ['committed.py', 'edited.py', 'untracked.py'])
 
 
+class ChangedLinesTest(Fixture):
+    def setUp(self) -> None:
+        super().setUp()
+        (self.root / 'a.py').write_text(''.join(f'line {n}\n' for n in range(1, 11)))
+        git(self.root, 'add', '.')
+        git(self.root, 'commit', '-q', '-m', 'base')
+        git(self.root, 'checkout', '-q', '-b', 'topic')
+
+    def edit(self, change) -> None:
+        lines = (self.root / 'a.py').read_text().splitlines(keepends=True)
+        change(lines)
+        (self.root / 'a.py').write_text(''.join(lines))
+
+    def test_committed_and_uncommitted_edits_give_their_new_side_lines(self) -> None:
+        self.edit(lambda lines: lines.__setitem__(2, 'changed 3\n'))
+        git(self.root, 'commit', '-q', '-am', 'edit 3')
+        self.edit(lambda lines: lines.__setitem__(7, 'changed 8\n'))
+        self.assertEqual(grade_mode.changed_lines('main', self.root), {'a.py': [(3, 3), (8, 8)]})
+
+    def test_an_insertion_spans_the_inserted_lines(self) -> None:
+        self.edit(lambda lines: lines.insert(4, 'new a\nnew b\n'))
+        self.assertEqual(grade_mode.changed_lines('main', self.root), {'a.py': [(5, 6)]})
+
+    def test_a_pure_deletion_marks_the_lines_either_side(self) -> None:
+        # Removing a re-check or a lock changes the function around it.
+        self.edit(lambda lines: lines.__delitem__(4))
+        self.assertEqual(grade_mode.changed_lines('main', self.root), {'a.py': [(4, 5)]})
+
+    def test_an_untracked_file_is_wholly_changed(self) -> None:
+        (self.root / 'new.py').write_text('x\n')
+        self.assertEqual(grade_mode.changed_lines('main', self.root), {'new.py': None})
+
+    def test_names_with_spaces_and_non_ascii_come_back_as_they_are_on_disk(self) -> None:
+        # git C-quotes non-ASCII names and appends a tab to names with spaces unless told otherwise.
+        for name in ('my file.py', 'café.py'):
+            (self.root / name).write_text('1\n')
+        git(self.root, 'add', '.')
+        git(self.root, 'commit', '-q', '-m', 'odd names')
+        for name in ('my file.py', 'café.py'):
+            (self.root / name).write_text('2\n')
+        self.assertEqual(grade_mode.changed_lines('main', self.root), {'café.py': [(1, 1)], 'my file.py': [(1, 1)]})
+        self.assertEqual(sorted(grade_mode.changed_files('main', self.root)), ['café.py', 'my file.py'])
+
+    def test_an_added_line_that_looks_like_a_file_header_is_content(self) -> None:
+        self.edit(lambda lines: lines.insert(2, '++ b/elsewhere.py\n'))
+        self.assertEqual(grade_mode.changed_lines('main', self.root), {'a.py': [(3, 3)]})
+
+
 if __name__ == '__main__':
     unittest.main()

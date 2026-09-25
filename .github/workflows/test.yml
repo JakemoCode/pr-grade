@@ -19,5 +19,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: TypeScript for the adapter tests only
+        # Installed outside the checkout: the plugin itself has no npm dependency.
+        run: npm install --prefix "$RUNNER_TEMP/ts" --no-save --no-package-lock --ignore-scripts --no-audit --no-fund typescript@6.0.3
       - name: Unit tests
+        env:
+          PR_GRADE_TYPESCRIPT: ${{ runner.temp }}/ts/node_modules/typescript
+          # A missing compiler fails the run instead of skipping the TypeScript tests.
+          PR_GRADE_REQUIRE_TS: '1'
         run: python -m unittest discover -s tests -v

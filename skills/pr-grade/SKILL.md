@@ -42,7 +42,15 @@ It prints `in-thread`, `subagent`, or `fan-out`, and the silent-failure files th
 - **subagent**: dispatch one `pr-grade:grade` agent to apply every lens.
 - **fan-out**: dispatch one `pr-grade:grade` agent per fan-out group. The lens file names the groups; without them use timing (L1, L2, L7), reach (L3, L4), and lifetime and contract (L5, L6, L8).
 
-A grading agent needs the diff range, the lens file path, its lenses, and a list of what is already settled: the tests, type checks, and other deterministic checks that already passed. Their results are inputs, never questions to reopen, and re-running them is how a grader runs out of turns before it reports.
+Then list the check-then-act windows for L7, once, for whoever holds that lens:
+
+```sh
+python3 <base>/scripts/check_then_act.py
+```
+
+It scans the functions the branch changed and prints each check, the await or boundary after it, and the writes that rely on it. TypeScript and JavaScript need Node and the repository's own `typescript` package; without them the scanner says which files it skipped.
+
+A grading agent needs the diff range, the lens file path, its lenses, the scanner's output when it holds L7, and a list of what is already settled: the tests, type checks, and other deterministic checks that already passed. Their results are inputs, never questions to reopen, and re-running them is how a grader runs out of turns before it reports.
 
 ## 3. The eight lenses
 
@@ -117,6 +125,8 @@ Name the check. Name the line that changes the state. Count what sits between th
 A counter raised after the work starts does not bound the work. A flag set in a callback does not bound anything the callback has not reached yet. A guard compared against a value that can never change bounds nothing at all.
 
 *Example:* a guard meant to stop reads piling up raised its count only after the read budget expired. Every open inside that window passed the check and took a connection. The repair counted reads in flight: raise the count before the query starts, lower it when the query truly settles.
+
+**The scanner's list.** Answer each candidate from `check_then_act.py` in one of two ways. Clear it by naming what makes the window harmless: a re-check inside the write's own transaction, a store that refuses the second write (a unique key, or an expected version compared in the same statement), or a write that is idempotent. Or prove the race, and it is a finding. The list is where to start, never where to stop. It cannot see a check and a write in different functions, a write through a helper not named like one, a `.then()` chain, a synchronous check and write with no transaction around them, or a language it has no adapter for (it reads TypeScript and JavaScript, and names any other source files it skipped). **An empty list clears nothing.**
 
 ### L8. Failure direction
 

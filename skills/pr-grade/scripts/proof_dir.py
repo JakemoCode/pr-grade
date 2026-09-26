@@ -3,7 +3,7 @@
 with the repository's installed dependencies linked in, so a grader writes a failing test and runs it
 without building anything first.
 
-    python3 proof_dir.py make [--sha HEAD] [name ...]
+    python3 proof_dir.py make [--sha HEAD] [--since <ref>] [name ...]
     python3 proof_dir.py remove <root>
 
 Run `make` from inside the repository being graded, once per grade, with one name per grader, for
@@ -19,8 +19,10 @@ repository through git finds the copy, never the author's checkout. A copy holds
 only. No hook runs, submodules are not checked out, and Git LFS files stay pointers.
 
 A dependency directory is linked from the author's checkout only when every file that pins it reads
-the same there as at the graded commit, so a change that edits a manifest or lock file gets no stale
-link; `make` names the files that differ and the install to run in each copy instead. The defaults
+the same there as at the graded commit, and, with `--since` naming where the branch began, the same
+there as at that commit. A branch that edits a manifest or lock file gets no link even when the author
+committed the edit, since what is installed may predate it; `make` names the files that differ and the
+install to run in each copy instead. The defaults
 link `node_modules` and `.venv`. `proofDir` in `.claude/pr-grade.json` replaces them. A `pinnedBy`
 pattern is an fnmatch glob matched against the whole path from the repository root, and an entry
 without `pinnedBy` is always linked:
@@ -111,16 +113,18 @@ def _here(repo: Path, path: str) -> bytes | None:
     return file.read_bytes() if file.is_file() else None
 
 
-def drifted(repo: Path, sha: str, pins: list[str]) -> list[str]:
-    """The files matching `pins` that read differently in the author's checkout and at `sha`, a file
-    on one side only included."""
+def drifted(repo: Path, sha: str, pins: list[str], since: str | None = None) -> list[str]:
+    """The files matching `pins` that read differently in the author's checkout and at `sha`, or at
+    `since` and at `sha`, a file on one side only included. The second catches a branch that changed
+    its pins without the author installing again: the checkout matches the commit, the install does not."""
     if not pins:
         return []
     listed = git(repo, '-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', sha).splitlines()
     listed += git(repo, '-c', 'core.quotePath=false', 'ls-files', '--cached', '--others',
                   '--exclude-standard').splitlines()
     paths = sorted({p for p in listed if any(fnmatch.fnmatchcase(p, pin) for pin in pins)})
-    return [p for p in paths if _at(repo, sha, p) != _here(repo, p)]
+    return [p for p in paths if _at(repo, sha, p) != _here(repo, p)
+            or (since is not None and _at(repo, since, p) != _at(repo, sha, p))]
 
 
 def install_for(entry: dict, top: list[str]) -> str | None:
@@ -129,7 +133,8 @@ def install_for(entry: dict, top: list[str]) -> str | None:
     return next((INSTALLS[pin] for pin in entry.get('pinnedBy', []) if pin in INSTALLS and pin in top), None)
 
 
-def link(repo: Path, sha: str, wanted: list[dict], configured: bool, copies: list[Path]) -> list[str]:
+def link(repo: Path, sha: str, wanted: list[dict], configured: bool, copies: list[Path],
+         since: str | None = None) -> list[str]:
     top = git(repo, '-c', 'core.quotePath=false', 'ls-tree', '--name-only', sha).splitlines()
     lines = []
     for entry in wanted:
@@ -138,7 +143,7 @@ def link(repo: Path, sha: str, wanted: list[dict], configured: bool, copies: lis
             if configured:
                 lines.append(f"missing {path}: not in the author's checkout, so not linked")
             continue
-        drift = drifted(repo, sha, entry.get('pinnedBy', []))
+        drift = drifted(repo, sha, entry.get('pinnedBy', []), since)
         if drift:
             install = install_for(entry, top)
             then = f'in each copy run: {install}' if install else 'install it in each copy that needs it'
@@ -166,7 +171,7 @@ def sweep(parent: Path, now: float) -> None:
             shutil.rmtree(old, ignore_errors=True)
 
 
-def make(repo: Path, sha: str, names: list[str], config: dict, parent: Path) -> list[str]:
+def make(repo: Path, sha: str, names: list[str], config: dict, parent: Path, since: str | None = None) -> list[str]:
     """One copy and one scratch directory per name under a new root in `parent`; returns the lines to
     print. A failure removes the root before it propagates."""
     if not all(NAME.fullmatch(n) for n in names) or len(set(names)) != len(names):
@@ -189,7 +194,7 @@ def make(repo: Path, sha: str, names: list[str], config: dict, parent: Path) -> 
                 '--quiet', '--detach', sha, env=env)
             lines += [f'copy {name}: {copy}', f'scratch {name}: {scratch}']
             copies.append(copy)
-        lines += link(repo, sha, wanted, 'proofDir' in config, copies)
+        lines += link(repo, sha, wanted, 'proofDir' in config, copies, since)
     except BaseException:
         shutil.rmtree(root, ignore_errors=True)
         raise
@@ -216,6 +221,7 @@ def main() -> None:
     commands = ap.add_subparsers(dest='command', required=True)
     make_ap = commands.add_parser('make', help='make one proof copy per name')
     make_ap.add_argument('--sha', default='HEAD', help='the graded commit (default HEAD)')
+    make_ap.add_argument('--since', help='where the branch began; pins changed after it are not linked')
     make_ap.add_argument('names', nargs='*', help='one per grader, for example its fan-out group')
     remove_ap = commands.add_parser('remove', help='remove a root make printed')
     remove_ap.add_argument('root', type=Path)
@@ -226,7 +232,8 @@ def main() -> None:
             return
         repo = repo_root()
         sha = git(repo, 'rev-parse', '--verify', f'{args.sha}^{{commit}}').strip()
-        print('\n'.join(make(repo, sha, args.names or ['grade'], load_config(repo), Path(tempfile.gettempdir()))))
+        since = git(repo, 'rev-parse', '--verify', f'{args.since}^{{commit}}').strip() if args.since else None
+        print('\n'.join(make(repo, sha, args.names or ['grade'], load_config(repo), Path(tempfile.gettempdir()), since)))
     except subprocess.CalledProcessError as failed:
         sys.exit(f"{' '.join(failed.cmd[:3])} failed: {(failed.stderr or '').strip() or f'exit {failed.returncode}'}")
 

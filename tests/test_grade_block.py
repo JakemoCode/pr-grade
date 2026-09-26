@@ -299,12 +299,21 @@ class MergeTest(unittest.TestCase):
         self.assertEqual((block['Score'], block['Verified and clear']), ('4/5', 'L2, L3'))
         self.assertIn('L1  P1 at src/a.py:9', self.merged())
 
-    def test_one_defect_two_graders_found_is_one_finding(self) -> None:
+    def test_two_findings_at_one_line_are_flagged_and_both_count(self) -> None:
+        # One defect or two is the coordinator's call; until then the floor assumes two.
         self.write('timing', report('4/5', 'L2', findings='P1 L1 src/a.py:9 - late write lands\n'))
         self.write('reach', report('4/5', '', findings='P1 L3 src/a.py:9 - caller sees stale row\n'))
         merged = self.merged()
-        self.assertIn('findings (1):', merged)
-        self.assertIn('[timing L1; reach L3]', merged)
+        self.assertIn('findings (2):', merged)
+        self.assertEqual(merged.count('same line as another finding'), 2)
+        self.assertEqual(self.block()['Score'], '3/5')
+
+    def test_a_finding_shaped_line_under_could_not_verify_stays_a_claim(self) -> None:
+        self.write('timing', report('5/5', 'L1', unverified='\nP2 L2 src/a.py:10 - maybe a race; runs 1-3 passed'))
+        self.write('reach', report('5/5', 'L3'))
+        merged = self.merged()
+        self.assertIn('findings (0):', merged)
+        self.assertIn('Could not verify: guess: P2 L2 src/a.py:10', merged)
         self.assertEqual(self.block()['Score'], '4/5')
 
     def test_an_open_p2_claim_blocks_like_the_finding_it_would_be(self) -> None:

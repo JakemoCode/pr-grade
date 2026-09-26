@@ -45,6 +45,14 @@ class GroupsTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             grade_prep.groups_for('fan-out', LENSES, None, ['odd=L1,L12'])
 
+    def test_a_lens_given_to_two_groups_stops_the_run(self) -> None:
+        with self.assertRaises(SystemExit):
+            grade_prep.groups_for('fan-out', LENSES, None, ['a=L1,L7', 'b=L7'])
+
+    def test_two_groups_with_one_name_stop_the_run(self) -> None:
+        with self.assertRaises(SystemExit):
+            grade_prep.groups_for('fan-out', LENSES, None, ['Timing=L1', 'timing=L2'])
+
     def test_one_grader_holds_every_lens_below_fan_out(self) -> None:
         self.assertEqual(grade_prep.groups_for('subagent', LENSES, None, []), {'grade': LENSES})
 
@@ -90,7 +98,11 @@ class CliTest(unittest.TestCase):
                               env={**os.environ, 'TMPDIR': str(self.proofs)}, capture_output=True, text=True)
 
     def prep(self, *args: str) -> str:
-        run = self.run_cli(*args)
+        return self.prep_with('--base', 'main', *args)
+
+    def prep_with(self, *args: str) -> str:
+        run = subprocess.run([sys.executable, str(SCRIPTS / 'grade_prep.py'), *args], cwd=self.repo,
+                             env={**os.environ, 'TMPDIR': str(self.proofs)}, capture_output=True, text=True)
         self.assertEqual(run.returncode, 0, run.stderr)
         return run.stdout
 
@@ -145,6 +157,44 @@ class CliTest(unittest.TestCase):
 
     def test_callers_found_by_hand_join_the_list(self) -> None:
         self.assertIn('- `Mode` type: cli.py:4', self.prep('--callers', '`Mode` type: cli.py:4'))
+
+    def test_two_modified_functions_with_one_name_both_count_as_definitions(self) -> None:
+        git(self.repo, 'checkout', '-q', 'main')
+        (self.repo / 'other.py').write_text('def claim(y):\n    return y\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'second claim')
+        git(self.repo, 'checkout', '-q', 'topic')
+        git(self.repo, 'merge', '-q', '--no-edit', 'main')
+        (self.repo / 'other.py').write_text('def claim(y):\n    return y * 2\n')
+        git(self.repo, 'commit', '-q', '-am', 'change the other claim')
+        line = next(l for l in self.prep().splitlines() if l.startswith('- `claim`'))
+        self.assertIn('defined other.py:1, store.py:1:', line)
+        self.assertNotIn('other.py:1,', line.split(': ', 1)[1])
+
+    def test_a_file_the_author_never_added_is_left_out(self) -> None:
+        (self.repo / 'scratch.py').write_text('def claim(z):\n    return z\n')
+        out = self.prep()
+        self.assertNotIn('scratch.py', out)
+        self.assertIn('(3 files;', out)
+
+    def test_in_thread_prints_no_merge_line(self) -> None:
+        (self.repo / '.claude/pr-grade.json').write_text('{"silent": []}\n')
+        git(self.repo, 'commit', '-q', '-am', 'nothing silent')
+        out = self.prep()
+        self.assertIn('mode: in-thread', out)
+        self.assertNotIn('merge:', out)
+        self.assertIn('remove:', out)
+
+    def test_a_regrade_keeps_the_whole_branchs_mode_for_the_block(self) -> None:
+        graded = git(self.repo, 'rev-parse', 'HEAD').strip()
+        (self.repo / 'README.md').write_text('notes\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'docs only')
+        out = self.prep_with('--base', graded, '--branch-base', 'main')
+        self.assertIn('mode: in-thread', out)
+        self.assertIn('the grade block keeps subagent', out)
+        root = Path(re.search(r'^remove: .* remove (\S+)$', out, re.M).group(1))
+        self.assertEqual(json.loads((root / 'grade.json').read_text())['mode'], 'subagent')
 
     def test_uncommitted_edits_stop_it_before_anything_is_made(self) -> None:
         (self.repo / 'store.py').write_text('changed\n')

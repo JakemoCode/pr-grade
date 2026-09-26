@@ -163,6 +163,15 @@ class LinkTest(Fixture):
         out = self.make(sha=self.sha)
         self.assertIn('(package.json)', out['not linked node_modules'])
 
+    def test_a_branch_that_changed_its_pins_gets_no_link_even_when_committed(self) -> None:
+        # The checkout matches the commit, but the node_modules installed before the change may not.
+        fork = self.sha
+        head = self.commit('package.json', '{"name": "x", "dependencies": {"y": "2"}}\n')
+        out = self.make(sha=head)
+        self.assertIn('linked node_modules', out)
+        out = fields(proof_dir.make(self.repo, head, ['grade'], {}, self.parent, since=fork))
+        self.assertIn('(package.json)', out['not linked node_modules'])
+
     def test_the_install_named_follows_the_lock_file_at_the_graded_commit(self) -> None:
         self.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n')
         (self.repo / 'pnpm-lock.yaml').write_text('lockfileVersion: 9\n# edited\n')

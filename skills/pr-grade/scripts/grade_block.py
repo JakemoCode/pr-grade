@@ -28,8 +28,8 @@ key is set. The config and the lens file are read from the PR's base branch, so 
 rules it is checked against.
 
 `merge` reads the report each grader wrote under the root grade_prep.py printed, and prints where every
-lens ended (clear, a finding, an open claim, or unaccounted), the findings with duplicates at one
-file:line joined, the lowest score the rules allow, and a draft block. It settles nothing that needs
+lens ended (clear, a finding, an open claim, or unaccounted), the findings with any two at one line
+flagged, the lowest score the rules allow, and a draft block. It settles nothing that needs
 judgment: two lines with one cause, a clearance against a proof, a 3 for a design decision, or a 1.
 """
 from __future__ import annotations
@@ -137,8 +137,9 @@ def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[
 
 
 def read_report(text: str) -> dict:
-    """A grader's report as its fields, findings, and per-lens closing lines. A field runs on to the next
-    field, finding, or closing line; each line of `Could not verify` is one claim."""
+    """A grader's report as its fields and findings. A field runs on to the next field, finding, or
+    closing line, and each line of `Could not verify` is one claim. Under `Could not verify` or `Outside
+    my lenses` a line shaped like a finding is still an item of that field: an unproven P2 is a claim."""
     fields: dict[str, list[str]] = {}
     findings, current = [], None
     for raw in text.splitlines():
@@ -146,7 +147,9 @@ def read_report(text: str) -> dict:
         if line.startswith('```'):
             continue
         finding, field = FINDING.match(line), REPORT_LINE.match(line)
-        if finding:
+        if finding and current in ('Could not verify', 'Outside my lenses'):
+            fields[current].append(line)
+        elif finding:
             findings.append({'rank': finding[1], 'lenses': LENS_ID.findall(finding[2]), 'where': finding[3],
                              'title': finding[4].strip()})
             current = None
@@ -162,7 +165,7 @@ def merge(proof_root: Path) -> str:
     """Where each lens ended across the graders' reports, and the draft block they support."""
     meta = json.loads((proof_root / 'grade.json').read_text())
     lenses, status = meta['lenses'], {}
-    findings: dict[str, dict] = {}
+    findings: list[dict] = []
     open_claims, outside, scores, out = [], [], [], []
     for group, held in meta['groups'].items():
         path = proof_root / group / 'report.md'
@@ -173,10 +176,8 @@ def merge(proof_root: Path) -> str:
         fields = report['fields']
         scores.append(f"{group} {' '.join(fields.get('Score', ['?']))}")
         for found in report['findings']:
-            entry = findings.setdefault(found['where'], {**found, 'by': []})
-            entry['by'].append(f"{group} {','.join(found['lenses']) or 'no lens named'}")
+            findings.append({**found, 'by': f"{group} {','.join(found['lenses']) or 'no lens named'}"})
             if found['rank'] != 'P3':
-                entry['rank'] = min(entry['rank'], found['rank'])
                 for lens in found['lenses'] or held:
                     status[lens] = f"{found['rank']} at {found['where']}"
         for claim in fields.get('Could not verify', []):
@@ -195,7 +196,7 @@ def merge(proof_root: Path) -> str:
                     if (m := LENS_ID.match(item.strip()))}
         for lens in held:
             status.setdefault(lens, 'clear' if lens in verified else f'unaccounted: ask {group} which')
-    blocking_findings = [f for f in findings.values() if f['rank'] != 'P3']
+    blocking_findings = [f for f in findings if f['rank'] != 'P3']
     count = len(blocking_findings) + sum(1 for _, _, blocking in open_claims if blocking)
     unapplied = [lens for lens in lenses if not status.get(lens, '').startswith(('clear', 'P', 'open'))]
     floor = 2 if unapplied else 5 if count == 0 else 4 if count == 1 else 3
@@ -205,7 +206,11 @@ def merge(proof_root: Path) -> str:
     out += ['reports: ' + (', '.join(scores) or 'none'), '', 'lenses:']
     out += [f'  {lens}  {status.get(lens, "not held by any grader")}' for lens in lenses]
     out += ['', f'findings ({len(findings)}):']
-    out += [f"  {f['rank']} {f['where']} - {f['title']}  [{'; '.join(f['by'])}]" for f in findings.values()] or ['  none']
+    lines_seen = [f['where'] for f in findings]
+    # Two findings at one line may be one defect or two; counting both keeps the floor on the safe side.
+    out += [f"  {f['rank']} {f['where']} - {f['title']}  [{f['by']}]"
+            + ('  (same line as another finding: one defect or two?)' if lines_seen.count(f['where']) > 1 else '')
+            for f in findings] or ['  none']
     out += ['', 'could not verify:']
     out += [f"  {group}: {claim}{'' if blocking else '  (P3, does not block)'}"
             for group, claim, blocking in open_claims] or ['  none']

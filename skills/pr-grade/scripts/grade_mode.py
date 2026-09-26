@@ -75,7 +75,8 @@ def matches(path: str, patterns: list[str]) -> str | None:
 def code_files(changed: list[str], config: dict) -> list[str]:
     """Changed files that count toward size: those `countAsCode` lists, and the rest that are neither tests
     nor `notCode`."""
-    listed = set(config['countAsCode'])
+    # A caller that embeds the selector may build its config without this key.
+    listed = set(config.get('countAsCode', ()))
     return [p for p in changed if p in listed or not matches(p, config['tests']) and not matches(p, config['notCode'])]
 
 

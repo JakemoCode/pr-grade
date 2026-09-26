@@ -6,7 +6,7 @@ CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` wi
 
 ## 0.7.0
 
-- `countAsCode` in `.claude/pr-grade.json` lists exact paths that count toward size even when `notCode` matches them, such as a manifest under `docs/` that the code reads. The mode selector, `grade_prep.py`, and `grade_block.py check` all read it, and a listed path changed after the grade counts as code changed.
+- `countAsCode` in `.claude/pr-grade.json` lists exact paths that count toward size even when `notCode` matches them, such as a manifest under `docs/` that the code reads. The mode selector, `grade_prep.py` (its modes, callers, and L7 scan), `check_then_act.py`, and `grade_block.py check` all read it, and a listed path changed after the grade counts as code changed.
 - `grade_block.py merge` joins a line indented under a report item to that item, so a wrapped `Could not verify` claim is one claim. It used to count the second line as a claim of its own, and as blocking.
 - `Verified and clear` clears a lens only when its item is lens ids alone or followed by a note in parentheses. `L2 not applicable` no longer clears L2, in `merge` or in `check`, and `L1 L2 L4` in one item clears all three.
 - When a lens is unassessed, the draft block's `Blocking` names it instead of reading `nothing` under a 2/5.

@@ -168,9 +168,13 @@ def sweep(parent: Path, repo: Path, now: float) -> None:
     coordinator had not merged yet, and a root another repository made is that repository's to sweep."""
     for old in parent.glob(PREFIX + '*'):
         marker = old / MARKER
-        if old.is_symlink() or not marker.is_file() or marker.read_text().split('\n', 1)[0] != str(repo):
+        try:
+            if old.is_symlink() or marker.read_text().split('\n', 1)[0] != str(repo):
+                continue
+            last = max(path.stat().st_mtime for path in [marker, *old.glob('*/report.md')])
+        except OSError:
+            # Gone under a concurrent sweep, or unreadable: either way not this call's to remove.
             continue
-        last = max(path.stat().st_mtime for path in [marker, *old.glob('*/report.md')])
         if now - last > STALE_AFTER:
             shutil.rmtree(old, ignore_errors=True)
 

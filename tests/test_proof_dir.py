@@ -233,6 +233,11 @@ class RemoveTest(Fixture):
         self.make()
         self.assertTrue((root / 'grade' / 'report.md').exists())
 
+    def test_a_root_without_a_readable_marker_is_skipped_not_fatal(self) -> None:
+        # A concurrent sweep can remove a root between the glob and the read.
+        (self.parent / f'{proof_dir.PREFIX}gone').mkdir()
+        self.assertIn('copy grade', self.make())
+
     def test_another_repositorys_root_is_left_to_it(self) -> None:
         other = self.parent.parent / 'other'
         other.mkdir()

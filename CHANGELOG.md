@@ -4,6 +4,14 @@ Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an 
 
 CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` without raising the version and adding its heading here. Label one `hold-release` to merge it unreleased, when a change lands over several pull requests.
 
+## 0.5.0
+
+- The grade agent reads the skill it applies at `${CLAUDE_PLUGIN_ROOT}/skills/pr-grade/SKILL.md`, the copy installed with it, and never searches the filesystem. Graders that searched spent up to eight of fifty turns on it and read three different installed versions.
+- The agent's `description` names everything a dispatch carries, so a coordinator that never loads the skill still sees the contract: the repository and lens file paths, base and head SHAs, lenses, settled checks, declined findings, the callers list, and the L7 scanner output.
+- A turn budget the grader can follow: parallel calls for everything it already knows it needs, whole-file reads for short files, `git grep -a` at the graded commit, shell forms a worktree-isolated session accepts, and a proof ladder of three runs per finding. "Report by turn 45" is gone; a grader cannot see its turn number.
+- The report closes every lens with a sentence and adds `Outside my lenses`. An unproven claim that would be a P1 or P2 keeps its lens out of `Verified and clear` and caps the score at 4.
+- The coordinator merges graders' reports before it scores, sends a capped grader one message to report, reviews fix commits and merges before re-grading them, and passes the callers list, found with `git grep -a`, to every grader.
+
 ## 0.4.0
 
 - A repository that embeds the scripts can pass in its own rules. `grade_mode.assess` takes `named`, exact paths mapped to the reason each is a silent-failure file, and `grade_block.problems` takes `assess`, a selector to use in place of the plugin's.

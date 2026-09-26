@@ -28,7 +28,7 @@ The scripts use only the Python standard library (3.9 or later). `check` also ne
 
 This is from the pull request that added the grade check to a repository's own merge flow, with its file names generalized. The change made the local `check-pr` command refuse a PR without a current grade. `/code-review high` came back with ten findings, and none of them was about CI.
 
-`grade_mode.py` put the change at `fan-out`, so three `grade` agents read it. The timing group (L1, L2, L7) returned:
+`grade_mode.py` put the change at `fan-out`, so three `grade` agents read it. The timing group (L1, L2, L7) returned this, in the report shape before 0.5.0, which added a closing line per lens and `Outside my lenses`:
 
 ```
 Score: 4/5

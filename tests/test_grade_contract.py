@@ -15,8 +15,7 @@ AGENT = (ROOT / 'agents/grade.md').read_text()
 SKILL = (ROOT / 'skills/pr-grade/SKILL.md').read_text()
 # What a grader needs from the coordinator. A coordinator that never loads the skill sees only the
 # agent's description, so each one has to be named there, in the agent's Inputs, and in the skill.
-DISPATCH = ['repository', 'lens file', 'base', 'head', 'lenses', 'settled', 'declined', 'callers',
-            'check_then_act.py']
+DISPATCH = ['repository', 'lens file', 'base and head', 'settled', 'declined', 'callers', 'check_then_act.py']
 
 
 def frontmatter(text: str) -> dict[str, str]:

@@ -26,7 +26,7 @@ Without them the generic lenses below apply, and the selector uses its defaults.
 
 `git diff origin/main...HEAD --stat`, plus any uncommitted work, then read every changed hunk. Grade the change itself, never a summary of it.
 
-For every function you modified rather than added, list its callers with the repository's own search, for example `grep -rn '<functionName>' --include='*.<ext>' .` with vendored directories excluded. Write the list down. L4 uses it, and it is the lens that most often fires.
+For every function, method, type, or option you modified rather than added, list its callers with file and line, for example `git grep -n -a -w -e '<name>' -- . ':!<vendored dir>'`. A plain `grep` or `rg` skips a file it takes for binary: on one branch that hid a caller behind a single NUL byte. `-e` keeps a name like `--base` from being read as an option. Write the list down with the command that found it. It goes to every grader, and L4, the lens that most often fires, starts from it.
 
 Grade after a correctness review, never alongside one. Run the review the repository uses, fix what it proves, and commit. Keep each finding you declined, with the reason. This skill was built against Claude Code's `/code-review`, but any review that returns findings works the same way: another plugin, a second model, or a person's comments. Grading first spends the graders' turns re-finding what the review catches: on one pull request, four of the graders' seven findings were already in the review. With no review, grade anyway; the lenses do not depend on one.
 
@@ -52,9 +52,13 @@ python3 <base>/scripts/check_then_act.py
 
 It scans the functions the branch changed and prints each check, the await or boundary after it, and the writes that rely on it. TypeScript and JavaScript need Node and the repository's own `typescript` package, and Python needs nothing; the scanner says which files it skipped and why.
 
-A grading agent needs the diff range, the lens file path, its lenses, the scanner's output when it holds L7, the review findings you declined with their reasons, and a list of what is already settled: the tests, type checks, and other deterministic checks that already passed. Their results are inputs, never questions to reopen, and re-running them is how a grader runs out of turns before it reports.
+A grading agent needs what the `description` of `agents/grade.md` lists, pasted into its prompt: the repository's absolute path, the lens file's absolute path or "none", the base and head as full SHAs, its lenses, the callers list with its command, the scanner's output when it holds L7, the review findings you declined with their reasons, and a list of what is already settled. The base is the branch point, `git merge-base origin/main HEAD`, as a SHA: `origin/main` itself moves when anything fetches, and once main moves past the branch point a diff against it shows main's new work as this change reverting it. A grader told where nothing is searches the filesystem for it, and graders who did spent up to eight of their fifty turns on it and read three different installed copies of this file.
+
+Settled means the tests, type checks, and other deterministic checks that already passed at the head, with their results. They are inputs, never questions to reopen, and re-running them is how a grader runs out of turns before it reports. Nothing else is settled: a recorded decision, a comment saying the behaviour is intended, or an earlier grade is a claim the lenses grade. Never tell a grader an earlier score.
 
 Pass the declined findings as the review returned them, in whatever form it used. Leave out the ones you fixed: the fix is in the diff, and a grader should judge it without being told it is right.
+
+A grader has fifty turns and cannot see which one it is on. When the harness says one stopped at its turn limit, send it one message with SendMessage: "Stop investigating and report now, in your report shape, from what you have. Put every claim you have not proven under Could not verify." Do not ask it to continue; a turn spent investigating is not spent reporting. Below the grade block, say which graders needed that message. When a group's grader stops at its limit in two rounds, split the group next round, one grader per lens. Each extra grader reads the whole change again, so split no sooner.
 
 ## 3. The eight lenses
 
@@ -164,6 +168,16 @@ Rank findings `P1` (fix before merge), `P2` (fix or justify), `P3` (note). The s
 
 Rank by what the defect does to a run. When a run fails either way, in the same direction, and the only defect is how the failure reads, such as a traceback where a message belongs, the finding is a P3. That holds in a re-grade whose fix was itself about messages, where the next traceback looks like the fix left unfinished.
 
+With more than one grader, merge their reports before you score. Two graders on one branch each scored the same proven P1 as 2/5, and a third cleared the path it broke as outside its lenses.
+
+- Keep one list of findings. Two graders that name the same defect, the same cause reaching the same wrong state, are one finding: keep the stronger proof and name both lenses.
+- A proof beats a clearance. When one grader clears what another proves, the finding stands. If the clearance names a sub-claim that would break the proof, run it.
+- A defect a grader lists under `Outside my lenses` belongs to the lens it names. Prove it, or carry it to `Could not verify`.
+- Every lens ends clear, as a finding, or under `Could not verify`. When a report leaves one of its lenses in none of the three, ask that grader which, in one message, before you write the block.
+- Score the change yourself from the merged list. A grader's score covers only its own lenses.
+
+Then take `Could not verify` item by item. For a claim that would be a P1 or P2 if true, prove or refute it yourself, or dispatch one grader with only that claim, its lens, and what was tried. What survives that one attempt stays under `Could not verify`, labelled a guess. Its lens stays out of `Verified and clear`, it scores as the finding it would be, and the guess is the `Blocking` sentence, for a person to decide. A guess that would only be a P3 leaves the score where it is.
+
 ## 6. Report it
 
 Report in this shape. The `## Grade` block goes in the PR body exactly as written, one field per line and outside any code block, because `grade_block.py check` reads it:
@@ -187,7 +201,9 @@ Say each finding once.
 
 ## 7. Fix, then re-grade
 
-Commit the fixes, then size the re-grade by the fix commits alone:
+Commit the fixes and review them the way step 1 reviews the change, keeping what you declined for the graders. A merge from the base branch is a change too. On one branch, two graders each spent their whole budget proving a defect a merge brought in, and the review run after them found it in twenty turns.
+
+Then size the re-grade by the fix commits alone:
 
 ```sh
 python3 <base>/scripts/grade_mode.py --base <the last commit graded>

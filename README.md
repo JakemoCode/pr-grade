@@ -16,7 +16,7 @@ A correctness review asks whether the code does the right thing. The defects tha
 | Piece | What it does |
 |---|---|
 | `pr-grade` skill | The eight lenses, the proof rule, the score, and the report shape. Run `/pr-grade` before opening a PR or marking one ready. |
-| `pr-grade:grade` agent | Applies named lenses to one change and proves each finding by running something. Sonnet at `xhigh`, 50 turns, read-only on the repository. |
+| `pr-grade:grade` agent | Applies named lenses to one change and proves each finding by running something. Sonnet at `high`, 50 turns, read-only on the repository. |
 | `scripts/grade_mode.py` | Picks the grading mode from the branch's changed files: `in-thread`, one `subagent`, or `fan-out` with one agent per lens group. |
 | `scripts/grade_block.py check <pr>` | Refuses a PR whose `## Grade` block is missing, below 5/5, missing a lens, in a cheaper mode than its files need, or older than its code. |
 | `scripts/check_then_act.py` | Lists the check-then-act windows (L7) in the functions a branch changed, for the grader to clear or prove. |
@@ -28,7 +28,7 @@ The scripts use only the Python standard library (3.9 or later). `check` also ne
 
 This is from the pull request that added the grade check to a repository's own merge flow, with its file names generalized. The change made the local `check-pr` command refuse a PR without a current grade. `/code-review high` came back with ten findings, and none of them was about CI.
 
-`grade_mode.py` put the change at `fan-out`, so three `grade` agents read it. The timing group (L1, L2, L7) returned:
+`grade_mode.py` put the change at `fan-out`, so three `grade` agents read it. The timing group (L1, L2, L7) returned this, in the report shape before 0.5.0, which added a closing line per lens and `Outside my lenses`:
 
 ```
 Score: 4/5

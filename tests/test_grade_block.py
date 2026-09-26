@@ -98,6 +98,10 @@ class ProblemsTest(Fixture):
     def test_lenses_in_one_item_are_each_clear(self) -> None:
         self.assertEqual(self.problems(body(**{'Verified and clear': 'L1 L2 L3 (all walked)'})), [])
 
+    def test_each_lens_in_an_item_may_carry_its_own_note(self) -> None:
+        self.assertEqual(self.problems(body(**{'Verified and clear': 'L1 (a) L2 (b), L3'})), [])
+        self.assertEqual(self.problems(body(**{'Verified and clear': 'L1 (a) L2, L3 (c (nested))'})), [])
+
     def test_a_path_counted_as_code_raises_the_required_mode(self) -> None:
         pr_files = ('.github/workflows/ci.yml', *LEAF[:3], 'docs/manifest.yaml')
         self.assertEqual(self.problems(body(), pr_files), [])
@@ -379,6 +383,17 @@ class MergeTest(unittest.TestCase):
                                                           '  - P2 L2 src/a.py:30 - maybe a second race'))
         self.write('reach', report('5/5', 'L3'))
         self.assertEqual(self.block()['Score'], '3/5')
+
+    def test_an_indented_claim_is_a_claim_of_its_own(self) -> None:
+        self.write('timing', report('5/5', 'L1', unverified='L1 P2 src/a.py:10 - maybe a race\n'
+                                                          '    L2 P2 whether close leaks the handle'))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertEqual(self.block()['Score'], '3/5')
+
+    def test_one_lens_per_line_with_notes_clears_each(self) -> None:
+        self.write('timing', report('5/5', '\nL1 (proved by test_x)\nL2 (no await)'))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertEqual(self.block()['Verified and clear'], 'L1, L2, L3')
 
     def test_a_lens_named_with_a_qualifier_is_unaccounted(self) -> None:
         self.write('timing', report('5/5', 'L1, L2 not applicable'))

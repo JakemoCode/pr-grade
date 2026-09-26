@@ -4,6 +4,12 @@ Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an 
 
 CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` without raising the version and adding its heading here. Label one `hold-release` to merge it unreleased, when a change lands over several pull requests.
 
+## 0.7.1
+
+- `Verified and clear` reads each lens id with its own note: `L1 (a) L2 (b)` and `L1 (a) L2` clear both, where 0.7.0 cleared only L1 in the first and nothing in the second. `L2 not applicable` still clears nothing.
+- `merge` reads a `Verified and clear` written one lens per line as one item per line, so `L1 (proved by test_x)` then `L3 (no await)` clears both.
+- `merge` keeps an indented line that opens with a lens id or a rank as its own claim instead of folding it into the claim above. Wrapped prose still joins.
+
 ## 0.7.0
 
 - `countAsCode` in `.claude/pr-grade.json` lists exact paths that count toward size even when `notCode` matches them, such as a manifest under `docs/` that the code reads. The mode selector, `grade_prep.py` (its modes, callers, and L7 scan), `check_then_act.py`, and `grade_block.py check` all read it, and a listed path changed after the grade counts as code changed.

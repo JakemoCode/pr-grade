@@ -34,8 +34,8 @@ without `pinnedBy` is always linked:
 
 A linked directory is still the author's: installing into it from a copy changes the author's
 checkout. `remove` deletes the link, never what it points to, and refuses a directory `make` did not
-make. `make` first removes every root it made more than a day ago, so a grade that died before
-`remove` leaves nothing behind for long.
+make. `make` first removes this repository's roots that saw no activity for a week, no copy made and
+no grader's report written, so a grade that died before `remove` leaves nothing behind for long.
 """
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ load_config, repo_root = grade_mode.load_config, grade_mode.repo_root
 
 PREFIX = 'pr-grade-proof-'
 MARKER = '.pr-grade-proof'
-STALE_AFTER = 24 * 60 * 60
+STALE_AFTER = 7 * 24 * 60 * 60
 NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]*')
 DEFAULTS = [
     {'path': 'node_modules', 'pinnedBy': ['package.json', 'package-lock.json', 'npm-shrinkwrap.json',
@@ -162,12 +162,16 @@ def link(repo: Path, sha: str, wanted: list[dict], configured: bool, copies: lis
     return lines
 
 
-def sweep(parent: Path, now: float) -> None:
-    """Removes roots made here more than STALE_AFTER ago: their grade is over, whether or not it ran
-    `remove`."""
+def sweep(parent: Path, repo: Path, now: float) -> None:
+    """Removes this repository's roots that saw no activity for STALE_AFTER: nothing made, and no report
+    written. Age from the root's creation alone deleted a round whose graders had reported but whose
+    coordinator had not merged yet, and a root another repository made is that repository's to sweep."""
     for old in parent.glob(PREFIX + '*'):
         marker = old / MARKER
-        if not old.is_symlink() and marker.is_file() and now - marker.stat().st_mtime > STALE_AFTER:
+        if old.is_symlink() or not marker.is_file() or marker.read_text().split('\n', 1)[0] != str(repo):
+            continue
+        last = max(path.stat().st_mtime for path in [marker, *old.glob('*/report.md')])
+        if now - last > STALE_AFTER:
             shutil.rmtree(old, ignore_errors=True)
 
 
@@ -177,7 +181,7 @@ def make(repo: Path, sha: str, names: list[str], config: dict, parent: Path, sin
     if not all(NAME.fullmatch(n) for n in names) or len(set(names)) != len(names):
         sys.exit(f"copy names must be distinct, made of letters, digits, '-' and '_': {' '.join(names)}")
     wanted = entries(config)
-    sweep(parent, time.time())
+    sweep(parent, repo, time.time())
     common = (repo / git(repo, 'rev-parse', '--git-common-dir').strip()).resolve()
     root = Path(tempfile.mkdtemp(prefix=PREFIX, dir=parent)).resolve()
     try:

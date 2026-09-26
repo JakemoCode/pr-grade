@@ -171,6 +171,17 @@ class CliTest(unittest.TestCase):
         self.assertIn('defined other.py:1, store.py:1:', line)
         self.assertNotIn('other.py:1,', line.split(': ', 1)[1])
 
+    def test_a_modified_dunder_is_named_as_not_derived(self) -> None:
+        git(self.repo, 'checkout', '-q', 'main')
+        (self.repo / 'box.py').write_text('class Box:\n    def __repr__(self):\n        return "a"\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'box')
+        git(self.repo, 'checkout', '-q', 'topic')
+        git(self.repo, 'merge', '-q', '--no-edit', 'main')
+        (self.repo / 'box.py').write_text('class Box:\n    def __repr__(self):\n        return "b"\n')
+        git(self.repo, 'commit', '-q', '-am', 'change repr')
+        self.assertIn('- not derived for box.py:2 `Box.__repr__`: an entry point or dunder', self.prep())
+
     def test_a_file_the_author_never_added_is_left_out(self) -> None:
         (self.repo / 'scratch.py').write_text('def claim(z):\n    return z\n')
         out = self.prep()

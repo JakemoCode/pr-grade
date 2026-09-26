@@ -213,14 +213,38 @@ class RemoveTest(Fixture):
             proof_dir.remove(self.repo)
         self.assertTrue((self.repo / 'package.json').exists())
 
-    def test_make_sweeps_roots_older_than_a_day_and_keeps_the_rest(self) -> None:
+    def age(self, path: Path) -> None:
+        stale = time.time() - proof_dir.STALE_AFTER - 60
+        os.utime(path, (stale, stale))
+
+    def test_make_sweeps_this_repositorys_idle_roots_and_keeps_the_rest(self) -> None:
         old, recent = Path(self.make()['root']), Path(self.make()['root'])
-        day_ago = time.time() - proof_dir.STALE_AFTER - 60
-        os.utime(old / proof_dir.MARKER, (day_ago, day_ago))
+        self.age(old / proof_dir.MARKER)
         self.make()
         self.assertFalse(old.exists())
         self.assertTrue(recent.exists())
         self.assertTrue(self.installed())
+
+    def test_a_report_written_since_keeps_an_old_root(self) -> None:
+        # Graders reported and the coordinator has not merged yet: the round is not over.
+        root = Path(self.make()['root'])
+        self.age(root / proof_dir.MARKER)
+        (root / 'grade' / 'report.md').write_text('Score: 5/5\n')
+        self.make()
+        self.assertTrue((root / 'grade' / 'report.md').exists())
+
+    def test_another_repositorys_root_is_left_to_it(self) -> None:
+        other = self.parent.parent / 'other'
+        other.mkdir()
+        git(other, 'init', '-q', '-b', 'main')
+        (other / 'x.txt').write_text('x\n')
+        git(other, 'add', '-A')
+        git(other, 'commit', '-q', '-m', 'x')
+        theirs = Path(fields(proof_dir.make(other, git(other, 'rev-parse', 'HEAD').strip(), ['grade'], {},
+                                            self.parent))['root'])
+        self.age(theirs / proof_dir.MARKER)
+        self.make()
+        self.assertTrue(theirs.exists())
 
     def test_the_printed_remove_line_undoes_the_printed_make(self) -> None:
         env = {**os.environ, 'TMPDIR': str(self.parent)}

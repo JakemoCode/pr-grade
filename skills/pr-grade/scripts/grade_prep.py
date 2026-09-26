@@ -127,7 +127,13 @@ def modified_functions(root: Path, fork: str, lines: dict, config: dict) -> tupl
         for fn in parsed.get(file, []):
             first, last = fn['span'][0][0], fn['span'][1][0]
             name = symbol(fn['name'])
-            if name is None or (ranges is not None and not any(start <= last and first <= end for start, end in ranges)):
+            if ranges is not None and not any(start <= last and first <= end for start, end in ranges):
+                continue
+            if name is None:
+                # Say so, so a changed method missing from the list reads as skipped, never as uncalled.
+                if not fn['name'].startswith('<') and ' > ' not in fn['name']:
+                    notes.append(f"{file}:{first} `{fn['name']}`: an entry point or dunder, which the language "
+                                 'calls implicitly')
                 continue
             # A function new on the branch has no caller the branch did not write.
             if git(root, 'grep', '-q', '-w', '-e', name, fork, '--', file, check=False).returncode == 0:

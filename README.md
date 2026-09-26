@@ -16,7 +16,7 @@ A correctness review asks whether the code does the right thing. The defects tha
 | Piece | What it does |
 |---|---|
 | `pr-grade` skill | The eight lenses, the proof rule, the score, and the report shape. Run `/pr-grade` before opening a PR or marking one ready. |
-| `pr-grade:grade` agent | Applies named lenses to one change and proves each finding by running something. Sonnet at `xhigh`, 50 turns, read-only on the repository. |
+| `pr-grade:grade` agent | Applies named lenses to one change and proves each finding by running something. Sonnet at `high`, 50 turns, read-only on the repository. |
 | `scripts/grade_mode.py` | Picks the grading mode from the branch's changed files: `in-thread`, one `subagent`, or `fan-out` with one agent per lens group. |
 | `scripts/grade_block.py check <pr>` | Refuses a PR whose `## Grade` block is missing, below 5/5, missing a lens, in a cheaper mode than its files need, or older than its code. |
 | `scripts/check_then_act.py` | Lists the check-then-act windows (L7) in the functions a branch changed, for the grader to clear or prove. |

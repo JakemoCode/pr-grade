@@ -10,6 +10,7 @@ CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` wi
 - The agent's `description` names everything a dispatch carries, so a coordinator that never loads the skill still sees the contract: the repository and lens file paths, base and head SHAs, lenses, settled checks, declined findings, the callers list, and the L7 scanner output.
 - A turn budget the grader can follow: parallel calls for everything it already knows it needs, whole-file reads for short files, `git grep -a` at the graded commit, shell forms a worktree-isolated session accepts, and a proof ladder of three runs per finding. "Report by turn 45" is gone; a grader cannot see its turn number.
 - The report closes every lens with a sentence and adds `Outside my lenses`. An unproven claim that would be a P1 or P2 keeps its lens out of `Verified and clear` and scores as the finding it would be.
+- The grade agent runs at `high` effort instead of `xhigh`. Most of a grader's turns are reading and judgment, and Anthropic's guidance keeps `xhigh` for the hardest coding and agentic work.
 - The coordinator merges graders' reports before it scores, sends a capped grader one message to report, reviews fix commits and merges before re-grading them, and passes the callers list, found with `git grep -a`, to every grader.
 
 ## 0.4.0

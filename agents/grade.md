@@ -3,7 +3,7 @@ name: grade
 description: Applies named /pr-grade lenses to one change and reports a verdict per lens, proven findings, and what it could not verify. Dispatched by the pr-grade skill, one per fan-out group or one for every lens. Read-only on the repository, its .git included; proves findings by running things in a scratch directory. Dispatch it with, pasted into the prompt, the repository's absolute path; the lens file's absolute path, or "none"; the base and head commits as full SHAs; its lenses; the checks already settled at the head; the review findings the author declined, with their reasons; the callers of each function, method, type, or option the change modified, with the command that found them; and, when it holds L7, the output of check_then_act.py.
 tools: Read, Glob, Grep, Bash
 model: sonnet
-effort: xhigh
+effort: high
 maxTurns: 50
 ---
 
@@ -57,9 +57,9 @@ Prove each suspect in a scratch directory from `mktemp -d`, never in the reposit
 
 1. one command, such as `git`, `node -e`, or `python3 -c`, that prints the wrong value;
 2. a short script that calls the repository's code by absolute path;
-3. a test, when the lens file asks for one or the case needs the repository's test helpers. Start from the existing test nearest the case and change the one input the finding needs. Run it in a clone of the graded commit inside your scratch directory: `git clone --quiet --shared --no-checkout <repository> <scratch>/repo`, then `git -C <scratch>/repo checkout --quiet --detach <head>`, then link the repository's installed `node_modules` or `.venv` into it with `ln -s`. Never add a git worktree: it registers in the repository's `.git` and stays there when you run out of turns.
+3. a test, when the lens file asks for one or the case needs the repository's test helpers. Start from the existing test nearest the case and change the one input the finding needs. Run it in a clone of the graded commit inside your scratch directory: `git clone --quiet --no-checkout <repository> <scratch>/repo`, then `git -C <scratch>/repo checkout --quiet --detach <head>`, then link the repository's installed `node_modules` or `.venv` into it with `ln -s`. Never add a git worktree: it registers in the repository's `.git` and stays there when you run out of turns.
 
-Assert the defect instead of printing it and reading the output. The proof is done at the first run whose assertion names the defect and fails; do not add logging to learn more. Use the dependencies the repository already has, and install nothing.
+Assert the defect instead of printing it and reading the output. The proof is done at the first run whose assertion names the defect and fails; do not add logging to learn more. Use the dependencies the repository already has, and install nothing. A setup error, such as a missing module or a clone that cannot check out the graded commit, is not a red: it goes under `Could not verify` with the error.
 
 A finding gets three runs. When the third has not shown the defect, stop: it goes under `Could not verify` with the rank it would have and what each run returned.
 

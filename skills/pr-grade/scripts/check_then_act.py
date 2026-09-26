@@ -469,7 +469,10 @@ def render(result: dict) -> str:
     lines = [f"check-then-act candidates (L7): {len(result['candidates'])} in {scanned} {where}.{skipped} "
              'Each is a window to judge, not a finding.']
     for c in result['candidates']:
-        lines += ['', f"{c['file']}:{c['span'][0]}  {c['function']}"]
+        # A function the branch touched elsewhere can hold a window the branch did not open; say so, so the
+        # grader weighs it without re-running the scan for `inDiff`.
+        untouched = '  (check, gap, and writes unchanged by this diff)' if result['scope'] == 'diff' and not c['inDiff'] else ''
+        lines += ['', f"{c['file']}:{c['span'][0]}  {c['function']}{untouched}"]
         for check in c['checks']:
             reads = ', '.join(f"{r['callee']} ({r['line']})" for r in check['reads'])
             same = f", same store as write {', '.join(map(str, check['sameStoreWrites']))}" if check['sameStoreWrites'] else ''

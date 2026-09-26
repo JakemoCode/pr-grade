@@ -60,7 +60,7 @@ class GroupsTest(unittest.TestCase):
 class SymbolTest(unittest.TestCase):
     def test_what_a_caller_writes(self) -> None:
         cases = {'claim': 'claim', 'Store.claim': 'claim', 'Store.__init__': 'Store', 'Store.constructor': 'Store',
-                 'run > items.map callback': None, '<anonymous>@12': None}
+                 'run > items.map callback': None, '<anonymous>@12': None, 'main': None, 'Store.__repr__': None}
         for name, expected in cases.items():
             with self.subTest(name=name):
                 self.assertEqual(grade_prep.symbol(name), expected)

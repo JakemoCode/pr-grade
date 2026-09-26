@@ -95,11 +95,15 @@ def groups_for(mode: str, lenses: list[str], lens_text: str | None, given: list[
 
 def symbol(name: str) -> str | None:
     """What a caller writes to reach a function the adapters named: the method, or the class for a
-    constructor. None for a callback or an anonymous function, which nothing calls by name."""
+    constructor. None for a callback or an anonymous function, which nothing calls by name, and for an
+    entry point: every script has a `main` and every class a `__repr__`, so a search for one lists the
+    rest, not callers."""
     if ' > ' in name or name.startswith('<'):
         return None
     head, _, last = name.rpartition('.')
-    return head.rpartition('.')[2] if last in ('constructor', '__init__') and head else last
+    if last in ('constructor', '__init__'):
+        return head.rpartition('.')[2] or None
+    return None if last == 'main' or (last.startswith('__') and last.endswith('__')) else last
 
 
 def modified_functions(root: Path, fork: str, lines: dict, config: dict) -> tuple[dict[str, list[str]], list[str]]:

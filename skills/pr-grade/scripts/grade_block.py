@@ -65,6 +65,7 @@ REPORT_LINE = re.compile(r'^(Score|Blocking|Verified and clear|Could not verify|
                          r'[ \t]*(.*)$')
 FINDING = re.compile(r'^(P[123])[ \t]+((?:L\d+[ \t,]*)*)(\S+:\d+)[ \t]+-[ \t]+(.+)$')
 BLOCKING = re.compile(r'\bP[12]\b')
+BULLET = re.compile(r'([-*+]|\d+[.)])[ \t]')
 
 
 def without_code(markdown: str) -> str:
@@ -147,7 +148,7 @@ def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[
 def read_report(text: str) -> dict:
     """A grader's report as its fields and findings. A field runs on to the next field, finding, or
     closing line, and each of its lines is one item, joined by any more-indented lines that follow it:
-    a claim wrapped onto a second line is still one claim. Under `Could not verify` or `Outside
+    a claim wrapped onto a second line is still one claim. A bullet starts a new item at any depth. Under `Could not verify` or `Outside
     my lenses` a line shaped like a finding is still an item of that field: an unproven P2 is a claim."""
     fields: dict[str, list[str]] = {}
     findings, current, indent = [], None, None
@@ -159,6 +160,7 @@ def read_report(text: str) -> dict:
         finding, field = FINDING.match(line), REPORT_LINE.match(line)
         if finding and current in ('Could not verify', 'Outside my lenses'):
             fields[current].append(line)
+            indent = depth if indent is None else indent
         elif finding:
             findings.append({'rank': finding[1], 'lenses': LENS_ID.findall(finding[2]), 'where': finding[3],
                              'title': finding[4].strip()})
@@ -167,7 +169,7 @@ def read_report(text: str) -> dict:
             current = field[1]
             fields[current] = [field[2].strip()] if field[2].strip() else []
             indent = depth if fields[current] else None
-        elif current and line and fields[current] and indent is not None and depth > indent:
+        elif current and line and fields[current] and indent is not None and depth > indent and not BULLET.match(line):
             fields[current][-1] += ' ' + line
         elif current and line:
             fields[current].append(line)

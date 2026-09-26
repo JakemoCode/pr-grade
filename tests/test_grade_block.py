@@ -374,6 +374,12 @@ class MergeTest(unittest.TestCase):
         self.assertIn('P3, does not block', self.merged())
         self.assertEqual(self.block()['Score'], '4/5')
 
+    def test_an_indented_bullet_is_a_claim_of_its_own(self) -> None:
+        self.write('timing', report('5/5', 'L1', unverified='P2 L2 src/a.py:10 - maybe a race\n'
+                                                          '  - P2 L2 src/a.py:30 - maybe a second race'))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertEqual(self.block()['Score'], '3/5')
+
     def test_a_lens_named_with_a_qualifier_is_unaccounted(self) -> None:
         self.write('timing', report('5/5', 'L1, L2 not applicable'))
         self.write('reach', report('5/5', 'L3'))

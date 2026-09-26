@@ -15,6 +15,9 @@ line, for a repository that already keeps that list somewhere (a map, a guarante
     silent, or more than fanOutAbove           subagent
     neither                                    in-thread
 
+`countAsCode` lists exact paths that count toward size whatever `tests` and `notCode` say, for a
+data file the repository treats as code under a directory it otherwise leaves out.
+
 Patterns are fnmatch globs. One with a `/` matches the whole path, and its `*` crosses directories;
 one without matches the file name. The branch's files include uncommitted and untracked work. Both
 sides of a rename count, so a rename can raise the mode but never lowers it.
@@ -42,6 +45,7 @@ DEFAULTS = {
     'tests': ['tests/*', 'test/*', '*/tests/*', '*/test/*', '__tests__/*', '*/__tests__/*', '*.test.*', '*.spec.*',
               '*_test.*', 'test_*'],
     'notCode': ['*.md', 'docs/*', 'LICENSE', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '*.lock', 'go.sum'],
+    'countAsCode': [],
 }
 
 
@@ -69,8 +73,10 @@ def matches(path: str, patterns: list[str]) -> str | None:
 
 
 def code_files(changed: list[str], config: dict) -> list[str]:
-    """Changed files that count toward size: neither tests nor `notCode`."""
-    return [p for p in changed if not matches(p, config['tests']) and not matches(p, config['notCode'])]
+    """Changed files that count toward size: those `countAsCode` lists, and the rest that are neither tests
+    nor `notCode`."""
+    listed = set(config['countAsCode'])
+    return [p for p in changed if p in listed or not matches(p, config['tests']) and not matches(p, config['notCode'])]
 
 
 def silent_reasons(changed: list[str], root: Path, config: dict, named: dict[str, str] | None = None) -> dict[str, str]:
@@ -106,12 +112,12 @@ def mode_for(silent: bool, code_count: int, fan_out_above: int) -> str:
 def assess(changed: list[str], root: Path, config: dict | None = None,
            named: dict[str, str] | None = None) -> tuple[str, dict[str, str], list[str]]:
     """The mode, each silent-failure file with its reason, and every file the grade must cover: all of
-    them but `notCode`, plus any silent file there. Tests are covered, since a test weakened after the
+    them but `notCode`, plus any silent file or `countAsCode` path there. Tests are covered, since a test weakened after the
     grade can undo the proof a finding rested on. `named` is as `silent_reasons` takes it."""
     config = config or load_config(root)
     reasons, code = silent_reasons(changed, root, config, named), code_files(changed, config)
     mode = mode_for(bool(reasons), len(code), config['fanOutAbove'])
-    return mode, reasons, [p for p in changed if p in reasons or not matches(p, config['notCode'])]
+    return mode, reasons, [p for p in changed if p in reasons or p in code or not matches(p, config['notCode'])]
 
 
 def changed_files(base: str, root: Path) -> list[str]:

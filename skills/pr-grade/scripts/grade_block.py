@@ -59,6 +59,7 @@ SECTION = re.compile(r'(?ms)^##[ \t]+Grade[ \t]*$(.*?)(?=^##[ \t]|\Z)')
 FIELD = re.compile(r'(?m)^(Mode|Graded|Score|Verified and clear):[ \t]*(.*?)[ \t]*$')
 LENS_HEADING = re.compile(r'(?m)^###[ \t]+(L\d+)\.')
 LENS_ID = re.compile(r'L\d+\b')
+CLEAR_ITEM = re.compile(r'((?:L\d+\b[ \t]*)+)(?:\(.*\))?\.?')
 SHA = re.compile(r'[0-9a-f]{40}')
 REPORT_LINE = re.compile(r'^(Score|Blocking|Verified and clear|Could not verify|Outside my lenses|L7 candidates|L\d+):'
                          r'[ \t]*(.*)$')
@@ -77,6 +78,14 @@ def lens_ids(text: str | None) -> list[str]:
     with no code change. The skill's eight apply without a file, or when no heading matches, so a
     reworded heading can never leave nothing required."""
     return (LENS_HEADING.findall(text) if text else []) or DEFAULT_LENSES
+
+
+def verified_lenses(text: str) -> set[str]:
+    """The lenses a `Verified and clear` value clears. Each comma-separated item names its lenses first,
+    alone or followed by a note in parentheses: `L1 L2` clears both, `L3 (L2 not applicable)` clears L3
+    only, and `L2 not applicable` clears nothing, since only the grader knows what the words meant."""
+    items = re.split(r',(?![^()]*\))', text)
+    return {lens for item in items if (m := CLEAR_ITEM.fullmatch(item.strip())) for lens in LENS_ID.findall(m[1])}
 
 
 def parse(body: str) -> dict[str, str] | None:
@@ -112,8 +121,7 @@ def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[
         found.append(f'Graded {mode}, but this change requires {required} ({why}). Re-grade.')
     if block.get('Score') != '5/5':
         found.append(f"Grade score is {block.get('Score') or 'missing'}; the PR goes ready only at 5/5.")
-    # Each comma-separated item names its lens first; "L3 (L2 not applicable)" verifies L3 only.
-    verified = {m[0] for item in block.get('Verified and clear', '').split(',') if (m := LENS_ID.match(item.strip()))}
+    verified = verified_lenses(block.get('Verified and clear', ''))
     missing = [lens for lens in lenses if lens not in verified]
     if missing:
         found.append(f"`Verified and clear` leaves out {', '.join(missing)}. Apply every lens.")
@@ -138,14 +146,16 @@ def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[
 
 def read_report(text: str) -> dict:
     """A grader's report as its fields and findings. A field runs on to the next field, finding, or
-    closing line, and each line of `Could not verify` is one claim. Under `Could not verify` or `Outside
+    closing line, and each of its lines is one item, joined by any more-indented lines that follow it:
+    a claim wrapped onto a second line is still one claim. Under `Could not verify` or `Outside
     my lenses` a line shaped like a finding is still an item of that field: an unproven P2 is a claim."""
     fields: dict[str, list[str]] = {}
-    findings, current = [], None
+    findings, current, indent = [], None, None
     for raw in text.splitlines():
         line = raw.strip()
         if line.startswith('```'):
             continue
+        depth = len(raw) - len(raw.lstrip())
         finding, field = FINDING.match(line), REPORT_LINE.match(line)
         if finding and current in ('Could not verify', 'Outside my lenses'):
             fields[current].append(line)
@@ -156,8 +166,12 @@ def read_report(text: str) -> dict:
         elif field:
             current = field[1]
             fields[current] = [field[2].strip()] if field[2].strip() else []
+            indent = depth if fields[current] else None
+        elif current and line and fields[current] and indent is not None and depth > indent:
+            fields[current][-1] += ' ' + line
         elif current and line:
             fields[current].append(line)
+            indent = depth if indent is None else indent
     return {'fields': fields, 'findings': findings}
 
 
@@ -192,8 +206,7 @@ def merge(proof_root: Path) -> str:
                     status[lens] = f'open claim from {group}'
         outside += [f'{group}: {item}' for item in fields.get('Outside my lenses', [])
                     if item.lower().rstrip('.') != 'none']
-        verified = {m[0] for item in ' '.join(fields.get('Verified and clear', [])).split(',')
-                    if (m := LENS_ID.match(item.strip()))}
+        verified = verified_lenses(' '.join(fields.get('Verified and clear', [])))
         for lens in held:
             status.setdefault(lens, 'clear' if lens in verified else f'unaccounted: ask {group} which')
     blocking_findings = [f for f in findings if f['rank'] != 'P3']
@@ -201,7 +214,9 @@ def merge(proof_root: Path) -> str:
     unapplied = [lens for lens in lenses if not status.get(lens, '').startswith(('clear', 'P', 'open'))]
     floor = 2 if unapplied else 5 if count == 0 else 4 if count == 1 else 3
     clear = [lens for lens in lenses if status.get(lens) == 'clear']
-    first = (blocking_findings[0]['title'] if blocking_findings
+    # A 2 comes from a lens no report assessed, so that explains the score before any finding does.
+    first = ('not assessed: ' + '; '.join(f"{lens} ({status.get(lens, 'not held by any grader')})" for lens in unapplied)
+             if unapplied else blocking_findings[0]['title'] if blocking_findings
              else next((claim for _, claim, blocking in open_claims if blocking), None))
     out += ['reports: ' + (', '.join(scores) or 'none'), '', 'lenses:']
     out += [f'  {lens}  {status.get(lens, "not held by any grader")}' for lens in lenses]

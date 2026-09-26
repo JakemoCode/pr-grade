@@ -64,6 +64,16 @@ class ModeTest(Fixture):
                    'README.md', 'package-lock.json', 'Cargo.lock']
         self.assertEqual(self.assess(changed)[0], 'subagent')
 
+    def test_a_path_counted_as_code_counts_toward_size_under_not_code(self) -> None:
+        changed = ['.github/workflows/ci.yml', *LEAF[:3], 'docs/manifest.yaml']
+        self.assertEqual(self.assess(changed)[0], 'subagent')
+        self.configure(countAsCode=['docs/manifest.yaml'])
+        self.assertEqual(self.assess(changed)[0], 'fan-out')
+
+    def test_a_path_counted_as_code_is_exact_not_a_pattern(self) -> None:
+        self.configure(countAsCode=['docs/*', 'manifest.yaml'])
+        self.assertEqual(self.assess(['.github/workflows/ci.yml', *LEAF[:3], 'docs/manifest.yaml'])[0], 'subagent')
+
 
 class SilentTest(Fixture):
     def test_default_silent_paths(self) -> None:
@@ -123,6 +133,10 @@ class CoverageTest(Fixture):
     def test_a_silent_file_among_not_code_is_covered(self) -> None:
         self.assertEqual(self.assess(['.claude/pr-grade-lenses.md', 'docs/a.md'])[2], ['.claude/pr-grade-lenses.md'])
 
+
+    def test_a_path_counted_as_code_among_not_code_is_covered(self) -> None:
+        self.configure(countAsCode=['docs/owners.yaml'])
+        self.assertEqual(self.assess(['docs/owners.yaml', 'docs/a.md'])[2], ['docs/owners.yaml'])
 
 class ChangedFilesTest(Fixture):
     def test_committed_uncommitted_and_untracked_work_is_included(self) -> None:

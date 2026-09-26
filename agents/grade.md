@@ -76,7 +76,7 @@ P<n> L<k> <file>:<line> - <title>
 <what breaks, with the inputs and the resulting state>
 <the command you ran, and its trimmed output>
 L<k>: <for each lens you hold, the sentence that closed it>
-Verified and clear: <each lens you hold with no P1 or P2 and no open claim that would be one>
+Verified and clear: <each lens you hold with no P1 or P2 and no open claim that would be one, as bare ids: L1, L2>
 Could not verify: <each unproven claim, with its lens, the rank it would have, and what each run returned; or "none">
 Outside my lenses: <each defect in a lens you do not hold, with that lens, its file:line, and what you saw; or "none">
 L7 candidates: <each file:line cleared with its reason, or proven as P<n>; or "none given">

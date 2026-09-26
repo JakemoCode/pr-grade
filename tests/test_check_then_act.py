@@ -123,3 +123,22 @@ class ConfigTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RenderTest(unittest.TestCase):
+    def result(self, scope: str, in_diff: list[str]) -> dict:
+        candidate = {'file': 'store.py', 'span': [10, 30], 'function': 'Store.claim', 'inDiff': in_diff,
+                     'checks': [{'line': 12, 'text': 'if row.free:', 'reads': [], 'sameStoreWrites': []}],
+                     'gaps': [{'line': 14, 'kind': 'await', 'text': 'await slow()'}],
+                     'writes': [{'line': 16, 'callee': 'store.claim'}]}
+        return {'scope': scope, 'scanned': {'functions': 1}, 'skipped': [], 'candidates': [candidate]}
+
+    def test_a_window_the_diff_left_alone_is_marked(self) -> None:
+        self.assertIn('Store.claim  (check, gap, and writes unchanged by this diff)', cta.render(self.result('diff', [])))
+
+    def test_a_window_the_diff_touched_is_not_marked(self) -> None:
+        self.assertNotIn('unchanged by this diff', cta.render(self.result('diff', ['gap'])))
+
+    def test_a_whole_file_scan_marks_nothing(self) -> None:
+        # --whole lists functions the branch never touched on purpose; the mark is for the diff scope.
+        self.assertNotIn('unchanged by this diff', cta.render(self.result('whole', [])))

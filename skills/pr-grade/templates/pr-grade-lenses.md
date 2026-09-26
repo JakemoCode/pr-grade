@@ -48,7 +48,7 @@ Replace every `<...>`. Delete a section that adds nothing over the skill; keep i
 
 ## Proof
 
-<How a finding is proven here, for example: a test that fails on an assertion naming the defect, run against the unfixed code and committed on its own.>
+<How a finding is proven here, for example: a test that fails on an assertion naming the defect, run against the unfixed code and committed on its own. Say where a proof test goes in a grader's proof copy so its imports resolve, and the command that runs that one file, for example `npx vitest run tests/unit/proof.test.ts` or `.venv/bin/python -m pytest tests/test_proof.py`. If a proof needs anything uncommitted beyond `node_modules` and `.venv` (a `.env.test`, generated code, a nested workspace's `node_modules`), name it under `proofDir` in `.claude/pr-grade.json`.>
 
 ## Fan-out groups
 

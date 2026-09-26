@@ -20,5 +20,10 @@
   "tests": ["tests/*", "test/*", "*/tests/*", "*/test/*", "__tests__/*", "*/__tests__/*", "*.test.*", "*.spec.*",
             "*_test.*", "test_*"],
   "notCode": ["*.md", "docs/*", "LICENSE", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "*.lock", "go.sum"],
-  "checkThenAct": {}
+  "checkThenAct": {},
+  "proofDir": [
+    {"path": "node_modules", "pinnedBy": ["package.json", "package-lock.json"], "install": "npm ci"},
+    {"path": ".venv", "pinnedBy": ["pyproject.toml", "uv.lock"], "install": "uv sync --frozen"},
+    {"path": ".env.test"}
+  ]
 }

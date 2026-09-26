@@ -26,33 +26,27 @@ Without them the generic lenses below apply, and the selector uses its defaults.
 
 `git diff origin/main...HEAD --stat`, plus any uncommitted work, then read every changed hunk. Grade the change itself, never a summary of it.
 
-For every function, method, type, or option you modified rather than added, list its callers with file and line, for example `git grep -n -a -w -e '<name>' -- . ':!<vendored dir>'`. A plain `grep` or `rg` skips a file it takes for binary: on one branch that hid a caller behind a single NUL byte. `-e` keeps a name like `--base` from being read as an option. Write the list down with the command that found it. It goes to every grader, and L4, the lens that most often fires, starts from it.
+Every grader gets the callers of what the branch modified, with file and line. `grade_prep.py` in step 2 lists them for each function in TypeScript, JavaScript, or Python that existed before the branch, with `git grep -n -a -w -e '<name>'`. A plain `grep` or `rg` skips a file it takes for binary: on one branch that hid a caller behind a single NUL byte. For a type, option, or constant you modified, or code in another language, list the callers yourself with the same command and pass them with `--callers`. L4, the lens that most often fires, starts from this list.
 
 Grade after a correctness review, never alongside one. Run the review the repository uses, fix what it proves, and commit. Keep each finding you declined, with the reason. This skill was built against Claude Code's `/code-review`, but any review that returns findings works the same way: another plugin, a second model, or a person's comments. Grading first spends the graders' turns re-finding what the review catches: on one pull request, four of the graders' seven findings were already in the review. With no review, grade anyway; the lenses do not depend on one.
 
-## 2. Pick the mode
+## 2. Pick the mode and prepare the graders
 
-Commit the change, then run the selector from inside the repository, with this skill's base directory in place of `<base>`:
+Commit the change, then run the prep from inside the repository, with this skill's base directory in place of `<base>`:
 
 ```sh
-python3 <base>/scripts/grade_mode.py
+python3 <base>/scripts/grade_prep.py --settled '<each check that passed at the head, with its result>' --declined '<each finding you declined, with its reason>'
 ```
 
-It prints `in-thread`, `subagent`, or `fan-out`, and the silent-failure files that decided it:
+It picks the mode from what the branch touches, as `grade_mode.py` does alone, and prints it with the silent-failure files that decided it:
 
 - **in-thread**: apply every lens yourself.
 - **subagent**: dispatch one `pr-grade:grade` agent to apply every lens.
 - **fan-out**: dispatch one `pr-grade:grade` agent per fan-out group. The lens file names the groups; without them use timing (L1, L2, L7), reach (L3, L4), and lifetime and contract (L5, L6, L8).
 
-Then list the check-then-act windows for L7, once, for whoever holds that lens:
+Then it prints a prompt for every grader: a shared block, and one block per grader. Paste the shared block and the grader's own block into its prompt, unchanged. The shared block holds the repository, the lens file, the base and head as full SHAs, the change as one diff command, what is settled, the declined findings, and the callers list. The base is the branch point, since `origin/main` moves when anything fetches and a diff against it shows main's new work as this change reverting it. A grader's own block holds its lenses, its proof copy, its scratch directory, and where to write its report. The grader holding L7 also gets `check_then_act.py`'s list of check-then-act windows in the functions the branch changed. For TypeScript and JavaScript the scanner needs Node and the repository's own `typescript` package; Python needs nothing, and the scanner names the files it skipped.
 
-```sh
-python3 <base>/scripts/check_then_act.py
-```
-
-It scans the functions the branch changed and prints each check, the await or boundary after it, and the writes that rely on it. TypeScript and JavaScript need Node and the repository's own `typescript` package, and Python needs nothing; the scanner says which files it skipped and why.
-
-A grading agent needs what the `description` of `agents/grade.md` lists, pasted into its prompt: the repository's absolute path, the lens file's absolute path or "none", the base and head as full SHAs, its lenses, the callers list with its command, the scanner's output when it holds L7, the review findings you declined with their reasons, and a list of what is already settled. The base is the branch point, `git merge-base origin/main HEAD`, as a SHA: `origin/main` itself moves when anything fetches, and once main moves past the branch point a diff against it shows main's new work as this change reverting it. A grader told where nothing is searches the filesystem for it, and graders who did spent up to eight of their fifty turns on it and read three different installed copies of this file.
+A proof copy is a clone of the head commit outside the repository, with its installed dependencies linked in, one per grader. A grader writes a failing test there and runs it without setup, and nothing is registered in the repository. Name any dependency beyond `node_modules` and `.venv` under `proofDir` in `.claude/pr-grade.json`. The prep ends with a `merge:` line, which section 5 runs, and a `remove:` line to run once every grader has reported. A grader told where nothing is searches the filesystem for it. Graders who did spent up to eight of their fifty turns on it, and read three different installed copies of this file.
 
 Settled means the tests, type checks, and other deterministic checks that already passed at the head, with their results. They are inputs, never questions to reopen, and re-running them is how a grader runs out of turns before it reports. Nothing else is settled: a recorded decision, a comment saying the behaviour is intended, or an earlier grade is a claim the lenses grade. Never tell a grader an earlier score.
 
@@ -168,13 +162,13 @@ Rank findings `P1` (fix before merge), `P2` (fix or justify), `P3` (note). The s
 
 Rank by what the defect does to a run. When a run fails either way, in the same direction, and the only defect is how the failure reads, such as a traceback where a message belongs, the finding is a P3. That holds in a re-grade whose fix was itself about messages, where the next traceback looks like the fix left unfinished.
 
-With more than one grader, merge their reports before you score. Two graders on one branch each scored the same proven P1 as 2/5, and a third cleared the path it broke as outside its lenses.
+Merge the graders' reports before you score, with the `merge:` line the prep printed. Two graders on one branch each scored the same proven P1 as 2/5, and a third cleared the path it broke as outside its lenses. The merge reads every grader's report and prints where each lens ended, the findings with those at one file:line joined, the defects raised outside their lenses, the lowest score these rules allow, and a draft block. Then settle what it leaves to you:
 
-- Keep one list of findings. Two graders that name the same defect, the same cause reaching the same wrong state, are one finding: keep the stronger proof and name both lenses.
-- A proof beats a clearance. When one grader clears what another proves, the finding stands. If the clearance names a sub-claim that would break the proof, run it.
+- Two findings at different lines with one cause, the same wrong state, are one finding: keep the stronger proof and name both lenses.
+- A proof beats a clearance, and the merge counts the finding. If the clearance names a sub-claim that would break the proof, run it.
 - A defect a grader lists under `Outside my lenses` belongs to the lens it names. Prove it, or carry it to `Could not verify`.
-- Every lens ends clear, as a finding, or under `Could not verify`. When a report leaves one of its lenses in none of the three, ask that grader which, in one message, before you write the block.
-- Score the change yourself from the merged list. A grader's score covers only its own lenses.
+- A lens the merge calls unaccounted: ask that grader which, in one message, before you write the block.
+- The score is yours. A grader's score covers only its own lenses. The merge cannot see a 3 for a repair that is a design decision, or a 1 for a finding that contradicts the change's stated purpose.
 
 Then take `Could not verify` item by item. For a claim that would be a P1 or P2 if true, prove or refute it yourself, or dispatch one grader with only that claim, its lens, and what was tried. What survives that one attempt stays under `Could not verify`, labelled a guess. Its lens stays out of `Verified and clear`, it scores as the finding it would be, and the guess is the `Blocking` sentence, for a person to decide. A guess that would only be a P3 leaves the score where it is.
 
@@ -203,13 +197,13 @@ Say each finding once.
 
 Commit the fixes and review them the way step 1 reviews the change, keeping what you declined for the graders. A merge from the base branch is a change too. On one branch, two graders each spent their whole budget proving a defect a merge brought in, and the review run after them found it in twenty turns.
 
-Then size the re-grade by the fix commits alone:
+Run the old `remove:` line, then prepare the re-grade from the fix commits alone:
 
 ```sh
-python3 <base>/scripts/grade_mode.py --base <the last commit graded>
+python3 <base>/scripts/grade_prep.py --base <the last commit graded> --settled '...' --declined '...'
 ```
 
-Grade the fix commits in the mode it prints, with every lens, and give L7 the scanner's list for the same commits: `check_then_act.py --base` with the same commit. A repair is a change and gets the same treatment as any other, so a two-line fix to ordinary code is graded in-thread even inside a pull request that needed a fan-out, and a fix that touches silent-failure code gets at least a subagent. Without `--base` the selector sizes the whole branch, and every round costs what the first one did.
+Grade the fix commits in the mode it prints, with every lens. The copies it makes hold the fixed code, and the L7 scan covers the same commits. A repair is a change and gets the same treatment as any other, so a two-line fix to ordinary code is graded in-thread even inside a pull request that needed a fan-out, and a fix that touches silent-failure code gets at least a subagent. Without `--base` the selector sizes the whole branch, and every round costs what the first one did.
 
 This is not ceremony. On the pull request above:
 

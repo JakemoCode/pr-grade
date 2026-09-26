@@ -4,6 +4,14 @@ Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an 
 
 CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` without raising the version and adding its heading here. Label one `hold-release` to merge it unreleased, when a change lands over several pull requests.
 
+## 0.6.0
+
+- `scripts/grade_prep.py`: preparing a grade is one call. It picks the mode, splits the lenses among graders from the lens file's `## Fan-out groups` table, lists the callers of each function the branch modified (TypeScript, JavaScript, and Python; anything else is named as not derived), runs the L7 scan for whoever holds L7, makes the proof copies, and prints every grader's prompt. A coordinator turn on a large session costs several grader turns, and the prep it did by hand now takes one call.
+- `scripts/proof_dir.py`: each grader proves in its own clone of the graded commit outside the repository, with `node_modules` and `.venv` linked in when their pin files match the graded commit. `proofDir` in `.claude/pr-grade.json` names anything else. A clone registers nothing in the repository, unlike the worktrees graders built before, one of which leaked at the turn cap. A copy left behind is removed after a day.
+- `grade_block.py merge`: graders write their report to a file, and one call merges them into where each lens ended, the findings, the lowest score the rules allow, and a draft block. The coordinator keeps the judgment calls.
+- `check_then_act.py` marks a window the diff left alone, so a grader no longer re-runs the scan with `--json` to find out.
+- `tools/tally_run.py`, outside the plugin: per-subagent turns, cache reads, model time, and turn-limit stops from a session transcript, to measure a grading run.
+
 ## 0.5.0
 
 - The grade agent reads the skill it applies at `${CLAUDE_PLUGIN_ROOT}/skills/pr-grade/SKILL.md`, the copy installed with it, and never searches the filesystem. Graders that searched spent up to eight of fifty turns on it and read three different installed versions.

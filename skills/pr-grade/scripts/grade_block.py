@@ -59,13 +59,13 @@ SECTION = re.compile(r'(?ms)^##[ \t]+Grade[ \t]*$(.*?)(?=^##[ \t]|\Z)')
 FIELD = re.compile(r'(?m)^(Mode|Graded|Score|Verified and clear):[ \t]*(.*?)[ \t]*$')
 LENS_HEADING = re.compile(r'(?m)^###[ \t]+(L\d+)\.')
 LENS_ID = re.compile(r'L\d+\b')
-CLEAR_ITEM = re.compile(r'((?:L\d+\b[ \t]*)+)(?:\(.*\))?\.?')
+LEAD_ID = re.compile(r'(L\d+)\b[ \t]*')
 SHA = re.compile(r'[0-9a-f]{40}')
 REPORT_LINE = re.compile(r'^(Score|Blocking|Verified and clear|Could not verify|Outside my lenses|L7 candidates|L\d+):'
                          r'[ \t]*(.*)$')
 FINDING = re.compile(r'^(P[123])[ \t]+((?:L\d+[ \t,]*)*)(\S+:\d+)[ \t]+-[ \t]+(.+)$')
 BLOCKING = re.compile(r'\bP[12]\b')
-BULLET = re.compile(r'([-*+]|\d+[.)])[ \t]')
+NEW_ITEM = re.compile(r'([-*+]|\d+[.)])[ \t]|(L\d+|P[123])\b')
 
 
 def without_code(markdown: str) -> str:
@@ -81,12 +81,45 @@ def lens_ids(text: str | None) -> list[str]:
     return (LENS_HEADING.findall(text) if text else []) or DEFAULT_LENSES
 
 
+def _note_end(text: str) -> int | None:
+    """The index after the parenthesis that closes the one `text` opens with, or None when none does."""
+    depth = 0
+    for i, ch in enumerate(text):
+        depth += (ch == '(') - (ch == ')')
+        if depth == 0:
+            return i + 1
+    return None
+
+
 def verified_lenses(text: str) -> set[str]:
-    """The lenses a `Verified and clear` value clears. Each comma-separated item names its lenses first,
-    alone or followed by a note in parentheses: `L1 L2` clears both, `L3 (L2 not applicable)` clears L3
-    only, and `L2 not applicable` clears nothing, since only the grader knows what the words meant."""
-    items = re.split(r',(?![^()]*\))', text)
-    return {lens for item in items if (m := CLEAR_ITEM.fullmatch(item.strip())) for lens in LENS_ID.findall(m[1])}
+    """The lenses a `Verified and clear` value clears. Each comma-separated item is lens ids, each alone
+    or followed by a note in parentheses: `L1 L2` and `L1 (a) L2 (b)` clear both, `L3 (L2 not applicable)`
+    clears L3 only, and `L2 not applicable` clears nothing, since only the grader knows what the words
+    meant."""
+    items, depth, item = [], 0, ''
+    for ch in text + ',':
+        if ch == ',' and depth == 0:
+            items.append(item)
+            item = ''
+            continue
+        depth = max(depth + (ch == '(') - (ch == ')'), 0)
+        item += ch
+    cleared: set[str] = set()
+    for item in items:
+        rest, found = item.strip().rstrip('.'), []
+        while rest:
+            lead = LEAD_ID.match(rest)
+            end = None if lead or not rest.startswith('(') else _note_end(rest)
+            if lead:
+                found.append(lead[1])
+                rest = rest[lead.end():]
+            elif end is not None:
+                rest = rest[end:].lstrip()
+            else:
+                found = []
+                break
+        cleared.update(found)
+    return cleared
 
 
 def parse(body: str) -> dict[str, str] | None:
@@ -148,8 +181,9 @@ def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[
 def read_report(text: str) -> dict:
     """A grader's report as its fields and findings. A field runs on to the next field, finding, or
     closing line, and each of its lines is one item, joined by any more-indented lines that follow it:
-    a claim wrapped onto a second line is still one claim. A bullet starts a new item at any depth. Under `Could not verify` or `Outside
-    my lenses` a line shaped like a finding is still an item of that field: an unproven P2 is a claim."""
+    a claim wrapped onto a second line is still one claim. A line that opens with a bullet, a lens id, or
+    a rank starts a new item at any depth. Under `Could not verify` or `Outside my lenses` a line shaped
+    like a finding is still an item of that field: an unproven P2 is a claim."""
     fields: dict[str, list[str]] = {}
     findings, current, indent = [], None, None
     for raw in text.splitlines():
@@ -169,7 +203,7 @@ def read_report(text: str) -> dict:
             current = field[1]
             fields[current] = [field[2].strip()] if field[2].strip() else []
             indent = depth if fields[current] else None
-        elif current and line and fields[current] and indent is not None and depth > indent and not BULLET.match(line):
+        elif current and line and fields[current] and indent is not None and depth > indent and not NEW_ITEM.match(line):
             fields[current][-1] += ' ' + line
         elif current and line:
             fields[current].append(line)
@@ -208,7 +242,7 @@ def merge(proof_root: Path) -> str:
                     status[lens] = f'open claim from {group}'
         outside += [f'{group}: {item}' for item in fields.get('Outside my lenses', [])
                     if item.lower().rstrip('.') != 'none']
-        verified = verified_lenses(' '.join(fields.get('Verified and clear', [])))
+        verified = verified_lenses(', '.join(fields.get('Verified and clear', [])))
         for lens in held:
             status.setdefault(lens, 'clear' if lens in verified else f'unaccounted: ask {group} which')
     blocking_findings = [f for f in findings if f['rank'] != 'P3']

@@ -91,6 +91,19 @@ class ProblemsTest(Fixture):
     def test_a_lens_id_inside_another_is_not_counted(self) -> None:
         self.assertTrue(any('L1' in p for p in self.problems(body(**{'Verified and clear': 'L12, L2, L3'}))))
 
+    def test_a_lens_named_with_a_qualifier_is_not_clear(self) -> None:
+        refused = self.problems(body(**{'Verified and clear': 'L1, L2 not applicable, L3'}))
+        self.assertIn('`Verified and clear` leaves out L2. Apply every lens.', refused)
+
+    def test_lenses_in_one_item_are_each_clear(self) -> None:
+        self.assertEqual(self.problems(body(**{'Verified and clear': 'L1 L2 L3 (all walked)'})), [])
+
+    def test_a_path_counted_as_code_raises_the_required_mode(self) -> None:
+        pr_files = ('.github/workflows/ci.yml', *LEAF[:3], 'docs/manifest.yaml')
+        self.assertEqual(self.problems(body(), pr_files), [])
+        self.config = {**self.config, 'countAsCode': ['docs/manifest.yaml']}
+        self.assertTrue(any('requires fan-out' in p for p in self.problems(body(), pr_files)))
+
     def test_a_short_sha_is_refused(self) -> None:
         self.assertTrue(any('40-character' in p for p in self.problems(body(Graded='abc1234'))))
 
@@ -345,3 +358,38 @@ class MergeTest(unittest.TestCase):
         self.write('timing', report('5/5', 'L1, L2', outside='L3 src/b.py:4: a second caller skips the guard'))
         self.write('reach', report('5/5', 'L3'))
         self.assertIn('timing: L3 src/b.py:4: a second caller skips the guard', self.merged())
+
+    def test_a_wrapped_claim_is_one_claim(self) -> None:
+        self.write('timing', report('4/5', 'L1', unverified='P2 L2 src/a.py:10 - maybe a race\n'
+                                                          '  ran: npm test three times, which passed'))
+        self.write('reach', report('5/5', 'L3'))
+        merged = self.merged()
+        self.assertIn('Could not verify: guess: P2 L2 src/a.py:10 - maybe a race ran: npm test', merged)
+        self.assertEqual(self.block()['Score'], '4/5')
+
+    def test_separate_claims_stay_separate(self) -> None:
+        self.write('timing', report('5/5', 'L1', unverified='\n- P2 L2 src/a.py:10 - maybe a race\n'
+                                                          '  ran: npm test, which passed\n- P3 L1 the log reads oddly'))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertIn('P3, does not block', self.merged())
+        self.assertEqual(self.block()['Score'], '4/5')
+
+    def test_an_indented_bullet_is_a_claim_of_its_own(self) -> None:
+        self.write('timing', report('5/5', 'L1', unverified='P2 L2 src/a.py:10 - maybe a race\n'
+                                                          '  - P2 L2 src/a.py:30 - maybe a second race'))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertEqual(self.block()['Score'], '3/5')
+
+    def test_a_lens_named_with_a_qualifier_is_unaccounted(self) -> None:
+        self.write('timing', report('5/5', 'L1, L2 not applicable'))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertIn('L2  unaccounted: ask timing which', self.merged())
+
+    def test_lenses_in_one_item_are_each_clear(self) -> None:
+        self.write('timing', report('5/5', 'L1 L2'))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertEqual(self.block()['Verified and clear'], 'L1, L2, L3')
+
+    def test_an_unapplied_lens_is_the_blocking_sentence(self) -> None:
+        self.write('timing', report('5/5', 'L1, L2'))
+        self.assertIn('Blocking: not assessed: L3 (no report from reach)', self.merged())

@@ -183,7 +183,7 @@ Mode: <the mode grade_mode.py printed for the whole branch>
 Graded: <the full SHA of the last commit graded>
 Score: <n>/5
 Blocking: <the one sentence that explains anything below 5, or "nothing">
-Verified and clear: <each lens id, first in its item: L1, L2, ...>
+Verified and clear: <the lenses cleared, each item lens ids alone or with a note in parentheses: L1, L2, ...>
 Could not verify: <every claim left unproven, labelled as a guess, or "none">
 
 P1 <file>:<line> - <title>

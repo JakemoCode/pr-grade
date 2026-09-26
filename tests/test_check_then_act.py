@@ -116,6 +116,14 @@ class ConfigTest(unittest.TestCase):
             cta.cta_config({'checkThenAct': {'secondRead': ['x']}})
         self.assertIn('secondRead', str(stopped.exception.code))
 
+    def test_a_path_counted_as_code_is_scanned(self) -> None:
+        config = cta.load_config(Path('.'), '{"countAsCode": ["docs/tool.py"]}')
+        self.assertEqual([cta.is_code(p, config) for p in ('docs/tool.py', 'docs/other.py')], [True, False])
+
+    def test_a_config_without_count_as_code_still_reads(self) -> None:
+        config = {k: v for k, v in cta.load_config(Path('.'), '{}').items() if k != 'countAsCode'}
+        self.assertTrue(cta.is_code('src/a.py', config))
+
     def test_a_value_that_is_not_a_list_of_strings_stops_the_run(self) -> None:
         with self.assertRaises(SystemExit):
             cta.cta_config({'checkThenAct': {'writes': 'append'}})

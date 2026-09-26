@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from grade_mode import changed_lines, load_config, matches, repo_root  # noqa: E402
+from grade_mode import changed_lines, code_files, load_config, matches, repo_root  # noqa: E402
 from check_then_act_python import parse_python  # noqa: E402
 
 TS_ADAPTER = Path(__file__).resolve().parent / 'check_then_act_ts.cjs'
@@ -395,7 +395,7 @@ def unscannable(paths: list[str]) -> list[dict]:
 
 
 def is_code(path: str, config: dict) -> bool:
-    return not matches(path, config['tests']) and not matches(path, config['notCode'])
+    return bool(code_files([path], config))
 
 
 def expand(paths: list[str], root: Path, config: dict) -> tuple[list[str], list[dict]]:

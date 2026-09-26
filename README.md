@@ -21,11 +21,28 @@ A correctness review asks whether the code does the right thing. The defects tha
 | `scripts/proof_dir.py` | Makes one clone of the graded commit per grader outside the repository, with its installed dependencies linked in, and removes them afterwards. Nothing is registered in the repository. |
 | `scripts/grade_mode.py` | Picks the grading mode from the branch's changed files: `in-thread`, one `subagent`, or `fan-out` with one agent per lens group. |
 | `scripts/grade_block.py check <pr>` | Refuses a PR whose `## Grade` block is missing, below 5/5, missing a lens, in a cheaper mode than its files need, or older than its code. |
-| `scripts/grade_block.py merge <root>` | Merges the graders' reports: where each lens ended, the findings with duplicates joined, the lowest score the rules allow, and a draft block. |
+| `scripts/grade_block.py merge <root>` | Merges the graders' reports: where each lens ended, the findings with any two at one line flagged, the lowest score the rules allow, and a draft block. |
 | `scripts/check_then_act.py` | Lists the check-then-act windows (L7) in the functions a branch changed, for the grader to clear or prove. |
 | `templates/` | A lens file, a config, and a CI workflow to copy into a repository. |
 
 The scripts use only the Python standard library (3.9 or later). `check` also needs an authenticated `gh`, and the check-then-act scanner needs Node for TypeScript and JavaScript. It reads Python with the standard library.
+
+## The eight lenses
+
+Each lens is a question a correctness review tends not to ask. Every one comes from a defect that got past a careful review.
+
+| Lens | What it asks |
+|---|---|
+| L1. Abandoned work | For every timeout, race, early return, cancel, and retry: what happens to the operation nobody is waiting for any more? It still runs, still holds what it held, and still writes when it lands. |
+| L2. Shared bounded resources | For every pool, queue, lock, cache, and rate limit the change touches: what is the bound, who else uses it, and what happens when it is reached? |
+| L3. Unguarded failure reach | Where does a failure in the new code go? A handler, job, or listener that a framework calls may log an uncaught error, drop it, or end the process. |
+| L4. Every other caller | The change was written with one caller in mind. What does it do to the others? A default that was right when written can turn wrong once a change binds what it stood in for. |
+| L5. State that outlives its reason | For everything written and never deleted (cache entries, listeners, pending rows, leases, timers, temp files): which line removes it? |
+| L6. Contract drift | The behaviour moved. Did the docs, types, tests, error messages, tool descriptions, and registries that describe it move too? |
+| L7. Check then act | When does a guard's state change, relative to the work it guards? An `await` or a second read between the check and the write lets every caller in that window through. `check_then_act.py` lists the candidates. |
+| L8. Failure direction | For every new fallback, default, and failure path: which way does it fail, and why is that the cheap direction? |
+
+The list is incomplete by construction. A repository's lens file restates each lens for its own code, and adds one whenever a reviewer finds a defect no lens names. The full definitions, with an example for each, are in [the skill](skills/pr-grade/SKILL.md#3-the-eight-lenses).
 
 ## A real grade
 

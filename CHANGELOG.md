@@ -4,6 +4,10 @@ Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an 
 
 CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` without raising the version and adding its heading here. Label one `hold-release` to merge it unreleased, when a change lands over several pull requests.
 
+## 0.8.1
+
+- The grade agent has the Write tool and writes its report and any scratch script with it, only to the report path and inside the scratch directory its dispatch names. A worktree-isolated session refuses a `python3 - <<'EOF'` heredoc whose text names git, and a report nearly always cites `git grep`, so a grader in such a session could not write its report: 216 of 1,730 refusals across EngOS Slice 001 were these heredocs. A proof test is written in the scratch directory and copied into the proof copy with `cp`. The agent still never edits, stages, or commits anything in the repository.
+
 ## 0.8.0
 
 - `merge --report <group>=<file or ->` takes the report of a group that wrote no `<group>/report.md`, from a file or stdin. A grader that replied with its report but never wrote the file used to leave its lenses `no report from <group>` and the floor at 2/5, and a coordinator running as a subagent could not write the file for it. The merge refuses `--report` for a group that wrote its file, for a group the grade does not have, and for an empty report.

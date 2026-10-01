@@ -56,6 +56,31 @@ class DispatchTest(unittest.TestCase):
         self.assertIn(f'You have {limit} turns', section(AGENT, 'Turns'))
 
 
+class WriteTest(unittest.TestCase):
+    """A worktree-isolated session refuses a heredoc whose text names git, and a report nearly always
+    does, so the grader writes files with the Write tool and keeps file text off the command line."""
+
+    def test_the_agent_has_the_write_tool(self) -> None:
+        tools = [tool.strip() for tool in frontmatter(AGENT)['tools'].split(',')]
+        self.assertIn('Write', tools)
+        self.assertNotIn('Edit', tools)
+
+    def test_the_agent_is_never_told_to_write_through_a_heredoc(self) -> None:
+        self.assertNotRegex(AGENT, r"python3 - <<")
+
+    def test_the_report_and_scratch_files_go_through_the_write_tool(self) -> None:
+        for name in ('Shell', 'Report'):
+            with self.subTest(section=name):
+                self.assertIn('Write tool', section(AGENT, name))
+        shell = section(AGENT, 'Shell')
+        self.assertIn('report path', shell)
+        self.assertIn('scratch directory', shell)
+
+    def test_the_agent_still_never_edits_the_repository(self) -> None:
+        self.assertIn('You do not edit, stage, or commit anything in the repository.', AGENT)
+        self.assertIn('Read-only on the repository', frontmatter(AGENT)['description'])
+
+
 class ReportTest(unittest.TestCase):
     def report_fields(self) -> set[str]:
         block = re.search(r'(?s)```\n(Score:.*?)```', section(AGENT, 'Report')).group(1)

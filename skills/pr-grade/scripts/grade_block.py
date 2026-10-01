@@ -67,7 +67,7 @@ REPORT_LINE = re.compile(r'^(Score|Blocking|Verified and clear|Could not verify|
 FINDING = re.compile(r'^(P[123])[ \t]+((?:L\d+[ \t,]*)*)(\S+:\d+)[ \t]+-[ \t]+(.+)$')
 BLOCKING = re.compile(r'\bP[12]\b')
 NEW_ITEM = re.compile(r'([-*+]|\d+[.)])[ \t]|(L\d+|P[123])\b')
-# `L2's pool releases` continues a claim. A line naming a rank is a claim even so.
+# `L2's pool releases` continues a claim, unless its line names a rank or the claim above is a P3.
 LENS_POSSESSIVE = re.compile(r"L\d+['’]s\b")
 RANK = re.compile(r'\bP[123]\b')
 
@@ -182,10 +182,16 @@ def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[
     return found
 
 
-def _opens_item(line: str, field: str) -> bool:
-    """Whether an indented line starts an item of `field` rather than continuing the one above. Only under
-    `Could not verify` does a split count against the score, so only there is a possessive lens id prose."""
-    if field == 'Could not verify' and LENS_POSSESSIVE.match(line) and not RANK.search(line):
+def blocks(claim: str) -> bool:
+    """Whether an open claim counts against the score: a P1 or P2, or no rank at all."""
+    return bool(BLOCKING.search(claim)) or not re.search(r'\bP3\b', claim)
+
+
+def _opens_item(line: str, field: str, above: str) -> bool:
+    """Whether an indented line starts an item of `field` rather than continuing `above`. Only under
+    `Could not verify` does a split count against the score, so only there is a possessive lens id prose,
+    and only below a claim that already blocks: joined to a P3, it would stop counting."""
+    if field == 'Could not verify' and LENS_POSSESSIVE.match(line) and not RANK.search(line) and blocks(above):
         return False
     return bool(NEW_ITEM.match(line))
 
@@ -195,7 +201,7 @@ def read_report(text: str) -> dict:
     closing line, and each of its lines is one item, joined by any more-indented lines that follow it:
     a claim wrapped onto a second line is still one claim. A line that opens with a bullet, a lens id, or
     a rank starts a new item at any depth, except a possessive under `Could not verify` (`L2's pool`) on a
-    line naming no rank. Under `Could not verify` or `Outside my lenses` a line shaped like a finding
+    line naming no rank, below a claim that blocks. Under `Could not verify` or `Outside my lenses` a line shaped like a finding
     is still an item of that field: an unproven P2 is a claim."""
     fields: dict[str, list[str]] = {}
     findings, current, indent = [], None, None
@@ -216,7 +222,8 @@ def read_report(text: str) -> dict:
             current = field[1]
             fields[current] = [field[2].strip()] if field[2].strip() else []
             indent = depth if fields[current] else None
-        elif current and line and fields[current] and indent is not None and depth > indent and not _opens_item(line, current):
+        elif (current and line and fields[current] and indent is not None and depth > indent
+              and not _opens_item(line, current, fields[current][-1])):
             fields[current][-1] += ' ' + line
         elif current and line:
             fields[current].append(line)
@@ -259,7 +266,7 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
             if claim.lower().rstrip('.') == 'none':
                 continue
             # A claim with no rank is counted as one that would block, and says so.
-            blocking = bool(BLOCKING.search(claim)) or not re.search(r'\bP3\b', claim)
+            blocking = blocks(claim)
             open_claims.append((group, claim, blocking))
             for lens in LENS_ID.findall(claim) if blocking else []:
                 # An open claim outranks a clearance, even another grader's; only a proof outranks it.

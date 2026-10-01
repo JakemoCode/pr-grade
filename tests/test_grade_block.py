@@ -398,6 +398,13 @@ class MergeTest(unittest.TestCase):
                       self.merged())
         self.assertEqual(self.block()['Score'], '4/5')
 
+    def test_an_indented_possessive_below_a_p3_claim_still_counts(self) -> None:
+        # Joined to the P3 above it, the claim would stop counting.
+        self.write('timing', report('5/5', 'L1', unverified="\n- L1 P3 the log reads oddly\n"
+                                                          "    L2's pool may leak the handle under load"))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertEqual(self.block()['Score'], '4/5')
+
     def test_an_indented_possessive_naming_a_rank_is_a_claim(self) -> None:
         self.write('timing', report('5/5', 'L1', unverified='L1 P2 src/a.py:10 - maybe a race\n'
                                                           "    L2's close would be P2: leaks the handle"))

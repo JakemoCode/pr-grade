@@ -265,7 +265,8 @@ def main() -> None:
         block = [f"Apply pr-grade lenses {', '.join(ids)} to the change in the shared block.",
                  f"- Your proof copy: {fields[f'copy {name}']} (a clone of the head commit, yours alone; not the repository)",
                  f"- Your scratch directory: {fields[f'scratch {name}']}",
-                 f'- Write your report to: {proof_root / name / "report.md"}']
+                 # Claude Code refuses a subagent's Write to a file named report*.md, summary*.md, and the like.
+                 f'- Write your report to: {proof_root / name / "grade.md"}']
         if 'L7' in ids:
             block += ['', 'check_then_act.py at the head:', l7]
         print('\n'.join(block))

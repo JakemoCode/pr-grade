@@ -171,7 +171,7 @@ def sweep(parent: Path, repo: Path, now: float) -> None:
         try:
             if old.is_symlink() or marker.read_text().split('\n', 1)[0] != str(repo):
                 continue
-            last = max(path.stat().st_mtime for path in [marker, *old.glob('*/report.md')])
+            last = max(path.stat().st_mtime for path in [marker, *old.glob('*/grade.md')])
         except OSError:
             # Gone under a concurrent sweep, or unreadable: either way not this call's to remove.
             continue

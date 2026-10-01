@@ -12,7 +12,7 @@ transcript splits one message across several records by content block, and repea
 this counts each message id once, with its last usage. The transcript records output tokens as the
 stream began, so they are not reported: model seconds, the time from each prompt or tool result to the
 message that answers it, stands in for output and thinking. `capped` is read from the session's own
-notice that the subagent stopped at its turn limit.
+notices for that subagent, any of which says it stopped at its turn limit.
 """
 from __future__ import annotations
 
@@ -68,9 +68,12 @@ def run(session: Path, agent_type: str | None) -> list[dict]:
         meta = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
         if agent_type and meta.get('agentType') != agent_type:
             continue
-        notice = next((part for part in notices.split('<task-notification>') if f'<task-id>{agent}</task-id>' in part), '')
+        # Each of the agent's notifications, cut at its closing tag: the transcript runs on after one, and
+        # later text that mentions a turn limit, such as a skill read, is not this agent's notice.
+        cut = (part.partition('</task-notification>')[0] for part in notices.split('<task-notification>')[1:])
+        own = [notice for notice in cut if f'<task-id>{agent}</task-id>' in notice]
         rows.append({'agent': agent, 'type': meta.get('agentType', '?'), 'description': meta.get('description', ''),
-                     **tally(transcript), 'capped': 'turn limit' in notice})
+                     **tally(transcript), 'capped': any('turn limit' in notice for notice in own)})
     return rows
 
 

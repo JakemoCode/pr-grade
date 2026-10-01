@@ -2,7 +2,7 @@
 """The grade block a pull request carries, and the check that refuses a PR without a current one.
 
     python3 grade_block.py check <pr> [--repo owner/name]
-    python3 grade_block.py merge <proof root>
+    python3 grade_block.py merge <proof root> [--report <group>=<file or ->]
 
 Run it from inside the repository, locally before marking a PR ready or in CI on every push. It needs
 `gh`, authenticated, with read access to the repository's contents and pull requests.
@@ -27,9 +27,10 @@ It skips a draft, and a PR whose branch does not match `requireGrade.branches` i
 key is set. The config and the lens file are read from the PR's base branch, so a PR cannot loosen the
 rules it is checked against.
 
-`merge` reads the report each grader wrote under the root grade_prep.py printed, and prints where every
-lens ended (clear, a finding, an open claim, or unaccounted), the findings with any two at one line
-flagged, the lowest score the rules allow, and a draft block. It settles nothing that needs
+`merge` reads the report each grader wrote under the root grade_prep.py printed, or the one `--report`
+gives for a group whose grader replied without writing its file. It prints where every lens ended
+(clear, a finding, an open claim, or unaccounted), the findings with any two at one line flagged, the
+lowest score the rules allow, and a draft block. It settles nothing that needs
 judgment: two lines with one cause, a clearance against a proof, a 3 for a design decision, or a 1.
 """
 from __future__ import annotations
@@ -66,6 +67,9 @@ REPORT_LINE = re.compile(r'^(Score|Blocking|Verified and clear|Could not verify|
 FINDING = re.compile(r'^(P[123])[ \t]+((?:L\d+[ \t,]*)*)(\S+:\d+)[ \t]+-[ \t]+(.+)$')
 BLOCKING = re.compile(r'\bP[12]\b')
 NEW_ITEM = re.compile(r'([-*+]|\d+[.)])[ \t]|(L\d+|P[123])\b')
+# `L2's pool releases` continues a claim, unless its line names a rank or the claim above is a P3.
+LENS_POSSESSIVE = re.compile(r"L\d+['’]s\b")
+RANK = re.compile(r'\bP[123]\b')
 
 
 def without_code(markdown: str) -> str:
@@ -178,12 +182,27 @@ def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[
     return found
 
 
+def blocks(claim: str) -> bool:
+    """Whether an open claim counts against the score: a P1 or P2, or no rank at all."""
+    return bool(BLOCKING.search(claim)) or not re.search(r'\bP3\b', claim)
+
+
+def _opens_item(line: str, field: str, above: str) -> bool:
+    """Whether an indented line starts an item of `field` rather than continuing `above`. Only under
+    `Could not verify` does a split count against the score, so only there is a possessive lens id prose,
+    and only below a claim that already blocks: joined to a P3, it would stop counting."""
+    if field == 'Could not verify' and LENS_POSSESSIVE.match(line) and not RANK.search(line) and blocks(above):
+        return False
+    return bool(NEW_ITEM.match(line))
+
+
 def read_report(text: str) -> dict:
     """A grader's report as its fields and findings. A field runs on to the next field, finding, or
     closing line, and each of its lines is one item, joined by any more-indented lines that follow it:
     a claim wrapped onto a second line is still one claim. A line that opens with a bullet, a lens id, or
-    a rank starts a new item at any depth. Under `Could not verify` or `Outside my lenses` a line shaped
-    like a finding is still an item of that field: an unproven P2 is a claim."""
+    a rank starts a new item at any depth, except a possessive under `Could not verify` (`L2's pool`) on a
+    line naming no rank, below a claim that blocks. Under `Could not verify` or `Outside my lenses` a line shaped like a finding
+    is still an item of that field: an unproven P2 is a claim."""
     fields: dict[str, list[str]] = {}
     findings, current, indent = [], None, None
     for raw in text.splitlines():
@@ -203,7 +222,8 @@ def read_report(text: str) -> dict:
             current = field[1]
             fields[current] = [field[2].strip()] if field[2].strip() else []
             indent = depth if fields[current] else None
-        elif current and line and fields[current] and indent is not None and depth > indent and not NEW_ITEM.match(line):
+        elif (current and line and fields[current] and indent is not None and depth > indent
+              and not _opens_item(line, current, fields[current][-1])):
             fields[current][-1] += ' ' + line
         elif current and line:
             fields[current].append(line)
@@ -211,18 +231,30 @@ def read_report(text: str) -> dict:
     return {'fields': fields, 'findings': findings}
 
 
-def merge(proof_root: Path) -> str:
-    """Where each lens ended across the graders' reports, and the draft block they support."""
+def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
+    """Where each lens ended across the graders' reports, and the draft block they support. `given` maps a
+    group to its report's text, for a group whose grader replied without writing the file."""
+    given = given or {}
     meta = json.loads((proof_root / 'grade.json').read_text())
+    for group, text in given.items():
+        if group not in meta['groups']:
+            sys.exit(f"--report {group}: this grade has no group {group!r}; its groups are {', '.join(meta['groups'])}")
+        if (proof_root / group / 'report.md').is_file():
+            sys.exit(f'--report {group}: {group} wrote {proof_root / group / "report.md"}, which the merge reads')
+        if not text.strip():
+            sys.exit(f'--report {group}: the report is empty')
     lenses, status = meta['lenses'], {}
     findings: list[dict] = []
     open_claims, outside, scores, out = [], [], [], []
     for group, held in meta['groups'].items():
         path = proof_root / group / 'report.md'
-        if not path.is_file():
+        if group in given:
+            report = read_report(given[group])
+        elif path.is_file():
+            report = read_report(path.read_text())
+        else:
             status.update({lens: f'no report from {group}' for lens in held})
             continue
-        report = read_report(path.read_text())
         fields = report['fields']
         scores.append(f"{group} {' '.join(fields.get('Score', ['?']))}")
         for found in report['findings']:
@@ -234,7 +266,7 @@ def merge(proof_root: Path) -> str:
             if claim.lower().rstrip('.') == 'none':
                 continue
             # A claim with no rank is counted as one that would block, and says so.
-            blocking = bool(BLOCKING.search(claim)) or not re.search(r'\bP3\b', claim)
+            blocking = blocks(claim)
             open_claims.append((group, claim, blocking))
             for lens in LENS_ID.findall(claim) if blocking else []:
                 # An open claim outranks a clearance, even another grader's; only a proof outranks it.
@@ -330,6 +362,27 @@ def check(pr: int, repo: str, root: Path) -> tuple[bool, list[str]]:
     return True, problems(block, pr_files=paths, lenses=lenses, compare=compare, root=root, config=config)
 
 
+def given_reports(pairs: list[str]) -> dict[str, str]:
+    """Each `--report group=source` read into text: a file, or stdin for `-`, which carries one."""
+    given: dict[str, str] = {}
+    stdin_read = False
+    for pair in pairs:
+        group, sep, source = pair.partition('=')
+        if not sep or not source:
+            sys.exit(f'--report {pair}: give it as <group>=<file or ->')
+        if group in given:
+            sys.exit(f'--report {pair}: {group} is given twice')
+        if source == '-':
+            if stdin_read:
+                sys.exit(f'--report {pair}: stdin can carry one report')
+            given[group], stdin_read = sys.stdin.read(), True
+        elif Path(source).is_file():
+            given[group] = Path(source).read_text()
+        else:
+            sys.exit(f'--report {pair}: {source} is not a file')
+    return given
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='command', required=True)
@@ -338,11 +391,13 @@ def main() -> None:
     run.add_argument('--repo', help='owner/name; defaults to the current repository')
     merging = sub.add_parser('merge', help="merge the graders' reports under a grade_prep.py root")
     merging.add_argument('root', type=Path)
+    merging.add_argument('--report', action='append', default=[], metavar='GROUP=FILE',
+                         help="a group's report, as a file or - for stdin, when its grader replied without writing it")
     args = ap.parse_args()
     if args.command == 'merge':
         if not (args.root / 'grade.json').is_file():
             sys.exit(f'{args.root} holds no grade.json; pass the root grade_prep.py printed')
-        print(merge(args.root))
+        print(merge(args.root, given_reports(args.report)))
         return
     repo = args.repo or gh('repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner').strip()
     required, found = check(args.pr, repo, repo_root())

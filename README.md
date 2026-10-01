@@ -21,7 +21,7 @@ A correctness review asks whether the code does the right thing. The defects tha
 | `scripts/proof_dir.py` | Makes one clone of the graded commit per grader outside the repository, with its installed dependencies linked in, and removes them afterwards. Nothing is registered in the repository. |
 | `scripts/grade_mode.py` | Picks the grading mode from the branch's changed files: `in-thread`, one `subagent`, or `fan-out` with one agent per lens group. |
 | `scripts/grade_block.py check <pr>` | Refuses a PR whose `## Grade` block is missing, below 5/5, missing a lens, in a cheaper mode than its files need, or older than its code. |
-| `scripts/grade_block.py merge <root>` | Merges the graders' reports: where each lens ended, the findings with any two at one line flagged, the lowest score the rules allow, and a draft block. |
+| `scripts/grade_block.py merge <root>` | Merges the graders' reports, or takes one with `--report <group>=<file or ->` when its grader replied without writing it: where each lens ended, the findings with any two at one line flagged, the lowest score the rules allow, and a draft block. |
 | `scripts/check_then_act.py` | Lists the check-then-act windows (L7) in the functions a branch changed, for the grader to clear or prove. |
 | `templates/` | A lens file, a config, and a CI workflow to copy into a repository. |
 

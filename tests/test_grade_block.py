@@ -390,6 +390,33 @@ class MergeTest(unittest.TestCase):
         self.write('reach', report('5/5', 'L3'))
         self.assertEqual(self.block()['Score'], '3/5')
 
+    def test_an_indented_possessive_lens_id_is_prose(self) -> None:
+        self.write('timing', report('5/5', 'L2', unverified='L1 P2 src/a.py:10 - maybe a race\n'
+                                                          "    L2's pool releases the handle on close"))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertIn("timing: L1 P2 src/a.py:10 - maybe a race L2's pool releases the handle on close\n",
+                      self.merged())
+        self.assertEqual(self.block()['Score'], '4/5')
+
+    def test_an_indented_possessive_naming_a_rank_is_a_claim(self) -> None:
+        self.write('timing', report('5/5', 'L1', unverified='L1 P2 src/a.py:10 - maybe a race\n'
+                                                          "    L2's close would be P2: leaks the handle"))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertEqual(self.block()['Score'], '3/5')
+
+    def test_an_indented_unranked_claim_still_counts(self) -> None:
+        # Prose and an unranked claim read alike after a bare lens id; splitting keeps the floor safe.
+        self.write('timing', report('5/5', 'L1', unverified='L1 P2 src/a.py:10 - maybe a race\n'
+                                                          '    L2 handle may leak on close'))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertEqual(self.block()['Score'], '3/5')
+
+    def test_a_possessive_under_verified_does_not_join_the_lens_above(self) -> None:
+        self.write('timing', report('5/5', 'L1 (proved by test_x)\n    L2 (no await)\n'
+                                                "    L2's pool checked by hand"))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertEqual(self.block()['Verified and clear'], 'L1, L2, L3')
+
     def test_one_lens_per_line_with_notes_clears_each(self) -> None:
         self.write('timing', report('5/5', '\nL1 (proved by test_x)\nL2 (no await)'))
         self.write('reach', report('5/5', 'L3'))
@@ -408,3 +435,48 @@ class MergeTest(unittest.TestCase):
     def test_an_unapplied_lens_is_the_blocking_sentence(self) -> None:
         self.write('timing', report('5/5', 'L1, L2'))
         self.assertIn('Blocking: not assessed: L3 (no report from reach)', self.merged())
+
+    def run_merge(self, *reports: str, stdin: str = '') -> subprocess.CompletedProcess:
+        args = [arg for given in reports for arg in ('--report', given)]
+        return subprocess.run([sys.executable, grade_block.__file__, 'merge', str(self.root), *args],
+                              input=stdin, capture_output=True, text=True)
+
+    def test_a_report_given_on_stdin_stands_in_for_a_missing_file(self) -> None:
+        # A grader that replied with its report but wrote no file, passed on by a coordinator that cannot write.
+        self.write('timing', report('5/5', 'L1, L2'))
+        run = self.run_merge('reach=-', stdin=report('5/5', 'L3'))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(grade_block.parse(run.stdout)['Score'], '5/5')
+        self.assertIn('L3  clear', run.stdout)
+
+    def test_a_report_given_as_a_file_stands_in_for_a_missing_file(self) -> None:
+        self.write('timing', report('5/5', 'L1, L2'))
+        reply = self.root / 'reply.txt'
+        reply.write_text(report('5/5', 'L3'))
+        run = self.run_merge(f'reach={reply}')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(grade_block.parse(run.stdout)['Verified and clear'], 'L1, L2, L3')
+
+    def test_a_report_for_a_group_that_wrote_its_file_is_refused(self) -> None:
+        # The file is the grader's own words; text from elsewhere never replaces it.
+        self.write('timing', report('5/5', 'L1, L2'))
+        self.write('reach', report('4/5', '', findings='P1 L3 src/a.py:9 - caller sees stale row\n'))
+        run = self.run_merge('reach=-', stdin=report('5/5', 'L3'))
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('reach/report.md', run.stderr)
+
+    def test_an_empty_report_is_refused(self) -> None:
+        self.write('timing', report('5/5', 'L1, L2'))
+        run = self.run_merge('reach=-', stdin='\n')
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('empty', run.stderr)
+
+    def test_a_report_for_a_group_the_grade_does_not_have_is_refused(self) -> None:
+        run = self.run_merge('timimg=-', stdin=report('5/5', 'L1, L2'))
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('timimg', run.stderr)
+
+    def test_a_report_file_that_does_not_exist_is_refused(self) -> None:
+        run = self.run_merge(f"reach={self.root / 'nowhere.txt'}")
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('nowhere.txt', run.stderr)

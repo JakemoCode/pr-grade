@@ -4,6 +4,13 @@ Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an 
 
 CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` without raising the version and adding its heading here. Label one `hold-release` to merge it unreleased, when a change lands over several pull requests.
 
+## 0.8.0
+
+- `merge --report <group>=<file or ->` takes the report of a group that wrote no `<group>/report.md`, from a file or stdin. A grader that replied with its report but never wrote the file used to leave its lenses `no report from <group>` and the floor at 2/5, and a coordinator running as a subagent could not write the file for it. The merge refuses `--report` for a group that wrote its file, for a group the grade does not have, and for an empty report.
+- The grade agent confirms its report file exists before it replies, and writes it once more when it does not.
+- The grade agent writes each `Could not verify` claim as its own `- ` bullet, which the merge already reads as one claim each.
+- Under `Could not verify`, `merge` reads an indented line that opens with a possessive lens id, such as `L2's pool releases the handle`, as part of the claim above it, unless the line names a rank. 0.7.1 split it off as a claim of its own with no rank, counted it as blocking, and put the floor a point low. A bare lens id still starts a claim: `L2 pool releases` and `L2 handle may leak` read alike, and counting a claim twice is the safe way to be wrong.
+
 ## 0.7.1
 
 - `Verified and clear` reads each lens id with its own note: `L1 (a) L2 (b)` and `L1 (a) L2` clear both, where 0.7.0 cleared only L1 in the first and nothing in the second. `L2 not applicable` still clears nothing.

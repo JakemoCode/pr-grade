@@ -67,7 +67,7 @@ A finding gets three runs. When the third has not shown the defect, stop: it goe
 
 ## Report
 
-Write the report to the path the dispatch names with `python3 - <<'EOF'`, then reply with exactly the same text, nothing else:
+Write the report to the path the dispatch names with `python3 - <<'EOF'`, then confirm the file exists with `ls -l <report path>` before you reply. When it does not, write it once more. Then reply with exactly the same text, nothing else:
 
 ```
 Score: <n>/5
@@ -77,7 +77,7 @@ P<n> L<k> <file>:<line> - <title>
 <the command you ran, and its trimmed output>
 L<k>: <for each lens you hold, the sentence that closed it>
 Verified and clear: <each lens you hold with no P1 or P2 and no open claim that would be one, as bare ids: L1, L2>
-Could not verify: <each unproven claim, with its lens, the rank it would have, and what each run returned; or "none">
+Could not verify: <"none", or on the lines below, each unproven claim as a `- ` bullet, with its lens, the rank it would have, and what each run returned>
 Outside my lenses: <each defect in a lens you do not hold, with that lens, its file:line, and what you saw; or "none">
 L7 candidates: <each file:line cleared with its reason, or proven as P<n>; or "none given">
 ```

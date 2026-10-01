@@ -168,6 +168,7 @@ Merge the graders' reports before you score, with the `merge:` line the prep pri
 - A proof beats a clearance, and the merge counts the finding. If the clearance names a sub-claim that would break the proof, run it.
 - A defect a grader lists under `Outside my lenses` belongs to the lens it names. Prove it, or carry it to `Could not verify`.
 - A lens the merge calls unaccounted: ask that grader which, in one message, before you write the block.
+- A lens the merge says has no report, from a grader that replied with its report but wrote no file: run the merge again with `--report <group>=-` and the reply on stdin, or `--report <group>=<file>`. Pass the reply unedited. The merge refuses it for a group that wrote its file.
 - The score is yours. A grader's score covers only its own lenses. The merge cannot see a 3 for a repair that is a design decision, or a 1 for a finding that contradicts the change's stated purpose.
 
 Then take `Could not verify` item by item. For a claim that would be a P1 or P2 if true, prove or refute it yourself, or dispatch one grader with only that claim, its lens, and what was tried. What survives that one attempt stays under `Could not verify`, labelled a guess. Its lens stays out of `Verified and clear`, it scores as the finding it would be, and the guess is the `Blocking` sentence, for a person to decide. A guess that would only be a P3 leaves the score where it is.

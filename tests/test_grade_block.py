@@ -294,7 +294,7 @@ class MergeTest(unittest.TestCase):
 
     def write(self, group: str, text: str) -> None:
         (self.root / group).mkdir(exist_ok=True)
-        (self.root / group / 'report.md').write_text(text)
+        (self.root / group / 'grade.md').write_text(text)
 
     def merged(self) -> str:
         return grade_block.merge(self.root)
@@ -470,7 +470,7 @@ class MergeTest(unittest.TestCase):
         self.write('reach', report('4/5', '', findings='P1 L3 src/a.py:9 - caller sees stale row\n'))
         run = self.run_merge('reach=-', stdin=report('5/5', 'L3'))
         self.assertNotEqual(run.returncode, 0)
-        self.assertIn('reach/report.md', run.stderr)
+        self.assertIn('reach/grade.md', run.stderr)
 
     def test_an_empty_report_is_refused(self) -> None:
         self.write('timing', report('5/5', 'L1, L2'))

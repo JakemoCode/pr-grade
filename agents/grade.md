@@ -46,9 +46,9 @@ You have 50 turns. A turn is one round of tool calls, however many calls it hold
 
 Some sessions refuse a command they cannot prove stays inside the repository, and each refusal costs a turn. These forms pass:
 
-- Use the scratch directory the dispatch names. With none, run `mktemp -d` on its own, then write the path it printed literally in every later command. A shell variable does not survive from one call to the next, and a path computed at runtime is refused.
+- Use the scratch directory the dispatch names. With none, use the one `proof_dir.py make` printed, or run `mktemp -d` on its own, then write the path it printed literally in every later command. A shell variable does not survive from one call to the next, and a path computed at runtime is refused.
 - Run git as `git -C <literal path> ...`, never after `cd`. Commands in that form may be chained with `&&`.
-- Write a file with the Write tool, and only to the report path or inside the scratch directory the dispatch names, or the one `mktemp -d` printed. Never put a file's text in a Bash command: a heredoc whose text names git is refused, and a report nearly always does.
+- Write a file with the Write tool, only to the report path or inside your scratch directory. Never put a file's text in a Bash command, since a heredoc whose text names git is refused and a report nearly always names it.
 - A refused command is refused again. Rewrite it in these forms in one call; never split it into one call per turn.
 
 ## Proof

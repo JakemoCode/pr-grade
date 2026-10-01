@@ -138,7 +138,16 @@ class CliTest(unittest.TestCase):
         root = Path(re.search(r'^merge: .* merge (\S+)$', out, re.M).group(1))
         meta = json.loads((root / 'grade.json').read_text())
         self.assertEqual((meta['mode'], meta['groups']['rest']), ('subagent', ['L3', 'L4', 'L5', 'L6', 'L8']))
-        self.assertIn(f"- Write your report to: {root / 'timing' / 'report.md'}", out)
+        self.assertIn(f"- Write your report to: {root / 'timing' / 'grade.md'}", out)
+
+    def test_a_subagent_may_write_to_the_report_path(self) -> None:
+        # Claude Code 2.1.286 refuses a subagent's Write to a basename matching this, case-insensitively.
+        refused = re.compile(r'^(REPORT|SUMMARY|FINDINGS|ANALYSIS).*\.md$', re.I)
+        paths = re.findall(r'^- Write your report to: (\S+)$', self.prep(), re.M)
+        self.assertTrue(paths)
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertIsNone(refused.match(Path(path).name))
 
     def test_the_printed_remove_line_removes_the_copies(self) -> None:
         out = self.prep()

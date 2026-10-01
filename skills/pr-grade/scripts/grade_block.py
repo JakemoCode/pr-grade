@@ -239,15 +239,15 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
     for group, text in given.items():
         if group not in meta['groups']:
             sys.exit(f"--report {group}: this grade has no group {group!r}; its groups are {', '.join(meta['groups'])}")
-        if (proof_root / group / 'report.md').is_file():
-            sys.exit(f'--report {group}: {group} wrote {proof_root / group / "report.md"}, which the merge reads')
+        if (proof_root / group / 'grade.md').is_file():
+            sys.exit(f'--report {group}: {group} wrote {proof_root / group / "grade.md"}, which the merge reads')
         if not text.strip():
             sys.exit(f'--report {group}: the report is empty')
     lenses, status = meta['lenses'], {}
     findings: list[dict] = []
     open_claims, outside, scores, out = [], [], [], []
     for group, held in meta['groups'].items():
-        path = proof_root / group / 'report.md'
+        path = proof_root / group / 'grade.md'
         if group in given:
             report = read_report(given[group])
         elif path.is_file():

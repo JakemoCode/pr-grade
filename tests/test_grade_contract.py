@@ -66,15 +66,15 @@ class WriteTest(unittest.TestCase):
         self.assertNotIn('Edit', tools)
 
     def test_the_agent_is_never_told_to_write_through_a_heredoc(self) -> None:
-        self.assertNotRegex(AGENT, r"python3 - <<")
+        self.assertNotIn('<<', AGENT)
 
-    def test_the_report_and_scratch_files_go_through_the_write_tool(self) -> None:
-        for name in ('Shell', 'Report'):
-            with self.subTest(section=name):
-                self.assertIn('Write tool', section(AGENT, name))
-        shell = section(AGENT, 'Shell')
-        self.assertIn('report path', shell)
-        self.assertIn('scratch directory', shell)
+    def test_the_write_rule_names_the_only_places_it_may_write(self) -> None:
+        rule = re.search(r'(?m)^- Write a file with the Write tool, (.*)$', section(AGENT, 'Shell'))
+        self.assertTrue(rule, 'the Shell section has no Write tool rule')
+        self.assertIn('only to the report path or inside your scratch directory', rule.group(1))
+
+    def test_the_report_is_written_with_the_write_tool(self) -> None:
+        self.assertIn('Write the report to the path the dispatch names with the Write tool', section(AGENT, 'Report'))
 
     def test_the_agent_still_never_edits_the_repository(self) -> None:
         self.assertIn('You do not edit, stage, or commit anything in the repository.', AGENT)

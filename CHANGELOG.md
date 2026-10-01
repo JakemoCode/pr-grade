@@ -6,7 +6,8 @@ CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` wi
 
 ## 0.8.1
 
-- The grade agent has the Write tool and writes its report and any scratch script with it, only to the report path and inside the scratch directory its dispatch names. A worktree-isolated session refuses a `python3 - <<'EOF'` heredoc whose text names git, and a report nearly always cites `git grep`, so a grader in such a session could not write its report: 216 of 1,730 refusals across EngOS Slice 001 were these heredocs. A proof test is written in the scratch directory and copied into the proof copy with `cp`. The agent still never edits, stages, or commits anything in the repository.
+- The grade agent has the Write tool and writes its report and any scratch script with it, only to the report path and inside the scratch directory its dispatch names. A worktree-isolated session refuses a `python3 - <<'EOF'` heredoc whose text names git, and a report nearly always cites `git grep`, so a grader in such a session could not write its report. These heredocs were 216 of the 1,730 refusals across EngOS Slice 001. A proof test is written in the scratch directory and copied into the proof copy with `cp`. The agent still never edits, stages, or commits anything in the repository.
+- A grader's report is `<root>/<group>/grade.md`, which `grade_prep.py` prints, `merge` reads, and the stale-root sweep checks. Claude Code refuses a subagent's Write to a file named `report*.md`, so `report.md` would have failed the same way the heredoc did. A grader dispatched by a 0.8.0 prep still writes `report.md`, which a 0.8.1 merge no longer reads; pass its reply with `merge --report`.
 
 ## 0.8.0
 

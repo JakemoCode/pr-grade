@@ -229,9 +229,9 @@ class RemoveTest(Fixture):
         # Graders reported and the coordinator has not merged yet: the round is not over.
         root = Path(self.make()['root'])
         self.age(root / proof_dir.MARKER)
-        (root / 'grade' / 'report.md').write_text('Score: 5/5\n')
+        (root / 'grade' / 'grade.md').write_text('Score: 5/5\n')
         self.make()
-        self.assertTrue((root / 'grade' / 'report.md').exists())
+        self.assertTrue((root / 'grade' / 'grade.md').exists())
 
     def test_a_root_without_a_readable_marker_is_skipped_not_fatal(self) -> None:
         # A concurrent sweep can remove a root between the glob and the read.

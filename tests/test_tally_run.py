@@ -77,6 +77,25 @@ class TallyTest(unittest.TestCase):
         capped = {row['agent']: row['capped'] for row in tally_run.run(self.session, None)}
         self.assertEqual(capped, {'g1': False, 'r1': True})
 
+    def test_capped_reads_only_the_agents_own_notice(self) -> None:
+        # A session goes on after a notification: a skill read later that mentions a turn limit is not
+        # the grader's notice, and neither is another agent's.
+        finished = ('<task-notification><task-id>g1</task-id><status>completed</status><summary>Agent '
+                    '"Grade timing" finished</summary></task-notification> When the harness says one stopped '
+                    'at its turn limit, send it one message.')
+        self.session.write_text(json.dumps({'type': 'user', 'message': {'content': finished}}) + '\n')
+        capped = {row['agent']: row['capped'] for row in tally_run.run(self.session, None)}
+        self.assertEqual(capped, {'g1': False, 'r1': False})
+
+    def test_capped_reads_every_notice_of_the_agent(self) -> None:
+        # A grader resumed after it finished can stop at its limit on a later notice.
+        notices = ('<task-notification><task-id>g1</task-id><summary>Agent "Grade timing" finished</summary>'
+                   '</task-notification><task-notification><task-id>g1</task-id><summary>Agent "Grade timing" '
+                   'stopped at its 50-turn limit</summary></task-notification>')
+        self.session.write_text(json.dumps({'type': 'user', 'message': {'content': notices}}) + '\n')
+        capped = {row['agent']: row['capped'] for row in tally_run.run(self.session, None)}
+        self.assertEqual(capped, {'g1': True, 'r1': False})
+
     def test_the_table_totals_the_rows(self) -> None:
         table = tally_run.render(tally_run.run(self.session, None))
         self.assertIn('1 of 2', table.splitlines()[-1])

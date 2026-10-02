@@ -6,7 +6,8 @@ CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` wi
 
 ## 0.9.0
 
-- Code that no rule names grades as silent. `ordinary` in `.claude/pr-grade.json` lists code a test would catch a defect in; a code file that neither it nor `silent`, `silentCommand`, or a caller's named files covers is unclassified, and raises the mode as a silent-failure file does. Before, an unnamed path graded as ordinary code, the cheap direction: EngOS fixed four such holes by hand, among them its Prettier config and a module its architecture tests rely on. `ordinary` defaults to empty, so a repository without it grades every code change in at least one subagent until it lists its ordinary code. Tests and `notCode` are never unclassified, and `silent` wins over `ordinary`.
+- Code that no rule names grades as silent. `ordinary` in `.claude/pr-grade.json` lists code a test would catch a defect in; a code file that neither it nor `silent`, `silentCommand`, or a caller's named files covers is unclassified, and raises the mode as a silent-failure file does. Before, an unnamed path graded as ordinary code, the cheap direction: EngOS fixed four such holes by hand, among them its Prettier config and a module its architecture tests rely on. `ordinary` defaults to empty, so a repository without it grades every code change in at least one subagent until it lists its ordinary code. Tests and `notCode` are never unclassified, and `silent` wins over `ordinary`. The template ships `ordinary` empty.
+- `silent`, `ordinary`, `tests`, `notCode`, and `countAsCode` must each be a list of strings, or the selector stops with a message. `"ordinary": "src/*"` was read one character at a time, and its lone `*` would have made every file ordinary.
 
 ## 0.8.1
 

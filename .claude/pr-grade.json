@@ -14,10 +14,15 @@
     "skills/pr-grade/templates/pr-grade-check.yml"
   ],
   "ordinary": [
-    "skills/pr-grade/scripts/*",
-    "skills/pr-grade/templates/*",
-    "tools/*",
-    ".claude-plugin/*",
+    "skills/pr-grade/scripts/check_then_act.py",
+    "skills/pr-grade/scripts/check_then_act_python.py",
+    "skills/pr-grade/scripts/check_then_act_ts.cjs",
+    "skills/pr-grade/scripts/grade_prep.py",
+    "skills/pr-grade/scripts/proof_dir.py",
+    "skills/pr-grade/templates/pr-grade.json",
+    "tools/tally_run.py",
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
     ".gitignore"
   ],
   "requireGrade": {

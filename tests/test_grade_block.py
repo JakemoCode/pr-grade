@@ -264,6 +264,11 @@ class CheckTest(Fixture):
                                  files=('src/x.py\t.github/workflows/x.yml',))[1]
         self.assertTrue(any('requires subagent' in p for p in refused))
 
+    def test_unclassified_code_needs_a_subagent_under_a_base_config_without_ordinary(self) -> None:
+        refused = self.run_check(text=body(Mode='in-thread', **{'Verified and clear': ', '.join(f'L{n}' for n in range(1, 9))}),
+                                 files=('src/x.py',), base={grade_mode.CONFIG: json.dumps({'silent': []})})[1]
+        self.assertTrue(any('requires subagent' in p and 'unclassified' in p for p in refused))
+
     def test_a_pr_at_githubs_file_list_cap_is_refused(self) -> None:
         self.assertTrue(any('3000' in p for p in self.run_check(files=tuple(f'docs/g_{n}.md' for n in range(3000)))[1]))
 

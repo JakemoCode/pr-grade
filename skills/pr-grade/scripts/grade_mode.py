@@ -51,6 +51,9 @@ DEFAULTS = {
     'notCode': ['*.md', 'docs/*', 'LICENSE', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '*.lock', 'go.sum'],
     'countAsCode': [],
 }
+# A string where a list belongs is read one character at a time, and a lone `*` matches every file:
+# under `ordinary` that grades everything in-thread.
+LIST_KEYS = ('silent', 'ordinary', 'tests', 'notCode', 'countAsCode')
 
 
 def _git(root: Path, *args: str) -> str:
@@ -63,11 +66,17 @@ def repo_root(start: Path | None = None) -> Path:
 
 def load_config(root: Path, text: str | None = None) -> dict:
     """The repository's config over the defaults, read from `text` when given, else from `root`. A key it
-    sets replaces the default list whole."""
+    sets replaces the default list whole. A pattern or path key that is not a list of strings stops the
+    run."""
     if text is None:
         path = root / CONFIG
         text = path.read_text() if path.exists() else None
-    return {**DEFAULTS, **(json.loads(text) if text else {})}
+    config = {**DEFAULTS, **(json.loads(text) if text else {})}
+    for key in LIST_KEYS:
+        value = config[key]
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            sys.exit(f'{key} in {CONFIG} must be a list of strings')
+    return config
 
 
 def matches(path: str, patterns: list[str]) -> str | None:

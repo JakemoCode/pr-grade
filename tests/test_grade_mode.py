@@ -160,6 +160,15 @@ class UnclassifiedTest(Fixture):
         reasons = grade_mode.assess(['src/named.py', 'src/listed.py'], self.root, named={'src/named.py': 'a store'})[1]
         self.assertEqual(reasons, {'src/named.py': 'a store', 'src/listed.py': 'named by silentCommand'})
 
+    def test_a_pattern_key_that_is_not_a_list_stops_the_run(self) -> None:
+        # "src/*" read as characters includes a lone `*`, which would make every file ordinary.
+        for key, value in (('ordinary', 'src/*'), ('silent', ['ok', 3]), ('countAsCode', None)):
+            with self.subTest(key=key):
+                self.configure(**{key: value})
+                with self.assertRaises(SystemExit) as stopped:
+                    self.assess(['src/a.py'])
+                self.assertEqual(str(stopped.exception.code), f'{key} in .claude/pr-grade.json must be a list of strings')
+
     def test_an_embedding_caller_without_the_key_classifies_nothing(self) -> None:
         # A caller that embeds the selector can build a config that predates `ordinary`.
         config = {**grade_mode.load_config(self.root)}

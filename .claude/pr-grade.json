@@ -13,6 +13,13 @@
     "skills/pr-grade/scripts/grade_mode.py",
     "skills/pr-grade/templates/pr-grade-check.yml"
   ],
+  "ordinary": [
+    "skills/pr-grade/scripts/*",
+    "skills/pr-grade/templates/*",
+    "tools/*",
+    ".claude-plugin/*",
+    ".gitignore"
+  ],
   "requireGrade": {
     "branches": "^(?!dependabot/)"
   }

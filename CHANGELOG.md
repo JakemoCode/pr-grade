@@ -4,6 +4,10 @@ Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an 
 
 CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` without raising the version and adding its heading here. Label one `hold-release` to merge it unreleased, when a change lands over several pull requests.
 
+## 0.9.0
+
+- Code that no rule names grades as silent. `ordinary` in `.claude/pr-grade.json` lists code a test would catch a defect in; a code file that neither it nor `silent`, `silentCommand`, or a caller's named files covers is unclassified, and raises the mode as a silent-failure file does. Before, an unnamed path graded as ordinary code, the cheap direction: EngOS fixed four such holes by hand, among them its Prettier config and a module its architecture tests rely on. `ordinary` defaults to empty, so a repository without it grades every code change in at least one subagent until it lists its ordinary code. Tests and `notCode` are never unclassified, and `silent` wins over `ordinary`.
+
 ## 0.8.1
 
 - The grade agent has the Write tool and writes its report and any scratch script with it, only to the report path and inside the scratch directory its dispatch names. A worktree-isolated session refuses a `python3 - <<'EOF'` heredoc whose text names git, and a report nearly always cites `git grep`, so a grader in such a session could not write its report. These heredocs were 216 of the 1,730 refusals across EngOS Slice 001. A proof test is written in the scratch directory and copied into the proof copy with `cp`. The agent still never edits, stages, or commits anything in the repository.

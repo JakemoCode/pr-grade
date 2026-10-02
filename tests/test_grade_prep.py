@@ -198,7 +198,7 @@ class CliTest(unittest.TestCase):
         self.assertIn('(3 files;', out)
 
     def test_in_thread_prints_no_merge_line(self) -> None:
-        (self.repo / '.claude/pr-grade.json').write_text('{"silent": []}\n')
+        (self.repo / '.claude/pr-grade.json').write_text('{"silent": [], "ordinary": ["*"]}\n')
         git(self.repo, 'commit', '-q', '-am', 'nothing silent')
         out = self.prep()
         self.assertIn('mode: in-thread', out)

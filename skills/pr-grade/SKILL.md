@@ -38,7 +38,7 @@ Commit the change, then run the prep from inside the repository, with this skill
 python3 <base>/scripts/grade_prep.py --settled '<each check that passed at the head, with its result>' --declined '<each finding you declined, with its reason>'
 ```
 
-It picks the mode from what the branch touches, as `grade_mode.py` does alone, and prints it with the silent-failure files that decided it:
+It picks the mode from what the branch touches, as `grade_mode.py` does alone, and prints it with the silent-failure and unclassified files that decided it:
 
 - **in-thread**: apply every lens yourself.
 - **subagent**: dispatch one `pr-grade:grade` agent to apply every lens.

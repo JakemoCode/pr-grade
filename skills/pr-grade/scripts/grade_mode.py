@@ -71,14 +71,20 @@ def repo_root(start: Path | None = None) -> Path:
     return Path(_git(start or Path.cwd(), 'rev-parse', '--show-toplevel').strip())
 
 
+def _given(root: Path, text: str | None = None) -> dict:
+    """The keys the repository's config sets, read from `text` when given, else from `root`. A missing or
+    empty file sets none."""
+    if text is None:
+        path = root / CONFIG
+        text = path.read_text() if path.exists() else None
+    return json.loads(text) if text else {}
+
+
 def load_config(root: Path, text: str | None = None) -> dict:
     """The repository's config over the defaults, read from `text` when given, else from `root`. A key it
     sets replaces the default list whole. A pattern or path key that is not a list of strings stops the
     run."""
-    if text is None:
-        path = root / CONFIG
-        text = path.read_text() if path.exists() else None
-    config = {**DEFAULTS, **(json.loads(text) if text else {})}
+    config = {**DEFAULTS, **_given(root, text)}
     for key in LIST_KEYS:
         value = config[key]
         if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
@@ -94,8 +100,7 @@ def matches(path: str, patterns: list[str]) -> str | None:
 
 def ordinary_notice(root: Path) -> str | None:
     """NO_ORDINARY when the repository's config sets no `ordinary` key, else None."""
-    path = root / CONFIG
-    return None if path.exists() and 'ordinary' in json.loads(path.read_text()) else NO_ORDINARY
+    return None if 'ordinary' in _given(root) else NO_ORDINARY
 
 
 def code_files(changed: list[str], config: dict) -> list[str]:
@@ -146,7 +151,7 @@ def mode_for(silent: bool, code_count: int, fan_out_above: int) -> str:
 
 def assess(changed: list[str], root: Path, config: dict | None = None,
            named: dict[str, str] | None = None) -> tuple[str, dict[str, str], list[str]]:
-    """The mode, each silent-failure file with its reason, and every file the grade must cover: all of
+    """The mode, each silent-failure or unclassified file with its reason, and every file the grade must cover: all of
     them but `notCode`, plus any silent file or `countAsCode` path there. Tests are covered, since a test weakened after the
     grade can undo the proof a finding rested on. `named` is as `silent_reasons` takes it."""
     config = config or load_config(root)
@@ -229,7 +234,7 @@ def main() -> None:
     if notice:
         print(notice)
     print(f"code files: {len(code_files(changed, config))} (more than {config['fanOutAbove']} raises the mode)")
-    print('silent-failure files:' if reasons else 'silent-failure files: none')
+    print('silent-failure and unclassified files:' if reasons else 'silent-failure and unclassified files: none')
     for path, reason in sorted(reasons.items()):
         print(f'  {path}: {reason}')
 

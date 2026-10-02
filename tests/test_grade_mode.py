@@ -72,9 +72,17 @@ class ModeTest(Fixture):
         self.configure(countAsCode=['docs/manifest.yaml'])
         self.assertEqual(self.assess(changed)[0], 'fan-out')
 
-    def test_a_path_counted_as_code_is_exact_not_a_pattern(self) -> None:
-        self.configure(countAsCode=['docs/*', 'manifest.yaml'])
+    def test_a_path_counted_as_code_matches_the_whole_path(self) -> None:
+        # Without a `/` it is still a whole path, never a file name at any depth.
+        self.configure(countAsCode=['manifest.yaml'])
         self.assertEqual(self.assess(['.github/workflows/ci.yml', *LEAF[:3], 'docs/manifest.yaml'])[0], 'subagent')
+
+    def test_a_glob_counts_every_path_it_matches(self) -> None:
+        # One entry covers each new folder's map, so the next one needs no config edit to count.
+        self.configure(countAsCode=['docs/slices/*/owners.yaml'])
+        changed = ['.github/workflows/ci.yml', *LEAF[:3], 'docs/slices/slice-002/owners.yaml', 'docs/slices/a.yaml']
+        self.assertEqual(grade_mode.code_files(changed, grade_mode.load_config(self.root)),
+                         ['.github/workflows/ci.yml', *LEAF[:3], 'docs/slices/slice-002/owners.yaml'])
 
 
 class SilentTest(Fixture):

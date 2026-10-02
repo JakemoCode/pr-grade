@@ -17,8 +17,10 @@ and grades as silent: no rule has looked at it, and grading it too cheaply is a 
     silent or unclassified, or more than fanOutAbove           subagent
     neither                                                    in-thread
 
-`countAsCode` lists exact paths that count toward size whatever `tests` and `notCode` say, for a
-data file the repository treats as code under a directory it otherwise leaves out.
+`countAsCode` lists paths that count toward size whatever `tests` and `notCode` say, for a data
+file the repository treats as code under a directory it otherwise leaves out. Each entry is a glob
+over the whole path, so an exact path matches only itself and `docs/*/owners.yaml` matches one file
+name in every folder under docs/.
 
 Patterns are fnmatch globs. One with a `/` matches the whole path, and its `*` crosses directories;
 one without matches the file name. The branch's files include uncommitted and untracked work. Both
@@ -86,11 +88,12 @@ def matches(path: str, patterns: list[str]) -> str | None:
 
 
 def code_files(changed: list[str], config: dict) -> list[str]:
-    """Changed files that count toward size: those `countAsCode` lists, and the rest that are neither tests
-    nor `notCode`."""
+    """Changed files that count toward size: those `countAsCode` matches, and the rest that are neither
+    tests nor `notCode`."""
     # A caller that embeds the selector may build its config without this key.
-    listed = set(config.get('countAsCode', ()))
-    return [p for p in changed if p in listed or not matches(p, config['tests']) and not matches(p, config['notCode'])]
+    listed = config.get('countAsCode', ())
+    return [p for p in changed if any(fnmatch.fnmatchcase(p, glob) for glob in listed)
+            or not matches(p, config['tests']) and not matches(p, config['notCode'])]
 
 
 def silent_reasons(changed: list[str], root: Path, config: dict, named: dict[str, str] | None = None) -> dict[str, str]:

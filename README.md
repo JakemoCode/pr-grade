@@ -116,7 +116,7 @@ The workflow template runs `check` on `opened`, `edited`, `synchronize`, `reopen
 
 A repository that vendors the scripts and has selection rules the config cannot express can pass them in without patching:
 
-- `grade_mode.assess(changed, root, config, named={path: reason})` treats each exact path in `named` as a silent-failure file with that reason. A name is never a pattern, so `package.json` does not match `tests/fixtures/x/package.json`.
+- `grade_mode.assess(changed, root, config, named={path: reason})` treats each exact path in `named` as a silent-failure file with that reason. A name is never a pattern, so `package.json` does not match `tests/fixtures/x/package.json`. A config built by hand without `ordinary` names no code ordinary, so every code file that `silent` and `named` leave out grades as unclassified.
 - `grade_block.problems(..., assess=your_assess)` uses your selector in place of `grade_mode.assess`. It takes and returns what `grade_mode.assess` does, and runs only once the body has a grade block.
 
 `grade_block.py` loads the `grade_mode.py` beside it by path under a private name, so a `grade_mode` module of your own is neither picked up nor replaced.

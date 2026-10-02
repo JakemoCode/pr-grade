@@ -92,7 +92,8 @@ def code_files(changed: list[str], config: dict) -> list[str]:
     tests nor `notCode`."""
     # A caller that embeds the selector may build its config without this key.
     listed = config.get('countAsCode', ())
-    return [p for p in changed if any(fnmatch.fnmatchcase(p, glob) for glob in listed)
+    # Equality too: as a glob, `docs/[id]/x.yaml` would match `docs/i/x.yaml` and never itself.
+    return [p for p in changed if any(p == entry or fnmatch.fnmatchcase(p, entry) for entry in listed)
             or not matches(p, config['tests']) and not matches(p, config['notCode'])]
 
 

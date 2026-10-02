@@ -77,6 +77,11 @@ class ModeTest(Fixture):
         self.configure(countAsCode=['manifest.yaml'])
         self.assertEqual(self.assess(['.github/workflows/ci.yml', *LEAF[:3], 'docs/manifest.yaml'])[0], 'subagent')
 
+    def test_an_exact_path_with_glob_characters_still_matches_itself(self) -> None:
+        listed = ['docs/[id]/owners.yaml', 'docs/a?b.yaml']
+        config = {**grade_mode.load_config(self.root), 'countAsCode': listed}
+        self.assertEqual(grade_mode.code_files(listed, config), listed)
+
     def test_a_glob_counts_every_path_it_matches(self) -> None:
         # One entry covers each new folder's map, so the next one needs no config edit to count.
         self.configure(countAsCode=['docs/slices/*/owners.yaml'])

@@ -44,9 +44,11 @@ class Fixture(unittest.TestCase):
 
 class ModeTest(Fixture):
     def test_four_leaf_files_grade_in_thread(self) -> None:
+        self.configure(ordinary=['src/*'])
         self.assertEqual(self.assess(LEAF[:4])[0], 'in-thread')
 
     def test_five_leaf_files_grade_in_a_subagent(self) -> None:
+        self.configure(ordinary=['src/*'])
         self.assertEqual(self.assess(LEAF[:5])[0], 'subagent')
 
     def test_one_silent_file_grades_in_a_subagent(self) -> None:
@@ -70,9 +72,22 @@ class ModeTest(Fixture):
         self.configure(countAsCode=['docs/manifest.yaml'])
         self.assertEqual(self.assess(changed)[0], 'fan-out')
 
-    def test_a_path_counted_as_code_is_exact_not_a_pattern(self) -> None:
-        self.configure(countAsCode=['docs/*', 'manifest.yaml'])
+    def test_a_path_counted_as_code_matches_the_whole_path(self) -> None:
+        # Without a `/` it is still a whole path, never a file name at any depth.
+        self.configure(countAsCode=['manifest.yaml'])
         self.assertEqual(self.assess(['.github/workflows/ci.yml', *LEAF[:3], 'docs/manifest.yaml'])[0], 'subagent')
+
+    def test_an_exact_path_with_glob_characters_still_matches_itself(self) -> None:
+        listed = ['docs/[id]/owners.yaml', 'docs/a?b.yaml']
+        config = {**grade_mode.load_config(self.root), 'countAsCode': listed}
+        self.assertEqual(grade_mode.code_files(listed, config), listed)
+
+    def test_a_glob_counts_every_path_it_matches(self) -> None:
+        # One entry covers each new folder's map, so the next one needs no config edit to count.
+        self.configure(countAsCode=['docs/slices/*/owners.yaml'])
+        changed = ['.github/workflows/ci.yml', *LEAF[:3], 'docs/slices/slice-002/owners.yaml', 'docs/slices/a.yaml']
+        self.assertEqual(grade_mode.code_files(changed, grade_mode.load_config(self.root)),
+                         ['.github/workflows/ci.yml', *LEAF[:3], 'docs/slices/slice-002/owners.yaml'])
 
 
 class SilentTest(Fixture):
@@ -83,7 +98,7 @@ class SilentTest(Fixture):
                 self.assertIn(path, self.assess([path])[1])
 
     def test_configured_patterns_replace_the_defaults(self) -> None:
-        self.configure(silent=['src/gates/*'])
+        self.configure(silent=['src/gates/*'], ordinary=['*'])
         reasons = self.assess(['src/gates/deep/check.py', '.github/workflows/ci.yml'])[1]
         self.assertEqual(set(reasons), {'src/gates/deep/check.py'})
 
@@ -93,7 +108,7 @@ class SilentTest(Fixture):
         self.assertIn('tests/architecture/owners.test.ts', self.assess(['tests/architecture/owners.test.ts'])[1])
 
     def test_silent_command_names_more_files(self) -> None:
-        self.configure(silentCommand='printf "src/store.py\\nsrc/other.py\\n"')
+        self.configure(silentCommand='printf "src/store.py\\nsrc/other.py\\n"', ordinary=['src/*'])
         self.assertEqual(self.assess(['src/store.py', 'src/leaf.py'])[1], {'src/store.py': 'named by silentCommand'})
 
     def test_a_failing_silent_command_stops_the_run_with_its_message(self) -> None:
@@ -104,11 +119,13 @@ class SilentTest(Fixture):
         self.assertEqual(str(stopped.exception.code), 'silentCommand failed (exit 3): build the venv first')
 
     def test_a_caller_names_silent_files_with_their_reasons(self) -> None:
+        self.configure(ordinary=['src/*'])
         named = {'src/store.py': 'declares guarantees in store.mutations.yaml'}
         mode, reasons, _ = grade_mode.assess(['src/store.py', 'src/leaf.py'], self.root, named=named)
         self.assertEqual((mode, reasons), ('subagent', named))
 
     def test_a_named_file_is_an_exact_path_not_a_pattern(self) -> None:
+        self.configure(ordinary=['src/*'])
         named = {'package.json': 'the build', 'src/*.py': 'every source file'}
         changed = ['tests/fixtures/x/package.json', 'src/a.py']
         self.assertEqual(grade_mode.assess(changed, self.root, named=named)[:2], ('in-thread', {}))
@@ -122,6 +139,89 @@ class SilentTest(Fixture):
         self.configure(silentCommand='printf "src/other.py\\n"')
         reasons = grade_mode.assess(['src/store.py', 'src/other.py'], self.root, named={'src/store.py': 'a store'})[1]
         self.assertEqual(reasons, {'src/store.py': 'a store', 'src/other.py': 'named by silentCommand'})
+
+
+class UnclassifiedTest(Fixture):
+    """Code that neither `silent` nor `ordinary` names grades as silent: no rule has looked at it."""
+
+    UNCLASSIFIED = ('unclassified: add it to `ordinary` in .claude/pr-grade.json if a test would catch a defect here, '
+                    'or to `silent` if none would')
+
+    def test_code_no_pattern_names_grades_in_a_subagent(self) -> None:
+        self.assertEqual(self.assess(['src/leaf_0.py'])[:2], ('subagent', {'src/leaf_0.py': self.UNCLASSIFIED}))
+
+    def test_unclassified_code_over_the_threshold_fans_out(self) -> None:
+        self.assertEqual(self.assess(LEAF[:5])[0], 'fan-out')
+
+    def test_code_an_ordinary_pattern_names_grades_in_thread(self) -> None:
+        self.configure(ordinary=['src/*', 'setup.py'])
+        self.assertEqual(self.assess(['src/deep/leaf.py', 'pkg/setup.py'])[:2], ('in-thread', {}))
+
+    def test_silent_wins_over_ordinary(self) -> None:
+        self.configure(ordinary=['src/*'], silent=['src/gates/*'])
+        self.assertEqual(self.assess(['src/gates/check.py'])[1], {'src/gates/check.py': 'matches src/gates/*'})
+
+    def test_tests_and_not_code_are_never_unclassified(self) -> None:
+        self.assertEqual(self.assess(['tests/a_test.py', 'src/b.test.ts', 'README.md', 'docs/guide.txt'])[:2],
+                         ('in-thread', {}))
+
+    def test_a_path_counted_as_code_needs_a_class_too(self) -> None:
+        self.configure(countAsCode=['docs/owners.yaml'], ordinary=['src/*'])
+        self.assertEqual(self.assess(['docs/owners.yaml'])[1], {'docs/owners.yaml': self.UNCLASSIFIED})
+
+    def test_a_caller_or_silent_command_keeps_its_own_reason(self) -> None:
+        self.configure(silentCommand='printf "src/listed.py\\n"')
+        reasons = grade_mode.assess(['src/named.py', 'src/listed.py'], self.root, named={'src/named.py': 'a store'})[1]
+        self.assertEqual(reasons, {'src/named.py': 'a store', 'src/listed.py': 'named by silentCommand'})
+
+    def test_a_pattern_key_that_is_not_a_list_stops_the_run(self) -> None:
+        # "src/*" read as characters includes a lone `*`, which would make every file ordinary.
+        for key, value in (('ordinary', 'src/*'), ('silent', ['ok', 3]), ('countAsCode', None)):
+            with self.subTest(key=key):
+                self.configure(**{key: value})
+                with self.assertRaises(SystemExit) as stopped:
+                    self.assess(['src/a.py'])
+                self.assertEqual(str(stopped.exception.code), f'{key} in .claude/pr-grade.json must be a list of strings')
+
+    def test_an_embedding_caller_without_the_key_classifies_nothing(self) -> None:
+        # A caller that embeds the selector can build a config that predates `ordinary`.
+        config = {**grade_mode.load_config(self.root)}
+        config.pop('ordinary', None)
+        self.assertEqual(grade_mode.assess(['src/a.py'], self.root, config)[0], 'subagent')
+
+
+class NoticeTest(Fixture):
+    """The command line says once why grades got dearer while the config sets no `ordinary`."""
+
+    def run_main(self) -> str:
+        git(self.root, 'commit', '-q', '--allow-empty', '-m', 'base')
+        git(self.root, 'checkout', '-q', '-b', 'topic')
+        for name in ('a.py', 'b.py'):
+            (self.root / 'src').mkdir(exist_ok=True)
+            (self.root / 'src' / name).write_text('x = 1\n')
+        run = subprocess.run([sys.executable, str(Path(grade_mode.__file__)), '--base', 'main'], cwd=self.root,
+                             capture_output=True, text=True, check=True)
+        return run.stdout
+
+    def test_a_config_without_ordinary_prints_the_notice_once(self) -> None:
+        self.configure(silent=[])
+        out = self.run_main()
+        self.assertEqual(out.count(grade_mode.NO_ORDINARY), 1)
+        for path in ('src/a.py', 'src/b.py'):
+            self.assertIn(f'  {path}: {UnclassifiedTest.UNCLASSIFIED}\n', out)
+
+    def test_no_config_at_all_prints_the_notice(self) -> None:
+        self.assertIn(grade_mode.NO_ORDINARY, self.run_main())
+
+    def test_an_empty_config_file_prints_the_notice(self) -> None:
+        # load_config reads an empty file as no config; the notice must too, not stop on a parse error.
+        (self.root / '.claude').mkdir()
+        (self.root / grade_mode.CONFIG).write_text('  \n')
+        self.assertIn(grade_mode.NO_ORDINARY, self.run_main())
+
+    def test_a_config_with_ordinary_prints_no_notice(self) -> None:
+        self.configure(ordinary=['src/*'])
+        self.assertNotIn('notice:', self.run_main())
 
 
 class CoverageTest(Fixture):

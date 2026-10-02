@@ -18,7 +18,7 @@ Run this before you push. It does not replace a correctness review such as `/cod
 Two optional files at the repository root tune this skill. Read both first when they exist.
 
 - **`.claude/pr-grade-lenses.md`** restates each lens for this codebase: its real bounded resources, its callers, its proof recipe, its fan-out groups. Where it and this file differ, it wins. [`templates/pr-grade-lenses.md`](templates/pr-grade-lenses.md) is a starting point.
-- **`.claude/pr-grade.json`** tells the mode selector which paths are silent-failure code. [`templates/pr-grade.json`](templates/pr-grade.json) shows every key.
+- **`.claude/pr-grade.json`** tells the mode selector which paths are silent-failure code and which are ordinary; code it names as neither grades as silent. [`templates/pr-grade.json`](templates/pr-grade.json) shows every key.
 
 Without them the generic lenses below apply, and the selector uses its defaults.
 
@@ -38,7 +38,7 @@ Commit the change, then run the prep from inside the repository, with this skill
 python3 <base>/scripts/grade_prep.py --settled '<each check that passed at the head, with its result>' --declined '<each finding you declined, with its reason>'
 ```
 
-It picks the mode from what the branch touches, as `grade_mode.py` does alone, and prints it with the silent-failure files that decided it:
+It picks the mode from what the branch touches, as `grade_mode.py` does alone, and prints it with the silent-failure and unclassified files that decided it:
 
 - **in-thread**: apply every lens yourself.
 - **subagent**: dispatch one `pr-grade:grade` agent to apply every lens.

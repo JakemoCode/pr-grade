@@ -197,11 +197,23 @@ class CliTest(unittest.TestCase):
         self.assertNotIn('scratch.py', out)
         self.assertIn('(3 files;', out)
 
+    def test_a_config_without_ordinary_prints_the_notice_before_the_shared_block(self) -> None:
+        out = self.prep()
+        self.assertEqual(out.count('notice: no `ordinary` key'), 1)
+        self.assertLess(out.index('notice:'), out.index('===== shared block ====='))
+
+    def test_an_empty_config_runs_and_prints_the_notice(self) -> None:
+        # load_config reads an empty file as no config; prep used to stop on it after making the copies.
+        (self.repo / '.claude/pr-grade.json').write_text('')
+        git(self.repo, 'commit', '-q', '-am', 'empty config')
+        self.assertIn('notice: no `ordinary` key', self.prep())
+
     def test_in_thread_prints_no_merge_line(self) -> None:
-        (self.repo / '.claude/pr-grade.json').write_text('{"silent": []}\n')
+        (self.repo / '.claude/pr-grade.json').write_text('{"silent": [], "ordinary": ["*"]}\n')
         git(self.repo, 'commit', '-q', '-am', 'nothing silent')
         out = self.prep()
         self.assertIn('mode: in-thread', out)
+        self.assertNotIn('notice:', out)
         self.assertNotIn('merge:', out)
         self.assertIn('remove:', out)
 

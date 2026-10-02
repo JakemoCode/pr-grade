@@ -9,14 +9,18 @@ file with the reason it is one.
 
 A silent-failure file is one where a defect would pass every test: a check, a gate, persistence, CI,
 hooks. The config names them with `silent` patterns, and `silentCommand` can print more, one path per
-line, for a repository that already keeps that list somewhere (a map, a guarantee file).
+line, for a repository that already keeps that list somewhere (a map, a guarantee file). `ordinary`
+patterns name the code a test would catch a defect in. A code file that nothing names is unclassified
+and grades as silent: no rule has looked at it, and grading it too cheaply is a failure no check reports.
 
-    silent, more than fanOutAbove code files   fan-out
-    silent, or more than fanOutAbove           subagent
-    neither                                    in-thread
+    silent or unclassified, more than fanOutAbove code files   fan-out
+    silent or unclassified, or more than fanOutAbove           subagent
+    neither                                                    in-thread
 
-`countAsCode` lists exact paths that count toward size whatever `tests` and `notCode` say, for a
-data file the repository treats as code under a directory it otherwise leaves out.
+`countAsCode` lists paths that count toward size whatever `tests` and `notCode` say, for a data
+file the repository treats as code under a directory it otherwise leaves out. Each entry is a glob
+over the whole path, so an exact path matches only itself and `docs/*/owners.yaml` matches one file
+name in every folder under docs/.
 
 Patterns are fnmatch globs. One with a `/` matches the whole path, and its `*` crosses directories;
 one without matches the file name. The branch's files include uncommitted and untracked work. Both
@@ -42,11 +46,21 @@ DEFAULTS = {
     'silent': ['.github/workflows/*', '.husky/*', '.claude/hooks/*', '.claude/settings.json', 'migrations/*',
                '*/migrations/*', CONFIG, '.claude/pr-grade-lenses.md'],
     'silentCommand': None,
+    # Empty, so a repository grades its code in-thread only once it says which code is ordinary.
+    'ordinary': [],
     'tests': ['tests/*', 'test/*', '*/tests/*', '*/test/*', '__tests__/*', '*/__tests__/*', '*.test.*', '*.spec.*',
               '*_test.*', 'test_*'],
     'notCode': ['*.md', 'docs/*', 'LICENSE', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '*.lock', 'go.sum'],
     'countAsCode': [],
 }
+# A string where a list belongs is read one character at a time, and a lone `*` matches every file:
+# under `ordinary` that grades everything in-thread.
+LIST_KEYS = ('silent', 'ordinary', 'tests', 'notCode', 'countAsCode')
+UNCLASSIFIED = (f'unclassified: add it to `ordinary` in {CONFIG} if a test would catch a defect here, '
+                'or to `silent` if none would')
+# Printed once per run while the config sets no `ordinary`, so the dearer grade after an upgrade has a reason.
+NO_ORDINARY = (f'notice: no `ordinary` key in {CONFIG}, so unclassified code raises the grade mode (pr-grade 0.9.0); '
+               'list ordinary code there to grade it in-thread')
 
 
 def _git(root: Path, *args: str) -> str:
@@ -57,13 +71,25 @@ def repo_root(start: Path | None = None) -> Path:
     return Path(_git(start or Path.cwd(), 'rev-parse', '--show-toplevel').strip())
 
 
-def load_config(root: Path, text: str | None = None) -> dict:
-    """The repository's config over the defaults, read from `text` when given, else from `root`. A key it
-    sets replaces the default list whole."""
+def _given(root: Path, text: str | None = None) -> dict:
+    """The keys the repository's config sets, read from `text` when given, else from `root`. A missing file, or
+    one holding only whitespace, sets none."""
     if text is None:
         path = root / CONFIG
         text = path.read_text() if path.exists() else None
-    return {**DEFAULTS, **(json.loads(text) if text else {})}
+    return json.loads(text) if text and text.strip() else {}
+
+
+def load_config(root: Path, text: str | None = None) -> dict:
+    """The repository's config over the defaults, read from `text` when given, else from `root`. A key it
+    sets replaces the default list whole. A pattern or path key that is not a list of strings stops the
+    run."""
+    config = {**DEFAULTS, **_given(root, text)}
+    for key in LIST_KEYS:
+        value = config[key]
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            sys.exit(f'{key} in {CONFIG} must be a list of strings')
+    return config
 
 
 def matches(path: str, patterns: list[str]) -> str | None:
@@ -72,18 +98,26 @@ def matches(path: str, patterns: list[str]) -> str | None:
     return next((p for p in patterns if fnmatch.fnmatchcase(path if '/' in p else name, p)), None)
 
 
+def ordinary_notice(root: Path) -> str | None:
+    """NO_ORDINARY when the repository's config sets no `ordinary` key, else None."""
+    return None if 'ordinary' in _given(root) else NO_ORDINARY
+
+
 def code_files(changed: list[str], config: dict) -> list[str]:
-    """Changed files that count toward size: those `countAsCode` lists, and the rest that are neither tests
-    nor `notCode`."""
+    """Changed files that count toward size: those `countAsCode` matches, and the rest that are neither
+    tests nor `notCode`."""
     # A caller that embeds the selector may build its config without this key.
-    listed = set(config.get('countAsCode', ()))
-    return [p for p in changed if p in listed or not matches(p, config['tests']) and not matches(p, config['notCode'])]
+    listed = config.get('countAsCode', ())
+    # Equality too: as a glob, `docs/[id]/x.yaml` would match `docs/i/x.yaml` and never itself.
+    return [p for p in changed if any(p == entry or fnmatch.fnmatchcase(p, entry) for entry in listed)
+            or not matches(p, config['tests']) and not matches(p, config['notCode'])]
 
 
 def silent_reasons(changed: list[str], root: Path, config: dict, named: dict[str, str] | None = None) -> dict[str, str]:
-    """Each changed silent-failure file, with why it is one. `named` maps exact paths a caller knows are
-    silent to the reason, for a repository that embeds this selector. A failing `silentCommand` stops the
-    run with its own message: a grade picked without it could be too cheap."""
+    """Each changed silent-failure file, with why it is one, unclassified code included. `named` maps
+    exact paths a caller knows are silent to the reason, for a repository that embeds this selector. A
+    failing `silentCommand` stops the run with its own message: a grade picked without it could be too
+    cheap."""
     listed: set[str] = set()
     if config['silentCommand']:
         run = subprocess.run(config['silentCommand'], shell=True, cwd=root, capture_output=True, text=True)
@@ -91,6 +125,9 @@ def silent_reasons(changed: list[str], root: Path, config: dict, named: dict[str
             sys.exit(f"silentCommand failed (exit {run.returncode}): {run.stderr.strip() or run.stdout.strip()}")
         listed = set(run.stdout.split())
     named = named or {}
+    code = set(code_files(changed, config))
+    # A caller that embeds the selector may build its config without this key.
+    ordinary = config.get('ordinary', ())
     reasons = {}
     for path in changed:
         pattern = matches(path, config['silent'])
@@ -100,6 +137,8 @@ def silent_reasons(changed: list[str], root: Path, config: dict, named: dict[str
             reasons[path] = named[path]
         elif path in listed:
             reasons[path] = 'named by silentCommand'
+        elif path in code and not matches(path, ordinary):
+            reasons[path] = UNCLASSIFIED
     return reasons
 
 
@@ -112,7 +151,7 @@ def mode_for(silent: bool, code_count: int, fan_out_above: int) -> str:
 
 def assess(changed: list[str], root: Path, config: dict | None = None,
            named: dict[str, str] | None = None) -> tuple[str, dict[str, str], list[str]]:
-    """The mode, each silent-failure file with its reason, and every file the grade must cover: all of
+    """The mode, each silent-failure or unclassified file with its reason, and every file the grade must cover: all of
     them but `notCode`, plus any silent file or `countAsCode` path there. Tests are covered, since a test weakened after the
     grade can undo the proof a finding rested on. `named` is as `silent_reasons` takes it."""
     config = config or load_config(root)
@@ -191,8 +230,11 @@ def main() -> None:
         sys.exit(f'no changes since {args.base}; nothing to grade')
     mode, reasons, _ = assess(changed, root, config)
     print(f'mode: {mode}')
+    notice = ordinary_notice(root)
+    if notice:
+        print(notice)
     print(f"code files: {len(code_files(changed, config))} (more than {config['fanOutAbove']} raises the mode)")
-    print('silent-failure files:' if reasons else 'silent-failure files: none')
+    print('silent-failure and unclassified files:' if reasons else 'silent-failure and unclassified files: none')
     for path, reason in sorted(reasons.items()):
         print(f'  {path}: {reason}')
 

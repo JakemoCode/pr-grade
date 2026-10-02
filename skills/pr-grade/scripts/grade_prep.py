@@ -184,6 +184,7 @@ def main() -> None:
     if git(root, 'status', '--porcelain', '--untracked-files=no').stdout.strip():
         sys.exit('grade_prep: the change has uncommitted edits. Graders see commits only; commit, then run this again.')
     config = grade_mode.load_config(root)
+    notice = grade_mode.ordinary_notice(root)
     try:
         fork = git(root, 'merge-base', args.base, 'HEAD').stdout.strip()
     except subprocess.CalledProcessError as failed:
@@ -231,13 +232,15 @@ def main() -> None:
     locks = sorted({path for path in changed if path.rsplit('/', 1)[-1] in LOCKS})
     excludes = ''.join(f" ':!{path}'" for path in locks)
     left_out = f"; lock files left out: {', '.join(locks)}" if locks else ''
-    why = '; '.join(f'{path} ({reason})' for path, reason in sorted(reasons.items())) or 'no silent-failure files'
+    why = '; '.join(f'{path} ({reason})' for path, reason in sorted(reasons.items())) or 'no silent-failure or unclassified files'
     copy_notes = [line for line in made if line.startswith(('not linked', 'missing', 'warning', 'note', 'linked'))]
     caller_lines = callers(root, head, modified) or ['- none: the branch modified no function that existed before it']
     caller_lines += [f'- not derived for {note}; search by hand' for note in notes]
     caller_lines += [f'- {line.strip()}' for line in args.callers.splitlines() if line.strip()]
 
     print(f'mode: {mode} ({why})' + (f'; the grade block keeps {branch_mode}, the whole branch' if branch_mode != mode else ''))
+    if notice:
+        print(notice)
     print('graders: ' + ', '.join(f"{name} ({', '.join(ids)})" for name, ids in groups.items()))
     if mode == 'in-thread':
         print('In-thread: grade it yourself from the shared block, proving in the copy below.')

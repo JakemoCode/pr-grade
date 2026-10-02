@@ -72,12 +72,12 @@ def repo_root(start: Path | None = None) -> Path:
 
 
 def _given(root: Path, text: str | None = None) -> dict:
-    """The keys the repository's config sets, read from `text` when given, else from `root`. A missing or
-    empty file sets none."""
+    """The keys the repository's config sets, read from `text` when given, else from `root`. A missing file, or
+    one holding only whitespace, sets none."""
     if text is None:
         path = root / CONFIG
         text = path.read_text() if path.exists() else None
-    return json.loads(text) if text else {}
+    return json.loads(text) if text and text.strip() else {}
 
 
 def load_config(root: Path, text: str | None = None) -> dict:

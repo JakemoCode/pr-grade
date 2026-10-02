@@ -216,7 +216,7 @@ class NoticeTest(Fixture):
     def test_an_empty_config_file_prints_the_notice(self) -> None:
         # load_config reads an empty file as no config; the notice must too, not stop on a parse error.
         (self.root / '.claude').mkdir()
-        (self.root / grade_mode.CONFIG).write_text('')
+        (self.root / grade_mode.CONFIG).write_text('  \n')
         self.assertIn(grade_mode.NO_ORDINARY, self.run_main())
 
     def test_a_config_with_ordinary_prints_no_notice(self) -> None:

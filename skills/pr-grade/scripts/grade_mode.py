@@ -56,6 +56,11 @@ DEFAULTS = {
 # A string where a list belongs is read one character at a time, and a lone `*` matches every file:
 # under `ordinary` that grades everything in-thread.
 LIST_KEYS = ('silent', 'ordinary', 'tests', 'notCode', 'countAsCode')
+UNCLASSIFIED = (f'unclassified: add it to `ordinary` in {CONFIG} if a test would catch a defect here, '
+                'or to `silent` if none would')
+# Printed once per run while the config sets no `ordinary`, so the dearer grade after an upgrade has a reason.
+NO_ORDINARY = (f'notice: no `ordinary` key in {CONFIG}, so unclassified code raises the grade mode (pr-grade 0.9.0); '
+               'list ordinary code there to grade it in-thread')
 
 
 def _git(root: Path, *args: str) -> str:
@@ -85,6 +90,12 @@ def matches(path: str, patterns: list[str]) -> str | None:
     """The first pattern `path` matches, or None."""
     name = posixpath.basename(path)
     return next((p for p in patterns if fnmatch.fnmatchcase(path if '/' in p else name, p)), None)
+
+
+def ordinary_notice(root: Path) -> str | None:
+    """NO_ORDINARY when the repository's config sets no `ordinary` key, else None."""
+    path = root / CONFIG
+    return None if path.exists() and 'ordinary' in json.loads(path.read_text()) else NO_ORDINARY
 
 
 def code_files(changed: list[str], config: dict) -> list[str]:
@@ -122,7 +133,7 @@ def silent_reasons(changed: list[str], root: Path, config: dict, named: dict[str
         elif path in listed:
             reasons[path] = 'named by silentCommand'
         elif path in code and not matches(path, ordinary):
-            reasons[path] = 'unclassified: neither silent nor ordinary names it'
+            reasons[path] = UNCLASSIFIED
     return reasons
 
 
@@ -214,6 +225,9 @@ def main() -> None:
         sys.exit(f'no changes since {args.base}; nothing to grade')
     mode, reasons, _ = assess(changed, root, config)
     print(f'mode: {mode}')
+    notice = ordinary_notice(root)
+    if notice:
+        print(notice)
     print(f"code files: {len(code_files(changed, config))} (more than {config['fanOutAbove']} raises the mode)")
     print('silent-failure files:' if reasons else 'silent-failure files: none')
     for path, reason in sorted(reasons.items()):

@@ -238,6 +238,9 @@ def main() -> None:
     caller_lines += [f'- {line.strip()}' for line in args.callers.splitlines() if line.strip()]
 
     print(f'mode: {mode} ({why})' + (f'; the grade block keeps {branch_mode}, the whole branch' if branch_mode != mode else ''))
+    notice = grade_mode.ordinary_notice(root)
+    if notice:
+        print(notice)
     print('graders: ' + ', '.join(f"{name} ({', '.join(ids)})" for name, ids in groups.items()))
     if mode == 'in-thread':
         print('In-thread: grade it yourself from the shared block, proving in the copy below.')

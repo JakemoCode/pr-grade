@@ -144,7 +144,8 @@ class SilentTest(Fixture):
 class UnclassifiedTest(Fixture):
     """Code that neither `silent` nor `ordinary` names grades as silent: no rule has looked at it."""
 
-    UNCLASSIFIED = 'unclassified: neither silent nor ordinary names it'
+    UNCLASSIFIED = ('unclassified: add it to `ordinary` in .claude/pr-grade.json if a test would catch a defect here, '
+                    'or to `silent` if none would')
 
     def test_code_no_pattern_names_grades_in_a_subagent(self) -> None:
         self.assertEqual(self.assess(['src/leaf_0.py'])[:2], ('subagent', {'src/leaf_0.py': self.UNCLASSIFIED}))
@@ -187,6 +188,34 @@ class UnclassifiedTest(Fixture):
         config = {**grade_mode.load_config(self.root)}
         config.pop('ordinary', None)
         self.assertEqual(grade_mode.assess(['src/a.py'], self.root, config)[0], 'subagent')
+
+
+class NoticeTest(Fixture):
+    """The command line says once why grades got dearer while the config sets no `ordinary`."""
+
+    def run_main(self) -> str:
+        git(self.root, 'commit', '-q', '--allow-empty', '-m', 'base')
+        git(self.root, 'checkout', '-q', '-b', 'topic')
+        for name in ('a.py', 'b.py'):
+            (self.root / 'src').mkdir(exist_ok=True)
+            (self.root / 'src' / name).write_text('x = 1\n')
+        run = subprocess.run([sys.executable, str(Path(grade_mode.__file__)), '--base', 'main'], cwd=self.root,
+                             capture_output=True, text=True, check=True)
+        return run.stdout
+
+    def test_a_config_without_ordinary_prints_the_notice_once(self) -> None:
+        self.configure(silent=[])
+        out = self.run_main()
+        self.assertEqual(out.count(grade_mode.NO_ORDINARY), 1)
+        for path in ('src/a.py', 'src/b.py'):
+            self.assertIn(f'  {path}: {UnclassifiedTest.UNCLASSIFIED}\n', out)
+
+    def test_no_config_at_all_prints_the_notice(self) -> None:
+        self.assertIn(grade_mode.NO_ORDINARY, self.run_main())
+
+    def test_a_config_with_ordinary_prints_no_notice(self) -> None:
+        self.configure(ordinary=['src/*'])
+        self.assertNotIn('notice:', self.run_main())
 
 
 class CoverageTest(Fixture):

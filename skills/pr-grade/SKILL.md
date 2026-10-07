@@ -206,7 +206,7 @@ Run the old `remove:` line, then prepare the re-grade from the fix commits alone
 python3 <base>/scripts/grade_prep.py --base <the last commit graded> --settled '...' --declined '...'
 ```
 
-Grade the fix commits in the mode it prints, with every lens. The copies it makes hold the fixed code, and the L7 scan covers the same commits. The grade block keeps the whole branch's mode, which the prep reads from `origin/main` (or `--branch-base`), prints beside the round's, and passes to the merge's draft block. A repair is a change and gets the same treatment as any other, so a two-line fix to ordinary code is graded in-thread even inside a pull request that needed a fan-out, and a fix that touches silent-failure code gets at least a subagent. Without `--base` the selector sizes the whole branch, and every round costs what the first one did.
+Grade the fix commits in the mode it prints, with every lens. Pass the same `--skip` as the first round: the prep does not remember it, and a lens left out of it is graded and drafted clear instead of not applicable. The copies it makes hold the fixed code, and the L7 scan covers the same commits. The grade block keeps the whole branch's mode, which the prep reads from `origin/main` (or `--branch-base`), prints beside the round's, and passes to the merge's draft block. A repair is a change and gets the same treatment as any other, so a two-line fix to ordinary code is graded in-thread even inside a pull request that needed a fan-out, and a fix that touches silent-failure code gets at least a subagent. Without `--base` the selector sizes the whole branch, and every round costs what the first one did.
 
 This is not ceremony. On the pull request above:
 

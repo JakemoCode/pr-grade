@@ -165,13 +165,21 @@ def link(repo: Path, sha: str, wanted: list[dict], configured: bool, copies: lis
 def sweep(parent: Path, repo: Path, now: float) -> None:
     """Removes this repository's roots that saw no activity for STALE_AFTER: nothing made, and no report
     written. Age from the root's creation alone deleted a round whose graders had reported but whose
-    coordinator had not merged yet, and a root another repository made is that repository's to sweep."""
+    coordinator had not merged yet. A root another repository made is that repository's to sweep while
+    it exists. One whose repository is gone, such as a removed worktree, or one with no marker, which a
+    grader's late report makes after the root was removed, no other make would ever reach, so it is
+    swept here once idle."""
     for old in parent.glob(PREFIX + '*'):
         marker = old / MARKER
         try:
-            if old.is_symlink() or marker.read_text().split('\n', 1)[0] != str(repo):
+            if old.is_symlink():
                 continue
-            last = max(path.stat().st_mtime for path in [marker, *old.glob('*/grade.md')])
+            owner = marker.read_text().split('\n', 1)[0] if marker.is_file() else None
+            if owner is not None and owner != str(repo) and Path(owner).is_dir():
+                continue
+            # A markerless root's own time also covers one a make is creating right now.
+            last = max(path.stat().st_mtime for path in [marker if owner is not None else old,
+                                                          *old.glob('*/grade.md')])
         except OSError:
             # Gone under a concurrent sweep, or unreadable: either way not this call's to remove.
             continue

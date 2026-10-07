@@ -4,6 +4,10 @@ Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an 
 
 CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` without raising the version and adding its heading here. Label one `hold-release` to merge it unreleased, when a change lands over several pull requests.
 
+## 0.10.1
+
+- `proof_dir.py make` sweeps two kinds of root no make ever reached. A root whose marker names a repository that no longer exists, such as a worktree removed after its grade, is swept once idle for seven days, where before only that repository's own make could sweep it. A root with no marker is swept on the same terms; a grader that writes its report after the coordinator removed the root makes one. A root of a repository that still exists is still left to that repository, and a markerless root's own time keeps one a make is creating right now.
+
 ## 0.10.0
 
 - `grade_prep.py --skip L2,L3` leaves lenses out of a grade. A repository whose lens file scopes a lens to some paths could only keep it out by passing it to `--groups` as a group of its own, making that group a proof copy no grader used, and writing the group's report by hand so the merge would not score the round 2/5. A skipped lens gets no grader and no proof copy, `grade.json` records it under `skipped`, and the prep prints a `skipped:` line. `--skip` refuses a word that is not a lens id the lens file defines, a lens a `--groups` group also names, and a list that skips every lens.

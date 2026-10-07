@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Everything a /pr-grade coordinator hands its graders, in one call.
 
-    python3 grade_prep.py [--base origin/main] [--groups NAME=L1,L2 ...] [--settled TEXT] [--declined TEXT]
-                          [--callers TEXT]
+    python3 grade_prep.py [--base origin/main] [--groups NAME=L1,L2 ...] [--skip L2,L3] [--settled TEXT]
+                          [--declined TEXT] [--callers TEXT]
 
 Run it from inside the repository once the change is committed. It picks the mode as grade_mode.py
 does, splits the lenses among graders (the lens file's `## Fan-out groups` table, or timing, reach, and
@@ -14,7 +14,9 @@ It ends with the command that merges the graders' reports and the one that remov
 `--base` is where the branch left, or the last commit graded for a re-grade. `--settled` names the
 checks that already passed at the head, with their results, and `--declined` the review findings the
 author declined, with reasons; each is pasted into every prompt as given. `--groups` replaces the
-groups, one `NAME=L1,L2` per grader. `--callers` adds callers found by hand to the derived list.
+groups, one `NAME=L1,L2` per grader. `--skip` names lenses that do not apply to this change: no grader
+holds them, no proof copy is made for them, and `grade.json` records them, so the merge clears each as
+`L2 (not applicable)`. `--callers` adds callers found by hand to the derived list.
 
 Callers are derived for functions in TypeScript, JavaScript, and Python that existed before the branch.
 A changed type, option, or constant, and code in any other language, is named as not derived, never
@@ -62,9 +64,26 @@ def slug(name: str) -> str:
     return re.sub(r'[^A-Za-z0-9]+', '-', name).strip('-').lower() or 'group'
 
 
-def groups_for(mode: str, lenses: list[str], lens_text: str | None, given: list[str]) -> dict[str, list[str]]:
-    """Grader name to its lenses. Every lens lands in exactly one group: one the table leaves out gets a
-    group of its own, so a lens the lens file added is never left ungraded."""
+def skipped_lenses(given: list[str], lenses: list[str]) -> list[str]:
+    """The lenses `--skip` names, in the lens file's order. Each is a lens id the lens file defines, and
+    at least one lens is left to grade."""
+    named = [item for value in given for item in re.split(r'[\s,]+', value) if item]
+    bad = [item for item in named if not re.fullmatch(r'L\d+', item) or item not in lenses]
+    if bad:
+        sys.exit(f"grade_prep: --skip names {', '.join(bad)}, which the lens file does not define as lenses")
+    skipped = [lens for lens in lenses if lens in named]
+    if skipped and len(skipped) == len(lenses):
+        sys.exit('grade_prep: --skip names every lens, which leaves nothing to grade')
+    return skipped
+
+
+def groups_for(mode: str, lenses: list[str], lens_text: str | None, given: list[str],
+               skipped: list[str] | None = None) -> dict[str, list[str]]:
+    """Grader name to its lenses. Every lens not in `skipped` lands in exactly one group: one the table
+    leaves out gets a group of its own, so a lens the lens file added is never left ungraded. A skipped
+    lens lands in none, and a group it leaves empty is dropped."""
+    skipped = skipped or []
+    graded = [lens for lens in lenses if lens not in skipped]
     if given:
         groups = {}
         for item in given:
@@ -72,13 +91,17 @@ def groups_for(mode: str, lenses: list[str], lens_text: str | None, given: list[
             if slug(name) in groups:
                 sys.exit(f'grade_prep: two --groups are named {slug(name)!r}')
             groups[slug(name)] = re.findall(r'L\d+', ids)
+        both = sorted({lens for ids in groups.values() for lens in ids if lens in skipped})
+        if both:
+            sys.exit(f"grade_prep: {', '.join(both)} is in --groups and --skip; grade it or skip it")
     elif mode != 'fan-out':
-        return {'grade': lenses}
+        return {'grade': graded}
     else:
         section = re.search(r'(?ms)^## Fan-out groups\s*$(.*?)(?=^## |\Z)', lens_text or '')
         rows = GROUP_ROW.findall(section.group(1)) if section else []
-        groups = {slug(name): re.findall(r'L\d+', ids) for name, ids in rows if name.lower() != 'group'}
-        groups = groups or {name: [lens for lens in ids if lens in lenses] for name, ids in DEFAULT_GROUPS.items()}
+        groups = {slug(name): [lens for lens in re.findall(r'L\d+', ids) if lens not in skipped]
+                  for name, ids in rows if name.lower() != 'group'}
+        groups = groups or {name: [lens for lens in ids if lens in graded] for name, ids in DEFAULT_GROUPS.items()}
     held = [lens for ids in groups.values() for lens in ids]
     twice = sorted({lens for lens in held if held.count(lens) > 1})
     if twice:
@@ -87,7 +110,7 @@ def groups_for(mode: str, lenses: list[str], lens_text: str | None, given: list[
     unknown = sorted(placed - set(lenses))
     if unknown:
         sys.exit(f"grade_prep: groups name {', '.join(unknown)}, which the lens file does not define")
-    rest = [lens for lens in lenses if lens not in placed]
+    rest = [lens for lens in graded if lens not in placed]
     if rest:
         groups['other-lenses'] = rest
     return {name: ids for name, ids in groups.items() if ids}
@@ -173,6 +196,8 @@ def main() -> None:
     ap.add_argument('--branch-base', help='on a re-grade, where the whole branch began, for the Mode the grade '
                                            'block keeps (default origin/main, or --base when that is not given)')
     ap.add_argument('--groups', action='append', default=[], metavar='NAME=L1,L2')
+    ap.add_argument('--skip', action='append', default=[], metavar='L2,L3',
+                    help='lenses that do not apply to this change; no grader holds them')
     ap.add_argument('--settled', default='')
     ap.add_argument('--declined', default='')
     ap.add_argument('--callers', default='', help='callers found by hand, for a type, option, or other language')
@@ -211,7 +236,8 @@ def main() -> None:
     lens_path = root / config['lenses']
     lens_text = lens_path.read_text() if lens_path.is_file() else None
     lenses = grade_block.lens_ids(lens_text)
-    groups = groups_for(mode, lenses, lens_text, args.groups)
+    skipped = skipped_lenses(args.skip, lenses)
+    groups = groups_for(mode, lenses, lens_text, args.groups, skipped)
 
     lines = {path: ranges for path, ranges in grade_mode.changed_lines(args.base, root).items() if path in committed}
     modified, notes = modified_functions(root, fork, lines, config)
@@ -226,7 +252,7 @@ def main() -> None:
     proof_root = Path(fields['root'])
     (proof_root / 'grade.json').write_text(json.dumps(
         {'repository': str(root), 'mode': branch_mode, 'roundMode': mode, 'base': fork, 'head': head, 'lenses': lenses,
-         'groups': groups},
+         'groups': groups, 'skipped': skipped},
         indent=1) + '\n')
 
     locks = sorted({path for path in changed if path.rsplit('/', 1)[-1] in LOCKS})
@@ -242,6 +268,9 @@ def main() -> None:
     if notice:
         print(notice)
     print('graders: ' + ', '.join(f"{name} ({', '.join(ids)})" for name, ids in groups.items()))
+    if skipped:
+        print(f"skipped: {', '.join(skipped)}, which no grader holds; the block clears each as "
+              f'`{skipped[0]} (not applicable)`')
     if mode == 'in-thread':
         print('In-thread: grade it yourself from the shared block, proving in the copy below.')
     print('\n===== shared block =====\n')

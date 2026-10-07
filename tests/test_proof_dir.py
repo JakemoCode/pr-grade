@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -239,17 +240,53 @@ class RemoveTest(Fixture):
         self.assertIn('copy grade', self.make())
 
     def test_another_repositorys_root_is_left_to_it(self) -> None:
+        _, theirs = self.other_root()
+        self.age(theirs / proof_dir.MARKER)
+        self.make()
+        self.assertTrue(theirs.exists())
+
+    def other_root(self) -> tuple[Path, Path]:
+        """Another repository, and a proof root it made under the same parent."""
         other = self.parent.parent / 'other'
         other.mkdir()
         git(other, 'init', '-q', '-b', 'main')
         (other / 'x.txt').write_text('x\n')
         git(other, 'add', '-A')
         git(other, 'commit', '-q', '-m', 'x')
-        theirs = Path(fields(proof_dir.make(other, git(other, 'rev-parse', 'HEAD').strip(), ['grade'], {},
-                                            self.parent))['root'])
+        return other, Path(fields(proof_dir.make(other, git(other, 'rev-parse', 'HEAD').strip(), ['grade'], {},
+                                                 self.parent))['root'])
+
+    def test_an_idle_root_of_a_repository_that_is_gone_is_swept(self) -> None:
+        # A removed worktree never runs make again, so no other sweep would ever reach its root.
+        other, theirs = self.other_root()
         self.age(theirs / proof_dir.MARKER)
+        shutil.rmtree(other)
+        self.make()
+        self.assertFalse(theirs.exists())
+
+    def test_a_recent_root_of_a_repository_that_is_gone_is_kept(self) -> None:
+        other, theirs = self.other_root()
+        shutil.rmtree(other)
         self.make()
         self.assertTrue(theirs.exists())
+
+    def test_an_idle_root_without_a_marker_is_swept(self) -> None:
+        # A grader that writes its report after the coordinator removed the root makes it again, markerless.
+        orphan = self.parent / f'{proof_dir.PREFIX}orphan'
+        (orphan / 'grade').mkdir(parents=True)
+        (orphan / 'grade' / 'grade.md').write_text('Score: 5/5\n')
+        self.age(orphan / 'grade' / 'grade.md')
+        self.age(orphan)
+        self.make()
+        self.assertFalse(orphan.exists())
+
+    def test_a_markerless_root_with_a_recent_report_is_kept(self) -> None:
+        orphan = self.parent / f'{proof_dir.PREFIX}orphan'
+        (orphan / 'grade').mkdir(parents=True)
+        (orphan / 'grade' / 'grade.md').write_text('Score: 5/5\n')
+        self.age(orphan)
+        self.make()
+        self.assertTrue(orphan.exists())
 
     def test_the_printed_remove_line_undoes_the_printed_make(self) -> None:
         env = {**os.environ, 'TMPDIR': str(self.parent)}

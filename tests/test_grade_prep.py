@@ -56,6 +56,54 @@ class GroupsTest(unittest.TestCase):
     def test_one_grader_holds_every_lens_below_fan_out(self) -> None:
         self.assertEqual(grade_prep.groups_for('subagent', LENSES, None, []), {'grade': LENSES})
 
+    def test_a_skipped_lens_reaches_no_group_and_a_group_it_empties_is_dropped(self) -> None:
+        self.assertEqual(grade_prep.groups_for('fan-out', LENSES, None, [], ['L2', 'L3', 'L4']),
+                         {'timing': ['L1', 'L7'], 'lifetime-and-contract': ['L5', 'L6', 'L8']})
+
+    def test_a_skipped_lens_leaves_the_lens_files_table_too(self) -> None:
+        table = '## Fan-out groups\n\n| Group | Lenses |\n|---|---|\n| Timing | L1, L2, L7 |\n| Rest | L3, L4, L5, L6, L8 |\n'
+        self.assertEqual(grade_prep.groups_for('fan-out', LENSES, table, [], ['L2']),
+                         {'timing': ['L1', 'L7'], 'rest': ['L3', 'L4', 'L5', 'L6', 'L8']})
+
+    def test_one_grader_holds_every_lens_not_skipped(self) -> None:
+        self.assertEqual(grade_prep.groups_for('subagent', LENSES, None, [], ['L4']),
+                         {'grade': ['L1', 'L2', 'L3', 'L5', 'L6', 'L7', 'L8']})
+
+    def test_a_given_group_naming_a_skipped_lens_stops_the_run(self) -> None:
+        with self.assertRaises(SystemExit) as stopped:
+            grade_prep.groups_for('fan-out', LENSES, None, ['timing=L1,L2'], ['L2'])
+        self.assertIn('L2', str(stopped.exception.code))
+
+    def test_a_skipped_lens_left_out_of_given_groups_gets_no_grader(self) -> None:
+        self.assertEqual(grade_prep.groups_for('fan-out', LENSES, None, ['timing=L1,L7'], ['L2', 'L3']),
+                         {'timing': ['L1', 'L7'], 'other-lenses': ['L4', 'L5', 'L6', 'L8']})
+
+
+class SkipTest(unittest.TestCase):
+    def test_skipped_lenses_come_back_in_the_lens_files_order(self) -> None:
+        self.assertEqual(grade_prep.skipped_lenses(['L5,L2', 'L3'], LENSES), ['L2', 'L3', 'L5'])
+
+    def test_spaces_after_the_commas_are_allowed(self) -> None:
+        self.assertEqual(grade_prep.skipped_lenses(['L2, L3'], LENSES), ['L2', 'L3'])
+
+    def test_nothing_given_skips_nothing(self) -> None:
+        self.assertEqual(grade_prep.skipped_lenses([], LENSES), [])
+
+    def test_a_lens_the_file_does_not_define_stops_the_run(self) -> None:
+        with self.assertRaises(SystemExit) as stopped:
+            grade_prep.skipped_lenses(['L2,L12'], LENSES)
+        self.assertIn('L12', str(stopped.exception.code))
+
+    def test_a_word_that_is_not_a_lens_id_stops_the_run(self) -> None:
+        # `--skip timing` must not read as skipping nothing.
+        with self.assertRaises(SystemExit) as stopped:
+            grade_prep.skipped_lenses(['timing'], LENSES)
+        self.assertIn('timing', str(stopped.exception.code))
+
+    def test_skipping_every_lens_stops_the_run(self) -> None:
+        with self.assertRaises(SystemExit):
+            grade_prep.skipped_lenses([','.join(LENSES)], LENSES)
+
 
 class SymbolTest(unittest.TestCase):
     def test_what_a_caller_writes(self) -> None:
@@ -139,6 +187,26 @@ class CliTest(unittest.TestCase):
         meta = json.loads((root / 'grade.json').read_text())
         self.assertEqual((meta['mode'], meta['groups']['rest']), ('subagent', ['L3', 'L4', 'L5', 'L6', 'L8']))
         self.assertIn(f"- Write your report to: {root / 'timing' / 'grade.md'}", out)
+
+    def test_a_skipped_lens_gets_no_grader_and_no_proof_copy(self) -> None:
+        out = self.prep('--groups', 'timing=L1,L7', '--groups', 'rest=L4,L5,L6,L8', '--skip', 'L2,L3')
+        self.assertEqual(len(re.findall(r'- Your proof copy: (\S+)', out)), 2)
+        self.assertNotIn('===== other-lenses =====', out)
+        self.assertIn('skipped: L2, L3', out)
+        root = Path(re.search(r'^merge: .* merge (\S+)$', out, re.M).group(1))
+        meta = json.loads((root / 'grade.json').read_text())
+        self.assertEqual((meta['skipped'], list(meta['groups'])), (['L2', 'L3'], ['timing', 'rest']))
+        self.assertEqual(meta['lenses'], LENSES)
+
+    def test_without_skip_grade_json_records_none_skipped(self) -> None:
+        root = Path(re.search(r'^merge: .* merge (\S+)$', self.prep(), re.M).group(1))
+        self.assertEqual(json.loads((root / 'grade.json').read_text())['skipped'], [])
+
+    def test_a_bad_skip_stops_the_run_before_any_copy_is_made(self) -> None:
+        run = self.run_cli('--skip', 'L12')
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('L12', run.stderr)
+        self.assertEqual(list(self.proofs.iterdir()), [])
 
     def test_a_subagent_may_write_to_the_report_path(self) -> None:
         # Claude Code 2.1.286 refuses a subagent's Write to a basename matching this, case-insensitively.

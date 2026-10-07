@@ -29,9 +29,11 @@ rules it is checked against.
 
 `merge` reads the report each grader wrote under the root grade_prep.py printed, or the one `--report`
 gives for a group whose grader replied without writing its file. It prints where every lens ended
-(clear, a finding, an open claim, or unaccounted), the findings with any two at one line flagged, the
-lowest score the rules allow, and a draft block. It settles nothing that needs
-judgment: two lines with one cause, a clearance against a proof, a 3 for a design decision, or a 1.
+(clear, not applicable, a finding, an open claim, or unaccounted), the findings with any two at one line
+flagged, the lowest score the rules allow, and a draft block. The draft keeps each grader's notes in
+`Verified and clear` and writes a lens grade_prep.py skipped as `L2 (not applicable)`. It settles
+nothing that needs judgment: two lines with one cause, a clearance against a proof, a 3 for a design
+decision, or a 1.
 """
 from __future__ import annotations
 
@@ -70,6 +72,7 @@ NEW_ITEM = re.compile(r'([-*+]|\d+[.)])[ \t]|(L\d+|P[123])\b')
 # `L2's pool releases` continues a claim, unless its line names a rank or the claim above is a P3.
 LENS_POSSESSIVE = re.compile(r"L\d+['’]s\b")
 RANK = re.compile(r'\bP[123]\b')
+SKIPPED = 'not applicable: skipped by grade_prep.py --skip'
 
 
 def without_code(markdown: str) -> str:
@@ -100,6 +103,12 @@ def verified_lenses(text: str) -> set[str]:
     or followed by a note in parentheses: `L1 L2` and `L1 (a) L2 (b)` clear both, `L3 (L2 not applicable)`
     clears L3 only, and `L2 not applicable` clears nothing, since only the grader knows what the words
     meant."""
+    return set(cleared_notes(text))
+
+
+def cleared_notes(text: str) -> dict[str, str]:
+    """Each lens a `Verified and clear` value clears, as `verified_lenses` reads it, with the notes that
+    follow its id joined by a space, or an empty string for a bare id."""
     items, depth, item = [], 0, ''
     for ch in text + ',':
         if ch == ',' and depth == 0:
@@ -108,21 +117,25 @@ def verified_lenses(text: str) -> set[str]:
             continue
         depth = max(depth + (ch == '(') - (ch == ')'), 0)
         item += ch
-    cleared: set[str] = set()
+    cleared: dict[str, str] = {}
     for item in items:
-        rest, found = item.strip().rstrip('.'), []
+        rest, found, last = item.strip().rstrip('.'), {}, None
         while rest:
             lead = LEAD_ID.match(rest)
             end = None if lead or not rest.startswith('(') else _note_end(rest)
             if lead:
-                found.append(lead[1])
+                last = lead[1]
+                found.setdefault(last, [])
                 rest = rest[lead.end():]
             elif end is not None:
+                if last is not None:
+                    found[last].append(rest[:end])
                 rest = rest[end:].lstrip()
             else:
-                found = []
+                found = {}
                 break
-        cleared.update(found)
+        for lens, notes in found.items():
+            cleared[lens] = ' '.join(note for note in (cleared.get(lens, ''), *notes) if note)
     return cleared
 
 
@@ -243,7 +256,7 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
             sys.exit(f'--report {group}: {group} wrote {proof_root / group / "grade.md"}, which the merge reads')
         if not text.strip():
             sys.exit(f'--report {group}: the report is empty')
-    lenses, status = meta['lenses'], {}
+    lenses, status, notes = meta['lenses'], {}, {}
     findings: list[dict] = []
     open_claims, outside, scores, out = [], [], [], []
     for group, held in meta['groups'].items():
@@ -274,14 +287,20 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
                     status[lens] = f'open claim from {group}'
         outside += [f'{group}: {item}' for item in fields.get('Outside my lenses', [])
                     if item.lower().rstrip('.') != 'none']
-        verified = verified_lenses(', '.join(fields.get('Verified and clear', [])))
+        verified = cleared_notes(', '.join(fields.get('Verified and clear', [])))
         for lens in held:
             status.setdefault(lens, 'clear' if lens in verified else f'unaccounted: ask {group} which')
+            notes[lens] = verified.get(lens, '')
+    # A skipped lens holds no grader, so a finding or open claim another grader raised under it outranks the skip.
+    for lens in meta.get('skipped', []):
+        status.setdefault(lens, SKIPPED)
     blocking_findings = [f for f in findings if f['rank'] != 'P3']
     count = len(blocking_findings) + sum(1 for _, _, blocking in open_claims if blocking)
-    unapplied = [lens for lens in lenses if not status.get(lens, '').startswith(('clear', 'P', 'open'))]
+    unapplied = [lens for lens in lenses if status.get(lens) != SKIPPED
+                 and not status.get(lens, '').startswith(('clear', 'P', 'open'))]
     floor = 2 if unapplied else 5 if count == 0 else 4 if count == 1 else 3
-    clear = [lens for lens in lenses if status.get(lens) == 'clear']
+    clear = [f"{lens} {notes[lens]}".rstrip() if status.get(lens) == 'clear' else f'{lens} (not applicable)'
+             for lens in lenses if status.get(lens) in ('clear', SKIPPED)]
     # A 2 comes from a lens no report assessed, so that explains the score before any finding does.
     first = ('not assessed: ' + '; '.join(f"{lens} ({status.get(lens, 'not held by any grader')})" for lens in unapplied)
              if unapplied else blocking_findings[0]['title'] if blocking_findings

@@ -427,12 +427,25 @@ class MergeTest(unittest.TestCase):
         self.write('timing', report('5/5', 'L1 (proved by test_x)\n    L2 (no await)\n'
                                                 "    L2's pool checked by hand"))
         self.write('reach', report('5/5', 'L3'))
-        self.assertEqual(self.block()['Verified and clear'], 'L1, L2, L3')
+        self.assertEqual(self.block()['Verified and clear'], 'L1 (proved by test_x), L2 (no await), L3')
 
     def test_one_lens_per_line_with_notes_clears_each(self) -> None:
         self.write('timing', report('5/5', '\nL1 (proved by test_x)\nL2 (no await)'))
         self.write('reach', report('5/5', 'L3'))
-        self.assertEqual(self.block()['Verified and clear'], 'L1, L2, L3')
+        self.assertEqual(self.block()['Verified and clear'], 'L1 (proved by test_x), L2 (no await), L3')
+
+    def test_the_draft_keeps_each_graders_note(self) -> None:
+        # A note can say the grader judged the lens not applicable; a checker can only refuse what it sees.
+        self.write('timing', report('5/5', 'L1 (not applicable), L2'))
+        self.write('reach', report('5/5', 'L3 (no caller outside src/b.py, a.py:4)'))
+        block = self.block()
+        self.assertEqual(block['Verified and clear'], 'L1 (not applicable), L2, L3 (no caller outside src/b.py, a.py:4)')
+        self.assertEqual(grade_block.verified_lenses(block['Verified and clear']), set(LENSES))
+
+    def test_a_note_on_a_lens_a_finding_holds_is_dropped(self) -> None:
+        self.write('timing', report('4/5', 'L1 (no await), L2', findings='P1 L1 src/a.py:9 - late write lands\n'))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertEqual(self.block()['Verified and clear'], 'L2, L3')
 
     def test_a_lens_named_with_a_qualifier_is_unaccounted(self) -> None:
         self.write('timing', report('5/5', 'L1, L2 not applicable'))
@@ -447,6 +460,46 @@ class MergeTest(unittest.TestCase):
     def test_an_unapplied_lens_is_the_blocking_sentence(self) -> None:
         self.write('timing', report('5/5', 'L1, L2'))
         self.assertIn('Blocking: not assessed: L3 (no report from reach)', self.merged())
+
+    def skip(self, *lenses: str, groups: dict | None = None) -> None:
+        (self.root / 'grade.json').write_text(json.dumps(
+            {'mode': 'fan-out', 'head': HEAD, 'lenses': LENSES, 'groups': groups or {'timing': ['L1', 'L2']},
+             'skipped': list(lenses)}))
+
+    def test_a_skipped_lens_is_applied_and_drafted_as_not_applicable(self) -> None:
+        self.skip('L3')
+        self.write('timing', report('5/5', 'L1, L2'))
+        merged = self.merged()
+        self.assertIn('L3  not applicable: skipped by grade_prep.py --skip', merged)
+        self.assertIn('reports: timing 5/5\n', merged)
+        block = self.block()
+        self.assertEqual((block['Score'], block['Verified and clear']), ('5/5', 'L1, L2, L3 (not applicable)'))
+
+    def test_a_skipped_lens_keeps_the_lens_files_order(self) -> None:
+        self.skip('L2', groups={'timing': ['L1'], 'reach': ['L3']})
+        self.write('timing', report('5/5', 'L1'))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertEqual(self.block()['Verified and clear'], 'L1, L2 (not applicable), L3')
+
+    def test_a_finding_on_a_skipped_lens_outranks_the_skip(self) -> None:
+        # Skipping says no rule put the lens in scope; a proven defect under it still counts.
+        self.skip('L3')
+        self.write('timing', report('4/5', 'L1, L2', findings='P2 L3 src/a.py:9 - a caller skips the guard\n'))
+        block = self.block()
+        self.assertEqual((block['Score'], block['Verified and clear']), ('4/5', 'L1, L2'))
+        self.assertIn('L3  P2 at src/a.py:9', self.merged())
+
+    def test_an_open_claim_on_a_skipped_lens_outranks_the_skip(self) -> None:
+        self.skip('L3')
+        self.write('timing', report('5/5', 'L1, L2', unverified='L3 would be P2: a caller may skip the guard'))
+        block = self.block()
+        self.assertEqual((block['Score'], block['Verified and clear']), ('4/5', 'L1, L2'))
+
+    def test_a_grade_json_without_skipped_skips_nothing(self) -> None:
+        # A root from an older grade_prep.py has no `skipped` key.
+        self.write('timing', report('5/5', 'L1, L2'))
+        self.assertIn('L3  no report from reach', self.merged())
+        self.assertEqual(self.block()['Score'], '2/5')
 
     def run_merge(self, *reports: str, stdin: str = '') -> subprocess.CompletedProcess:
         args = [arg for given in reports for arg in ('--report', given)]

@@ -6,7 +6,8 @@ CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` wi
 
 ## 0.11.1
 
-- `merge` reads a finding whose file is written from the repository's or a proof copy's absolute path as the path inside it, so `<repo>/scripts/canary_scoring.py:95` reads as `scripts/canary_scoring.py:95`. 0.11.0 flagged it as not in the head commit though the diff changed it, and missed its overlap with the same line written relative. Either spelling of a root counts, as written in `grade.json` and as resolved, since git prints `/private/var` for macOS's `/var`. An absolute path outside both keeps the note.
+- `merge` reads a finding whose file is written from the repository's or a proof copy's absolute path as the path inside it, so `<repo>/scripts/canary_scoring.py:95` reads as `scripts/canary_scoring.py:95`. 0.11.0 flagged it as not in the head commit though the diff changed it, and missed its overlap with the same line written relative. A path cited through a link, such as macOS's `/var` for the `/private/var` git prints, is read resolved, and a proof copy under the repository reads as the copy. An absolute path outside both keeps the note.
+- The grade agent writes a finding's `<file>` as the path inside the repository, as `git diff --name-only` prints it. The merge reads only finding lines this way; a `Could not verify` claim still carries the path as the grader wrote it.
 
 ## 0.11.0
 

@@ -228,6 +228,19 @@ def _opens_item(line: str, field: str, above: str) -> bool:
     return bool(NEW_ITEM.match(line))
 
 
+def _inside(path: str, roots: tuple[str, ...]) -> str:
+    """An absolute `path` as the path inside the root it sits in, or as written when it sits in none. The
+    longest root is tried first, so a proof copy under the repository reads as the copy. The path is tried
+    resolved too: roots are the resolved paths git prints, and a grader may cite /var for /private/var."""
+    if not path.startswith('/'):
+        return path
+    for spelling in (path, os.path.realpath(path)):
+        for root in sorted(roots, key=len, reverse=True):
+            if spelling.startswith(root + '/'):
+                return spelling[len(root) + 1:]
+    return path
+
+
 def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
     """A grader's report as its fields and findings. A field runs on to the next field, finding, or
     closing line, and each of its lines is one item, joined by any more-indented lines that follow it:
@@ -250,7 +263,7 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
         elif finding:
             start, end = sorted((int(finding[4]), int(finding[5] or finding[4])))
             file = finding[3][2:] if finding[3].startswith('./') else finding[3]
-            file = next((file[len(root) + 1:] for root in roots if file.startswith(root + '/')), file)
+            file = _inside(file, roots)
             findings.append({'rank': finding[1], 'lenses': LENS_ID.findall(finding[2]), 'file': file,
                              'start': start, 'end': end, 'where': f'{file}:{start}' + (f'-{end}' if end != start else ''),
                              'symbol': finding[6], 'title': finding[7].strip()})
@@ -373,10 +386,9 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
             sys.exit(f'--report {group}: {group} wrote {proof_root / group / "grade.md"}, which the merge reads')
         if not text.strip():
             sys.exit(f'--report {group}: the report is empty')
-    # Each root as written and resolved: git prints a repository's resolved path, /private/var for /var on macOS.
-    written = [meta['repository']] if meta.get('repository') else []
-    written += [str(proof_root / group / 'repo') for group in meta['groups']]
-    roots = tuple({spelling for root in written for spelling in (root, str(Path(root).resolve()))})
+    # A finding's file may be written from the repository or any grader's proof copy.
+    roots = tuple([meta['repository']] if meta.get('repository') else []) + tuple(
+        str((proof_root / group / 'repo').resolve()) for group in meta['groups'])
     lenses, status, notes = meta['lenses'], {}, {}
     findings: list[dict] = []
     open_claims, outside, scores, out = [], [], [], []

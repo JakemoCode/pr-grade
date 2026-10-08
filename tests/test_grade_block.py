@@ -703,15 +703,22 @@ class AnchorTest(unittest.TestCase):
         self.assertEqual(merged.count('same line as another finding'), 2)
 
     def test_a_path_written_through_a_link_to_the_repository_reads_as_the_path(self) -> None:
-        # git prints the resolved path, as /private/var does for /var on macOS, so either spelling is the repository.
+        # grade.json holds the path git prints, resolved, and a grader may cite one through a link, as /var
+        # is for /private/var on macOS.
         link = Path(self.tmp.name) / 'link'
         link.symlink_to(self.tmp.name)
         meta = json.loads((self.root / 'grade.json').read_text())
-        meta['repository'] = str(link / 'repo')
+        meta['repository'] = str(self.repo.resolve())
         (self.root / 'grade.json').write_text(json.dumps(meta))
-        merged = self.merged(f'P1 L1 {self.repo.resolve()}/src/render.py:9 - cached render dropped')
+        merged = self.merged(f'P1 L1 {link}/repo/src/render.py:9 - cached render dropped')
         self.assertNotIn('anchor', merged)
         self.assertIn('P1 src/render.py:9 - cached render dropped', merged)
+
+    def test_a_proof_copy_inside_the_repository_reads_as_the_copy(self) -> None:
+        # proof_dir.py honours TMPDIR, which can sit inside the repository.
+        for roots in (('/r', '/r/.tmp/p/all/repo'), ('/r/.tmp/p/all/repo', '/r')):
+            found = grade_block.read_report('P1 L1 /r/.tmp/p/all/repo/src/a.py:9 - t\n', roots)['findings']
+            self.assertEqual(found[0]['file'], 'src/a.py', roots)
 
     def test_an_absolute_path_outside_the_repository_keeps_its_note(self) -> None:
         elsewhere = Path(self.tmp.name) / 'elsewhere' / 'src' / 'render.py'

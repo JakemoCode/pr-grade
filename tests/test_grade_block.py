@@ -689,6 +689,35 @@ class AnchorTest(unittest.TestCase):
         self.assertNotIn('anchor', merged)
         self.assertIn('P1 src/render.py:9 in Renderer.render_html', merged)
 
+    def test_a_path_written_from_the_repository_reads_as_the_path(self) -> None:
+        # EngOS issue #925: a grader cited the file by the repository's absolute path.
+        merged = self.merged(f'P1 L1 {self.repo}/src/render.py:9 in Renderer.render_html - cached render dropped')
+        self.assertNotIn('anchor', merged)
+        self.assertIn('P1 src/render.py:9 in Renderer.render_html', merged)
+
+    def test_a_path_written_from_a_proof_copy_reads_as_the_path(self) -> None:
+        merged = self.merged(f'P1 L1 {self.root}/all/repo/src/render.py:9 - cached render dropped',
+                             f'P1 L2 {self.root}/all/repo/src/render.py:9 - stale row')
+        self.assertNotIn('anchor', merged)
+        self.assertIn('P1 src/render.py:9 - cached render dropped', merged)
+        self.assertEqual(merged.count('same line as another finding'), 2)
+
+    def test_a_path_written_through_a_link_to_the_repository_reads_as_the_path(self) -> None:
+        # git prints the resolved path, as /private/var does for /var on macOS, so either spelling is the repository.
+        link = Path(self.tmp.name) / 'link'
+        link.symlink_to(self.tmp.name)
+        meta = json.loads((self.root / 'grade.json').read_text())
+        meta['repository'] = str(link / 'repo')
+        (self.root / 'grade.json').write_text(json.dumps(meta))
+        merged = self.merged(f'P1 L1 {self.repo.resolve()}/src/render.py:9 - cached render dropped')
+        self.assertNotIn('anchor', merged)
+        self.assertIn('P1 src/render.py:9 - cached render dropped', merged)
+
+    def test_an_absolute_path_outside_the_repository_keeps_its_note(self) -> None:
+        elsewhere = Path(self.tmp.name) / 'elsewhere' / 'src' / 'render.py'
+        merged = self.merged(f'P1 L1 {elsewhere}:9 - cached render dropped')
+        self.assertIn(f'(anchor: {elsewhere} is not in the head commit)', merged)
+
     def test_a_column_after_the_line_is_dropped(self) -> None:
         merged = self.merged('P1 L1 src/render.py:9:13 in Renderer.render_html - cached render dropped')
         self.assertNotIn('anchor', merged)

@@ -228,13 +228,14 @@ def _opens_item(line: str, field: str, above: str) -> bool:
     return bool(NEW_ITEM.match(line))
 
 
-def read_report(text: str) -> dict:
+def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
     """A grader's report as its fields and findings. A field runs on to the next field, finding, or
     closing line, and each of its lines is one item, joined by any more-indented lines that follow it:
     a claim wrapped onto a second line is still one claim. A line that opens with a bullet, a lens id, or
     a rank starts a new item at any depth, except a possessive under `Could not verify` (`L2's pool`) on a
     line naming no rank, below a claim that blocks. Under `Could not verify` or `Outside my lenses` a line shaped like a finding
-    is still an item of that field: an unproven P2 is a claim."""
+    is still an item of that field: an unproven P2 is a claim. A finding's file written from one of `roots`,
+    the repository or a proof copy, reads as the path inside it."""
     fields: dict[str, list[str]] = {}
     findings, current, indent = [], None, None
     for raw in text.splitlines():
@@ -249,6 +250,7 @@ def read_report(text: str) -> dict:
         elif finding:
             start, end = sorted((int(finding[4]), int(finding[5] or finding[4])))
             file = finding[3][2:] if finding[3].startswith('./') else finding[3]
+            file = next((file[len(root) + 1:] for root in roots if file.startswith(root + '/')), file)
             findings.append({'rank': finding[1], 'lenses': LENS_ID.findall(finding[2]), 'file': file,
                              'start': start, 'end': end, 'where': f'{file}:{start}' + (f'-{end}' if end != start else ''),
                              'symbol': finding[6], 'title': finding[7].strip()})
@@ -371,15 +373,19 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
             sys.exit(f'--report {group}: {group} wrote {proof_root / group / "grade.md"}, which the merge reads')
         if not text.strip():
             sys.exit(f'--report {group}: the report is empty')
+    # Each root as written and resolved: git prints a repository's resolved path, /private/var for /var on macOS.
+    written = [meta['repository']] if meta.get('repository') else []
+    written += [str(proof_root / group / 'repo') for group in meta['groups']]
+    roots = tuple({spelling for root in written for spelling in (root, str(Path(root).resolve()))})
     lenses, status, notes = meta['lenses'], {}, {}
     findings: list[dict] = []
     open_claims, outside, scores, out = [], [], [], []
     for group, held in meta['groups'].items():
         path = proof_root / group / 'grade.md'
         if group in given:
-            report = read_report(given[group])
+            report = read_report(given[group], roots)
         elif path.is_file():
-            report = read_report(path.read_text())
+            report = read_report(path.read_text(), roots)
         else:
             status.update({lens: f'no report from {group}' for lens in held})
             continue

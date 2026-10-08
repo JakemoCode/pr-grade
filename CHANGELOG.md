@@ -4,6 +4,11 @@ Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an 
 
 CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` without raising the version and adding its heading here. Label one `hold-release` to merge it unreleased, when a change lands over several pull requests.
 
+## 0.11.1
+
+- `merge` reads a finding whose file is written from the repository's or a proof copy's absolute path as the path inside it, so `<repo>/scripts/canary_scoring.py:95` reads as `scripts/canary_scoring.py:95`. 0.11.0 flagged it as not in the head commit though the diff changed it, and missed its overlap with the same line written relative. A path cited through a link, such as macOS's `/var` for the `/private/var` git prints, is read resolved, and a proof copy under the repository reads as the copy. An absolute path outside both keeps the note.
+- The grade agent writes a finding's `<file>` as the path inside the repository, as `git diff --name-only` prints it. The merge reads only finding lines this way; a `Could not verify` claim still carries the path as the grader wrote it.
+
 ## 0.11.0
 
 - A finding line names the function it sits in and may cite a span: `P1 L4 src/reports/run-report-renderer.ts:78 in RunReportRenderer.renderHtml - cached render is dropped`, or `<file>:<start>-<end>`. The grade agent cites the line the defect lives on in the head (the changed line, the head line where removed code stood, or the unchanged line the change broke) and takes every number from the head file, never by counting from a hunk header. On EngOS's grader canary of 2026-10-08 a grader proved a P1 on line 78 and cited line 77, the lookup above it.

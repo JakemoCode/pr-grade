@@ -30,7 +30,9 @@ rules it is checked against.
 `merge` reads the report each grader wrote under the root grade_prep.py printed, or the one `--report`
 gives for a group whose grader replied without writing its file. It prints where every lens ended
 (clear, not applicable, a finding, an open claim, or unaccounted), the findings with any two at one line
-flagged, the lowest score the rules allow, and a draft block. The draft keeps each grader's notes in
+flagged, the lowest score the rules allow, and a draft block. It flags a finding whose line touches no
+line the graded diff changed, naming the nearest changed line and the function it sits in, and never
+refuses one: a defect can sit in a caller the change left alone. The draft keeps each grader's notes in
 `Verified and clear` and writes a lens grade_prep.py skipped as `L2 (not applicable)`. It settles
 nothing that needs judgment: two lines with one cause, a clearance against a proof, a 3 for a design
 decision, or a 1.
@@ -40,19 +42,33 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Callable
 
-# The selector beside this file, loaded by path under a private name. A repository that embeds these
-# scripts can have a `grade_mode` module of its own, which this neither picks up nor replaces.
-_spec = importlib.util.spec_from_file_location('_pr_grade_mode', Path(__file__).resolve().parent / 'grade_mode.py')
-grade_mode = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = grade_mode
-_spec.loader.exec_module(grade_mode)
+HERE = Path(__file__).resolve().parent
+
+
+def _load(name: str, file: str):
+    """A script beside this file, loaded by path under a private name. A repository that embeds these
+    scripts can have a `grade_mode` module of its own, which this neither picks up nor replaces."""
+    spec = importlib.util.spec_from_file_location(name, HERE / file)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+grade_mode = _load('_pr_grade_mode', 'grade_mode.py')
 CONFIG, MODES, load_config, repo_root = grade_mode.CONFIG, grade_mode.MODES, grade_mode.load_config, grade_mode.repo_root
+# What check_then_act.py hands its TypeScript adapter, which names each function with its span.
+TS_ADAPTER = HERE / 'check_then_act_ts.cjs'
+TS_SUFFIXES = ('.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs')
 
 DEFAULT_LENSES = [f'L{n}' for n in range(1, 9)]
 # GitHub lists at most this many files, and says nothing when it stops.
@@ -66,7 +82,10 @@ LEAD_ID = re.compile(r'(L\d+)\b[ \t]*')
 SHA = re.compile(r'[0-9a-f]{40}')
 REPORT_LINE = re.compile(r'^(Score|Blocking|Verified and clear|Could not verify|Outside my lenses|L7 candidates|L\d+):'
                          r'[ \t]*(.*)$')
-FINDING = re.compile(r'^(P[123])[ \t]+((?:L\d+[ \t,]*)*)(\S+:\d+)[ \t]+-[ \t]+(.+)$')
+# `P1 L4 <file>:<line> in <symbol> - <title>`, or `<file>:<start>-<end>`. The symbol runs to the first ` - `,
+# so a symbol written with words after it still parses, and a finding without one still reads. A column
+# after the line, as in `<file>:78:5`, is dropped.
+FINDING = re.compile(r'^(P[123])[ \t]+((?:L\d+[ \t,]*)*)(\S+?):(\d+)(?::\d+)?(?:-(\d+))?(?:[ \t]+in[ \t]+(.+?))?[ \t]+-[ \t]+(.+)$')
 BLOCKING = re.compile(r'\bP[12]\b')
 NEW_ITEM = re.compile(r'([-*+]|\d+[.)])[ \t]|(L\d+|P[123])\b')
 # `L2's pool releases` continues a claim, unless its line names a rank or the claim above is a P3.
@@ -228,8 +247,11 @@ def read_report(text: str) -> dict:
             fields[current].append(line)
             indent = depth if indent is None else indent
         elif finding:
-            findings.append({'rank': finding[1], 'lenses': LENS_ID.findall(finding[2]), 'where': finding[3],
-                             'title': finding[4].strip()})
+            start, end = sorted((int(finding[4]), int(finding[5] or finding[4])))
+            file = finding[3][2:] if finding[3].startswith('./') else finding[3]
+            findings.append({'rank': finding[1], 'lenses': LENS_ID.findall(finding[2]), 'file': file,
+                             'start': start, 'end': end, 'where': f'{file}:{start}' + (f'-{end}' if end != start else ''),
+                             'symbol': finding[6], 'title': finding[7].strip()})
             current = None
         elif field:
             current = field[1]
@@ -242,6 +264,99 @@ def read_report(text: str) -> dict:
             fields[current].append(line)
             indent = depth if indent is None else indent
     return {'fields': fields, 'findings': findings}
+
+
+def _functions(repo: Path, head: str, paths: list[str]) -> dict[str, list[dict]]:
+    """Each path's functions as the scanner's adapters name them, read from `head`, never the working
+    tree. A path no adapter reads, or one that fails to read or parse, has none; the others keep theirs."""
+    found: dict[str, list[dict]] = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        read = []
+        for path in paths:
+            show = subprocess.run(['git', 'show', f'{head}:{path}'], cwd=repo, capture_output=True)
+            if show.returncode == 0:
+                (Path(tmp) / path).parent.mkdir(parents=True, exist_ok=True)
+                (Path(tmp) / path).write_bytes(show.stdout)
+                read.append(path)
+        python = [path for path in read if path.endswith('.py')]
+        if python:
+            cta_python = sys.modules.get('_pr_grade_check_then_act_python') or _load(
+                '_pr_grade_check_then_act_python', 'check_then_act_python.py')
+            found.update(cta_python.parse_python(python, Path(tmp))[0])
+        typescript = [path for path in read if path.endswith(TS_SUFFIXES) and not path.endswith('.d.ts')]
+        node = shutil.which('node')
+        if typescript and node:
+            # The adapter looks for `typescript` from its root, a temporary directory here, then in
+            # PR_GRADE_TYPESCRIPT, so name the one Node resolves from the repository, as the scanner finds it.
+            env = dict(os.environ)
+            if not env.get('PR_GRADE_TYPESCRIPT'):
+                resolved = subprocess.run([node, '-p', "require.resolve('typescript', {paths: [process.argv[1]]})",
+                                           str(repo)], capture_output=True, text=True)
+                if resolved.returncode == 0:
+                    env['PR_GRADE_TYPESCRIPT'] = resolved.stdout.strip()
+            run = subprocess.run([node, str(TS_ADAPTER)], input=json.dumps({'root': tmp, 'files': typescript}),
+                                 cwd=tmp, env=env, capture_output=True, text=True)
+            if run.returncode == 0:
+                found.update({entry['path']: entry['functions'] for entry in json.loads(run.stdout)['files']
+                              if 'functions' in entry})
+    return found
+
+
+def _symbol(functions: list[dict], line: int) -> str | None:
+    """The innermost named function or method holding `line`. A callback reads as the function it is
+    written in."""
+    holding = sorted((fn for fn in functions if fn['span'][0][0] <= line <= fn['span'][1][0]),
+                     key=lambda fn: fn['span'][1][0] - fn['span'][0][0])
+    for fn in holding:
+        name = fn['name'].split(' > ')[0]
+        if not name.startswith('<'):
+            return name
+    return None
+
+
+def anchors(meta: dict, findings: list[dict]) -> tuple[list[str], str | None]:
+    """For each finding, why its line looks misplaced, or an empty string when it touches a line the
+    graded diff changed; and why none could be checked, when that is so. A defect can sit in code the diff
+    left alone, such as a caller the change broke, so this flags and never refuses."""
+    repo, base, head = meta.get('repository'), meta.get('base'), meta.get('head')
+    missing = [key for key, value in (('repository', repo), ('base', base), ('head', head)) if not value]
+    if missing:
+        return [''] * len(findings), f"grade.json names no {' or '.join(missing)}"
+    try:
+        changed = grade_mode.changed_lines(base, Path(repo), head)
+    except (subprocess.CalledProcessError, OSError) as failed:
+        why = getattr(failed, 'stderr', None) or failed
+        return [''] * len(findings), f'git diff {base}..{head} failed in {repo}: {str(why).strip()}'
+    notes, nearest = [], {}
+    for f in findings:
+        ranges = changed.get(f['file'])
+        if not ranges:
+            exists = subprocess.run(['git', 'cat-file', '-e', f"{head}:{f['file']}"], cwd=repo, capture_output=True)
+            notes.append(f"the graded diff changed nothing in {f['file']}" if exists.returncode == 0
+                         else f"{f['file']} is not in the head commit")
+        elif any(start <= f['end'] and f['start'] <= end for start, end in ranges):
+            notes.append('')
+        else:
+            # The changed lines closest to the cited span, both when one sits either side at the same distance:
+            # picking one would hand the coordinator a coin toss.
+            gaps = [(f['start'] - end, end) if end < f['start'] else (start - f['end'], start) for start, end in ranges]
+            closest = min(gap for gap, _ in gaps)
+            nearest[len(notes)] = sorted({line for gap, line in gaps if gap == closest})
+            notes.append('')
+    try:
+        functions = _functions(Path(repo), head, sorted({findings[i]['file'] for i in nearest}))
+    except (subprocess.CalledProcessError, OSError, ValueError, KeyError):
+        # A symbol is a help to the coordinator; the flag stands without one.
+        functions = {}
+    for i, lines in nearest.items():
+        file = findings[i]['file']
+        named = []
+        for line in lines:
+            symbol = _symbol(functions.get(file, []), line)
+            named.append(f'{file}:{line}' + (f' in {symbol}' if symbol else ''))
+        notes[i] = (f"touches no line the graded diff changed; nearest {'is' if len(named) == 1 else 'are'} "
+                    + ' and '.join(named))
+    return notes, None
 
 
 def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
@@ -308,11 +423,19 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
     out += ['reports: ' + (', '.join(scores) or 'none'), '', 'lenses:']
     out += [f'  {lens}  {status.get(lens, "not held by any grader")}' for lens in lenses]
     out += ['', f'findings ({len(findings)}):']
-    lines_seen = [f['where'] for f in findings]
-    # Two findings at one line may be one defect or two; counting both keeps the floor on the safe side.
-    out += [f"  {f['rank']} {f['where']} - {f['title']}  [{f['by']}]"
-            + ('  (same line as another finding: one defect or two?)' if lines_seen.count(f['where']) > 1 else '')
-            for f in findings] or ['  none']
+    anchor_notes, unchecked = anchors(meta, findings) if findings else ([], None)
+    for f, anchor in zip(findings, anchor_notes):
+        # Two findings at one line may be one defect or two; counting both keeps the floor on the safe side.
+        shared = any(g is not f and g['file'] == f['file'] and g['start'] <= f['end'] and f['start'] <= g['end']
+                     for g in findings)
+        out.append(f"  {f['rank']} {f['where']}" + (f" in {f['symbol']}" if f['symbol'] else '')
+                   + f" - {f['title']}  [{f['by']}]"
+                   + ('  (same line as another finding: one defect or two?)' if shared else '')
+                   + (f'  (anchor: {anchor})' if anchor else ''))
+    if not findings:
+        out.append('  none')
+    if unchecked:
+        out.append(f'  anchors: not checked, {unchecked}')
     out += ['', 'could not verify:']
     out += [f"  {group}: {claim}{'' if blocking else '  (P3, does not block)'}"
             for group, claim, blocking in open_claims] or ['  none']

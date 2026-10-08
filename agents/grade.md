@@ -72,7 +72,7 @@ Write the report to the path the dispatch names with the Write tool, then confir
 ```
 Score: <n>/5
 Blocking: <one sentence, or "nothing">
-P<n> L<k> <file>:<line> - <title>
+P<n> L<k> <file>:<line> in <symbol> - <title>
 <what breaks, with the inputs and the resulting state>
 <the command you ran, and its trimmed output>
 L<k>: <for each lens you hold, the sentence that closed it>
@@ -81,6 +81,10 @@ Could not verify: <"none", or on the lines below, each unproven claim as a `- ` 
 Outside my lenses: <each defect in a lens you do not hold, with that lens, its file:line, and what you saw; or "none">
 L7 candidates: <each file:line cleared with its reason, or proven as P<n>; or "none given">
 ```
+
+A finding's `<file>:<line>` is the line the defect lives on in the head commit: the changed (`+`) line, when the change introduced the defect; the head line where removed code stood, when the defect is a deletion; or the unchanged line the change broke, when the defect sits outside the diff, such as a caller. When your proof mutates or asserts on a line, that is the line. A defect that spans lines is `<file>:<start>-<end>`. `<symbol>` is the function, method (as `Class.method`), or class the line sits in; leave out ` in <symbol>` only for a line in none, such as a config file. For example, `P1 L4 src/reports/run-report-renderer.ts:78 in RunReportRenderer.renderHtml - cached render is dropped`.
+
+Take every line number from the head file, with `git -C <repository> grep -n -e '<text on the line>' <head> -- <file>` or a Read of the file, never by counting from a hunk header: counting is how a finding lands one line off. Anchor each file:line under `Could not verify`, `Outside my lenses`, and `L7 candidates` the same way. The merge flags a finding whose line the diff did not change, and the coordinator settles each flag.
 
 Every lens you hold appears in `Verified and clear`, or is kept out of it by a finding or a `Could not verify` item. A lens whose only finding is a P3 is verified and clear. A lens with an unproven claim that would be a P1 or P2 is not.
 

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -545,3 +547,198 @@ class MergeTest(unittest.TestCase):
         run = self.run_merge(f"reach={self.root / 'nowhere.txt'}")
         self.assertNotEqual(run.returncode, 0)
         self.assertIn('nowhere.txt', run.stderr)
+
+
+class FindingLineTest(unittest.TestCase):
+    """`P<n> L<k> <file>:<line> in <symbol> - <title>`, with `<file>:<start>-<end>` for a span."""
+
+    def finding(self, line: str) -> dict:
+        found = grade_block.read_report(f'Score: 4/5\n{line}\nwhat breaks\n')['findings']
+        self.assertEqual(len(found), 1, line)
+        return found[0]
+
+    def test_a_line_and_its_symbol_are_read(self) -> None:
+        found = self.finding('P1 L4 src/reports/run-report-renderer.ts:78 in RunReportRenderer.renderHtml - cache dropped')
+        self.assertEqual((found['file'], found['start'], found['end'], found['symbol'], found['where'], found['title']),
+                         ('src/reports/run-report-renderer.ts', 78, 78, 'RunReportRenderer.renderHtml',
+                          'src/reports/run-report-renderer.ts:78', 'cache dropped'))
+
+    def test_a_span_is_read(self) -> None:
+        found = self.finding('P2 L1 L7 src/a.py:9-12 in drain - late write lands')
+        self.assertEqual((found['lenses'], found['start'], found['end'], found['where'], found['symbol']),
+                         (['L1', 'L7'], 9, 12, 'src/a.py:9-12', 'drain'))
+
+    def test_the_form_without_a_symbol_still_reads(self) -> None:
+        # Reports written before the symbol was asked for keep scoring.
+        found = self.finding('P1 L1 src/a.py:9 - late write - lands twice')
+        self.assertEqual((found['where'], found['start'], found['end'], found['symbol'], found['title']),
+                         ('src/a.py:9', 9, 9, None, 'late write - lands twice'))
+
+    def test_a_symbol_written_with_words_after_it_still_reads(self) -> None:
+        # A finding that failed to parse would vanish from the score, so the symbol runs to the first ` - `.
+        found = self.finding('P1 L4 src/a.ts:78 in renderHtml (method) - cache dropped')
+        self.assertEqual((found['symbol'], found['title']), ('renderHtml (method)', 'cache dropped'))
+
+
+RENDER_BASE = '''def lookup(store, key):
+    return store.get(key)
+
+
+class Renderer:
+    def render_html(self, store, key):
+        rendered = lookup(store, key)
+        if rendered is not None:
+            return rendered
+        return self.build(key)
+
+    def build(self, key):
+        return key
+'''
+RENDER_HEAD = RENDER_BASE.replace('            return rendered\n', '            pass\n')
+RENDER_TS_BASE = '''export class RunReportRenderer {
+  renderHtml(store: Map<string, string>, key: string): string {
+    const rendered = store.get(key);
+    if (rendered !== undefined) return rendered;
+    return key;
+  }
+}
+'''
+RENDER_TS_HEAD = RENDER_TS_BASE.replace('if (rendered !== undefined) return rendered;', 'void rendered;')
+TYPESCRIPT = os.environ.get('PR_GRADE_TYPESCRIPT')
+TS_AVAILABLE = bool(shutil.which('node') and TYPESCRIPT and Path(TYPESCRIPT).exists())
+
+
+class AnchorTest(unittest.TestCase):
+    """The merge checks each finding's line against the lines the graded diff changed. In the head,
+    src/render.py:9 changed inside Renderer.render_html, src/render.ts:4 inside RunReportRenderer.renderHtml,
+    and the line after src/other.py:2 was removed."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo, self.root = Path(self.tmp.name) / 'repo', Path(self.tmp.name) / 'proof'
+        (self.repo / 'src').mkdir(parents=True)
+        self.root.mkdir()
+        self.files({'src/render.py': RENDER_BASE, 'src/render.ts': RENDER_TS_BASE,
+                    'src/other.py': 'a = 1\nb = 2\nc = 3\nd = 4\n', 'src/untouched.py': 'x = 1\n',
+                    'src/tie.py': 'a = 1\nb = 2\nc = 3\nd = 4\ne = 5\n'})
+        base = self.commit()
+        self.files({'src/render.py': RENDER_HEAD, 'src/render.ts': RENDER_TS_HEAD, 'src/other.py': 'a = 1\nb = 2\nd = 4\n',
+                    'src/tie.py': 'a = 1\nb = 20\nc = 3\nd = 40\ne = 5\n'})
+        head = self.commit()
+        (self.root / 'grade.json').write_text(json.dumps(
+            {'repository': str(self.repo), 'mode': 'subagent', 'base': base, 'head': head, 'lenses': LENSES,
+             'groups': {'all': LENSES}}))
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def files(self, contents: dict[str, str]) -> None:
+        for path, text in contents.items():
+            (self.repo / path).write_text(text)
+
+    def git(self, *args: str) -> str:
+        return subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-C', str(self.repo), *args],
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    def commit(self) -> str:
+        if not (self.repo / '.git').exists():
+            self.git('init', '-q', '-b', 'main')
+        self.git('add', '-A')
+        self.git('commit', '-q', '-m', 'c')
+        return self.git('rev-parse', 'HEAD')
+
+    def merged(self, *findings: str) -> str:
+        (self.root / 'all').mkdir(exist_ok=True)
+        (self.root / 'all' / 'grade.md').write_text(
+            report('4/5', 'L2, L3', findings=''.join(f'{line}\nwhat breaks\n' for line in findings)))
+        return grade_block.merge(self.root)
+
+    def test_a_finding_on_a_changed_line_is_not_flagged(self) -> None:
+        merged = self.merged('P1 L1 src/render.py:9 in Renderer.render_html - cached render dropped')
+        self.assertNotIn('anchor', merged)
+
+    def test_a_finding_one_line_off_names_the_changed_line_and_its_symbol(self) -> None:
+        # The EngOS canary: the proof mutated line 78 and the finding cited the lookup on line 77.
+        merged = self.merged('P1 L1 src/render.py:8 in Renderer.render_html - cached render dropped')
+        self.assertIn('P1 src/render.py:8 in Renderer.render_html - cached render dropped  [all L1]  (anchor: touches '
+                      'no line the graded diff changed; nearest is src/render.py:9 in Renderer.render_html)', merged)
+
+    # CI sets PR_GRADE_REQUIRE_TS, so a missing compiler fails these there instead of skipping them.
+    @unittest.skipUnless(TS_AVAILABLE or os.environ.get('PR_GRADE_REQUIRE_TS') == '1', 'needs node and PR_GRADE_TYPESCRIPT')
+    def test_a_typescript_finding_one_line_off_names_the_method(self) -> None:
+        merged = self.merged('P1 L1 src/render.ts:3 in RunReportRenderer.renderHtml - cached render dropped')
+        self.assertIn('(anchor: touches no line the graded diff changed; nearest is src/render.ts:4 in '
+                      'RunReportRenderer.renderHtml)', merged)
+
+    @unittest.skipUnless(TS_AVAILABLE or os.environ.get('PR_GRADE_REQUIRE_TS') == '1', 'needs node and PR_GRADE_TYPESCRIPT')
+    def test_typescript_is_found_where_the_repository_finds_it(self) -> None:
+        # Installed above the repository, as in a monorepo, with no PR_GRADE_TYPESCRIPT to fall back on.
+        (Path(self.tmp.name) / 'node_modules').mkdir()
+        (Path(self.tmp.name) / 'node_modules' / 'typescript').symlink_to(Path(TYPESCRIPT or '').resolve())
+        with mock.patch.dict(os.environ, {'PR_GRADE_TYPESCRIPT': ''}):
+            merged = self.merged('P1 L1 src/render.ts:3 - cached render dropped')
+        self.assertIn('nearest is src/render.ts:4 in RunReportRenderer.renderHtml)', merged)
+
+    def test_a_finding_between_two_changed_lines_names_both(self) -> None:
+        merged = self.merged('P1 L1 src/tie.py:3 - c is read stale')
+        self.assertIn('(anchor: touches no line the graded diff changed; nearest are src/tie.py:2 and src/tie.py:4)',
+                      merged)
+
+    def test_a_path_written_from_the_dot_reads_as_the_path(self) -> None:
+        merged = self.merged('P1 L1 ./src/render.py:9 in Renderer.render_html - cached render dropped')
+        self.assertNotIn('anchor', merged)
+        self.assertIn('P1 src/render.py:9 in Renderer.render_html', merged)
+
+    def test_a_column_after_the_line_is_dropped(self) -> None:
+        merged = self.merged('P1 L1 src/render.py:9:13 in Renderer.render_html - cached render dropped')
+        self.assertNotIn('anchor', merged)
+        self.assertIn('P1 src/render.py:9 in Renderer.render_html', merged)
+
+    def test_a_root_without_a_base_names_what_is_missing(self) -> None:
+        meta = json.loads((self.root / 'grade.json').read_text())
+        del meta['base'], meta['repository']
+        (self.root / 'grade.json').write_text(json.dumps(meta))
+        self.assertIn('anchors: not checked, grade.json names no repository or base',
+                      self.merged('P1 L1 src/render.py:8 - cached render dropped'))
+
+    @unittest.skipUnless(shutil.which('node'), 'needs node')
+    def test_an_adapter_that_prints_no_json_leaves_the_flag_without_a_symbol(self) -> None:
+        adapter = Path(self.tmp.name) / 'adapter.cjs'
+        adapter.write_text("process.stdout.write('not json');\n")
+        with mock.patch.object(grade_block, 'TS_ADAPTER', adapter):
+            merged = self.merged('P1 L1 src/render.ts:3 - cached render dropped')
+        self.assertIn('(anchor: touches no line the graded diff changed; nearest is src/render.ts:4)', merged)
+
+    def test_a_span_that_holds_a_changed_line_is_not_flagged(self) -> None:
+        self.assertNotIn('anchor', self.merged('P1 L1 src/render.py:7-10 in Renderer.render_html - cached render dropped'))
+
+    def test_the_head_line_where_removed_code_stood_is_not_flagged(self) -> None:
+        self.assertNotIn('anchor', self.merged('P2 L1 src/other.py:3 - the c binding is gone'))
+
+    def test_a_finding_in_a_file_the_diff_left_alone_is_flagged(self) -> None:
+        # Flagged, never refused: L4 finds a caller the change broke in code it never touched.
+        merged = self.merged('P2 L1 src/untouched.py:1 - reads the dropped render')
+        self.assertIn('(anchor: the graded diff changed nothing in src/untouched.py)', merged)
+        self.assertEqual(grade_block.parse(merged)['Score'], '4/5')
+
+    def test_a_finding_in_a_file_the_head_lacks_is_flagged(self) -> None:
+        merged = self.merged('P2 L1 src/gone.py:1 - reads the dropped render')
+        self.assertIn('(anchor: src/gone.py is not in the head commit)', merged)
+
+    def test_a_root_without_a_repository_says_the_anchors_went_unchecked(self) -> None:
+        # A grade.json from before 0.6.0 names no repository.
+        meta = json.loads((self.root / 'grade.json').read_text())
+        del meta['repository']
+        (self.root / 'grade.json').write_text(json.dumps(meta))
+        self.assertIn('anchors: not checked, grade.json names no repository',
+                      self.merged('P1 L1 src/render.py:8 - cached render dropped'))
+
+    def test_an_unreadable_head_says_the_anchors_went_unchecked(self) -> None:
+        meta = json.loads((self.root / 'grade.json').read_text())
+        meta['head'] = 'f' * 40
+        (self.root / 'grade.json').write_text(json.dumps(meta))
+        self.assertIn('anchors: not checked, git diff', self.merged('P1 L1 src/render.py:8 - cached render dropped'))
+
+    def test_two_findings_whose_spans_overlap_are_flagged(self) -> None:
+        merged = self.merged('P1 L1 src/render.py:9 - cached render dropped', 'P1 L2 src/render.py:8-10 - stale row')
+        self.assertEqual(merged.count('same line as another finding'), 2)

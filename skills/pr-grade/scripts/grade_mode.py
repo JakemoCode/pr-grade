@@ -183,13 +183,14 @@ def _header_path(line: str) -> str | None:
     return None
 
 
-def changed_lines(base: str, root: Path) -> dict[str, list[tuple[int, int]] | None]:
+def changed_lines(base: str, root: Path, head: str | None = None) -> dict[str, list[tuple[int, int]] | None]:
     """The new-side line ranges each changed path touches since it left `base`, uncommitted work
     included. An untracked file maps to None: all of it is new. A pure deletion marks the lines either
-    side of it, so removing a lock or a re-check still puts the function in scope."""
-    fork = _git(root, 'merge-base', base, 'HEAD').strip()
+    side of it, so removing a lock or a re-check still puts the function in scope. With `head`, the
+    ranges are those of the commits from the fork to `head` alone."""
+    fork = _git(root, 'merge-base', base, head or 'HEAD').strip()
     diff = _git(root, '-c', 'core.quotePath=false', 'diff', '-U0', '--no-renames', '--no-color', '--no-ext-diff',
-                '--src-prefix=a/', '--dst-prefix=b/', fork)
+                '--src-prefix=a/', '--dst-prefix=b/', fork, *([head] if head else []))
     ranges: dict[str, list[tuple[int, int]] | None] = {}
     path, in_header = None, False
     for line in diff.splitlines():
@@ -214,6 +215,8 @@ def changed_lines(base: str, root: Path) -> dict[str, list[tuple[int, int]] | No
             if hunk and path is not None:
                 start, count = int(hunk[1]), int(hunk[2]) if hunk[2] is not None else 1
                 ranges[path].append((start, start + count - 1) if count else (max(start, 1), start + 1))
+    if head:
+        return ranges
     for untracked in _git(root, '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard').splitlines():
         ranges[untracked] = None
     return ranges

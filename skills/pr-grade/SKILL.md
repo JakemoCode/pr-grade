@@ -164,9 +164,10 @@ Rank findings `P1` (fix before merge), `P2` (fix or justify), `P3` (note). The s
 
 Rank by what the defect does to a run. When a run fails either way, in the same direction, and the only defect is how the failure reads, such as a traceback where a message belongs, the finding is a P3. That holds in a re-grade whose fix was itself about messages, where the next traceback looks like the fix left unfinished.
 
-Merge the graders' reports before you score, with the `merge:` line the prep printed. Two graders on one branch each scored the same proven P1 as 2/5, and a third cleared the path it broke as outside its lenses. The merge reads every grader's report and prints where each lens ended, the findings with any two at one line flagged, the defects raised outside their lenses, the lowest score these rules allow, and a draft block. The draft keeps each grader's notes in `Verified and clear`, and writes a lens the prep skipped as `L2 (not applicable)`; leave both as written. Then settle what it leaves to you:
+Merge the graders' reports before you score, with the `merge:` line the prep printed. Two graders on one branch each scored the same proven P1 as 2/5, and a third cleared the path it broke as outside its lenses. The merge reads every grader's report and prints where each lens ended, the findings with any two at one line flagged and any whose line the graded diff did not change flagged `anchor:`, the defects raised outside their lenses, the lowest score these rules allow, and a draft block. The draft keeps each grader's notes in `Verified and clear`, and writes a lens the prep skipped as `L2 (not applicable)`; leave both as written. Then settle what it leaves to you:
 
 - Two findings with one cause, the same wrong state, are one finding, at one line or two: keep the stronger proof and name both lenses. The merge counts every finding until you join them, so its floor never assumes two defects are one.
+- A finding flagged `anchor:` cites a line the graded diff did not change, and the flag names the nearest changed line and the function it sits in. Read the finding's proof. When the proof mutated or asserted on another line, usually the one the flag names, re-anchor the finding there, in the same `<file>:<line> in <symbol>` form. When the defect does sit in unchanged code, such as a caller the change broke (L4) or a default a new binding made wrong, confirm the line and name the changed line that broke it in the finding's first sentence. A flag never drops a finding or moves the floor. When the merge prints `anchors: not checked`, check each finding's line against the diff yourself.
 - A proof beats a clearance, and the merge counts the finding. If the clearance names a sub-claim that would break the proof, run it.
 - A defect a grader lists under `Outside my lenses` belongs to the lens it names. Prove it, or carry it to `Could not verify`.
 - A lens the merge calls unaccounted: ask that grader which, in one message, before you write the block.
@@ -189,12 +190,12 @@ Blocking: <the one sentence that explains anything below 5, or "nothing">
 Verified and clear: <the lenses cleared, each item lens ids alone or with a note in parentheses: L1, L2, ...>
 Could not verify: <every claim left unproven, labelled as a guess, or "none">
 
-P1 <file>:<line> - <title>
+P1 <file>:<line> in <symbol> - <title>
 <what breaks, with the inputs and the resulting state>
 <the command that showed it, and its output>
 ```
 
-Say each finding once.
+Say each finding once, at the line the defect lives on in the head, as the grade agent's Report section defines it.
 
 ## 7. Fix, then re-grade
 

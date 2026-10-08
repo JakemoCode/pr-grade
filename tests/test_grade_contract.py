@@ -97,6 +97,18 @@ class ReportTest(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertTrue(grade_block.REPORT_LINE.match(f'{field}: x'), f'grade_block.merge does not read `{field}`')
 
+    def test_the_finding_line_names_its_symbol_where_each_reader_looks(self) -> None:
+        # A finding one line off reads as another place to anything scoring by line, so both the grader and
+        # the coordinator are shown the same shape, and the merge reads it.
+        self.assertIn('P<n> L<k> <file>:<line> in <symbol> - <title>', section(AGENT, 'Report'))
+        # Section 6's template holds its own `## Grade` line, which ends a section read.
+        self.assertIn('P1 <file>:<line> in <symbol> - <title>', SKILL)
+        self.assertIn('never by counting from a hunk header', section(AGENT, 'Report'))
+        example = re.search(r'`(P1 L4 \S+:\d+ in .*?)`', section(AGENT, 'Report'))
+        self.assertTrue(example, "the Report section gives no example finding line")
+        self.assertEqual(grade_block.read_report(example.group(1))['findings'][0]['symbol'],
+                         'RunReportRenderer.renderHtml')
+
     def test_the_fields_the_merge_names_are_in_the_report(self) -> None:
         merge = section(SKILL, '5. Score it')
         for field in ('Outside my lenses', 'Could not verify', 'Verified and clear', 'Blocking'):

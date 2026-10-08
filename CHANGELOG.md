@@ -4,6 +4,12 @@ Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an 
 
 CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` without raising the version and adding its heading here. Label one `hold-release` to merge it unreleased, when a change lands over several pull requests.
 
+## 0.11.0
+
+- A finding line names the function it sits in and may cite a span: `P1 L4 src/reports/run-report-renderer.ts:78 in RunReportRenderer.renderHtml - cached render is dropped`, or `<file>:<start>-<end>`. The grade agent cites the line the defect lives on in the head (the changed line, the head line where removed code stood, or the unchanged line the change broke) and takes every number from the head file, never by counting from a hunk header. On EngOS's grader canary of 2026-10-08 a grader proved a P1 on line 78 and cited line 77, the lookup above it.
+- `merge` flags a finding whose line touches no line the graded diff changed, naming the nearest changed line and the function it sits in, which it reads at the head with the scanner's Python and TypeScript adapters. Two changed lines at the same distance are both named. It flags rather than refuses, since a defect can sit in a caller the change left alone; SKILL.md section 5 says how the coordinator re-anchors or confirms each flag. A `grade.json` that names no repository, or a diff git cannot read, prints `anchors: not checked` with the reason.
+- `merge` reads the symbol and the span, and still reads `<file>:<line> - <title>`, so earlier reports keep scoring. It drops a leading `./` and a column after the line (`<file>:78:5`). Two findings whose spans overlap in one file are flagged as at one line. A 0.10.1 merge dropped a finding line carrying ` in <symbol>` entirely, so a report in the new shape needs a 0.11.0 merge.
+
 ## 0.10.1
 
 - `proof_dir.py make` sweeps two kinds of root no make ever reached. A root whose marker names a repository that no longer exists, such as a worktree removed after its grade, is swept once idle for seven days, where before only that repository's own make could sweep it. A root with no marker is swept on the same terms; a grader that writes its report after the coordinator removed the root makes one. A root of a repository that still exists is still left to that repository, and a markerless root's own time keeps one a make is creating right now.

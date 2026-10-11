@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-pr-grade: a Claude Code plugin that grades a change through eight lenses before it is pushed. Install name `pr-grade@jakemocode`.
+pr-grade: a Claude Code plugin that grades a change through nine lenses before it is pushed. Install name `pr-grade@jakemocode`.
 
 ## Grader agent
 

@@ -106,7 +106,7 @@ Mode: subagent
 Graded: <full SHA of the last commit graded>
 Score: 5/5
 Blocking: nothing
-Verified and clear: L1, L2, L3, L4, L5, L6, L7, L8
+Verified and clear: L1, L2, L3, L4, L5, L6, L7, L8, L9
 Could not verify: none
 ```
 

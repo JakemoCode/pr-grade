@@ -10,7 +10,7 @@ Run it from inside the repository, at the committed head. A repository declares 
 - replay: the base and head readers each read every recorded instance. An instance one accepts and
   the other refuses is listed.
 - transplant: each kind of record the change adds, a `records` match on a line the change adds that
-  no recorded instance and no base copy of a changed file holds, is put into a recorded instance.
+  no recorded instance and no file the base commit holds writes, is put into a recorded instance.
   Every value the instances hold, a `values` match, is run through it with the head reader, beside
   the same value under the record's old kind. A new kind starts out accepting whatever the old
   kinds' fields accept, and a value it accepts that the change says it must refuse is a finding.
@@ -88,8 +88,10 @@ def malformed(fmt: object) -> str | None:
     return None
 
 
-def touched(formats: list, changed: list[str]) -> list:
+def touched(formats: object, changed: list[str]) -> list:
     """The formats whose readers the branch changed, and every malformed one, which `report` names."""
+    if not isinstance(formats, list):
+        return [formats]
     return [f for f in formats if malformed(f) or any(grade_mode.matches(path, f['readers']) for path in changed)]
 
 
@@ -274,7 +276,8 @@ def transplant(root: Path, fork: str, head: str, fmt: dict, recorded: list[tuple
                        if not _at_base(root, fork, record, k))
     if not new_kinds:
         return ['Transplant: the change adds no kind of record that the recorded instances and the base lack.']
-    new_values = sorted({m['value'] for m in _values(value, added) if shape(m['value']) not in counts})
+    # Capped like the recorded ones: a change can add a file holding hundreds of values.
+    new_values = sorted({m['value'] for m in _values(value, added) if shape(m['value']) not in counts})[:VALUES_SHOWN]
     candidates = [(f'`{s}` ({len(vs)} recorded)', vs[-1])
                   for s, vs in sorted(counts.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:VALUES_SHOWN]]
     candidates += [(f'`{v}` (new in this change)', v) for v in new_values]

@@ -225,6 +225,18 @@ class ReportTest(unittest.TestCase):
                             for line in out), out)
         self.assertIn('### second (reader: fmt/reader.py)', out)
 
+    def test_formats_that_is_not_a_list_is_a_note(self) -> None:
+        out = history_replay.report(self.repo, self.fork, self.head, {'formats': 5}, ['fmt/reader.py'])
+        self.assertEqual(out, ['Note: a format is 5, not an object in .claude/pr-grade.json, so it was not replayed.'])
+
+    def test_values_new_in_the_change_are_capped(self) -> None:
+        (self.repo / 'fmt/values.txt').write_text(''.join(f'  - word{n:03}\n' for n in range(300)))
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'many values')
+        self.head = git(self.repo, 'rev-parse', 'HEAD').strip()
+        rows = [line for line in self.report(fmt()) if line.endswith('accepted') or 'refused' in line]
+        self.assertLessEqual(sum('(new in this change)' in row for row in rows), history_replay.VALUES_SHOWN)
+
     def test_an_unknown_source_is_a_note(self) -> None:
         out = self.report(fmt(instances=[{'rows': 'x'}, {'files': 'records/*.txt'}]))
         self.assertIn('Note: an instance source names no known key: {"rows": "x"}', out)

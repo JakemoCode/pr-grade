@@ -141,6 +141,26 @@ class ReportTest(unittest.TestCase):
                       'own kind accepted', out)
         self.assertIn('The new kind accepts 0 of the 2 values the old kind accepts.', '\n'.join(out))
 
+    def test_a_carrier_holding_the_example_value_does_not_read_its_other_findings_as_refusals(self) -> None:
+        # The carrier's second value is also the newest `issue #N`, the example the transplant runs. Masking
+        # that text for one value alone used to drop the carrier's problem from the intersection, and the
+        # problem then read as the new kind refusing `fixed`.
+        git(self.repo, 'checkout', '-q', self.fork)
+        git(self.repo, 'rm', '-q', 'records/a.txt', 'records/b.txt')
+        (self.repo / 'records').mkdir(exist_ok=True)
+        (self.repo / 'records/c.txt').write_text('- Rec 1\n  - fixed\n  - issue #5\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'one recorded instance')
+        self.fork = git(self.repo, 'rev-parse', 'HEAD').strip()
+        git(self.repo, 'cherry-pick', self.head)
+        self.head = git(self.repo, 'rev-parse', 'HEAD').strip()
+        out = self.report(fmt())
+        self.assertIn('- `fixed` (1 recorded): new kind accepted; own kind accepted', out)
+        # The example value is itself refused, so its refusal still shows beside the carrier's identical one.
+        self.assertIn("- `issue #N` (1 recorded): new kind refused: value '<value>' is unknown; "
+                      "own kind refused: value '<value>' is unknown", out)
+        self.assertIn('The new kind accepts 1 of the 1 values the old kind accepts.', '\n'.join(out))
+
     def test_a_reader_the_base_lacks_still_gets_the_transplant(self) -> None:
         # A path the base lacks is left out of the extract; the replay runs while the base holds the reader.
         self.assertIn('Replay:', '\n'.join(self.report(fmt(tree=['fmt', 'nowhere']))))

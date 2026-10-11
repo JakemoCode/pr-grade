@@ -40,6 +40,7 @@ check that fails is printed as a note.
 from __future__ import annotations
 
 import argparse
+import collections
 import datetime
 import importlib.util
 import io
@@ -116,6 +117,16 @@ def mask(problem: str, value: str) -> str:
     if not value:
         return problem
     return re.sub(rf'(?<![\w-]){re.escape(value)}(?![\w-])', '<value>', problem)
+
+
+def _common(runs: list[list[str]], candidates: list[tuple[str, str]]) -> collections.Counter:
+    """The problems every value's run draws identically, with the count each draws at least."""
+    common = collections.Counter(runs[0])
+    for run in runs[1:]:
+        common &= collections.Counter(run)
+    if len(runs) == 1:
+        common = collections.Counter({p: n for p, n in common.items() if mask(p, candidates[0][1]) == p})
+    return common
 
 
 def instances(root: Path, fork: str, fmt: dict, before: str | None) -> tuple[list[tuple[str, str]], list[str]]:
@@ -304,28 +315,29 @@ def transplant(root: Path, fork: str, head: str, fmt: dict, recorded: list[tuple
         except RuntimeError as failed:
             out.append(f'Transplant, {named}: the check failed, so no values were run: {failed}')
             continue
-        # A problem that names the value is the same problem for every value once the value is masked.
-        masked = [{mask(p, v) for p in problems} for (_, v), problems in zip(candidates * 2, results)]
-        new, old = masked[:len(candidates)], masked[len(candidates):]
-        # The carrier's own problems are the ones every value draws without being named: one that names the
-        # value is the kind refusing the value, even when the kind refuses every value.
-        new_common, old_common = ({p for p in set.intersection(*runs) if '<value>' not in p} for runs in (new, old))
+        # The carrier's own problems are the ones drawn identically, unmasked, whatever the value: a problem
+        # that names the value differs between values, so it is never the carrier's, even when the kind refuses
+        # every value. A count, not a set, so a value the carrier's text also holds still shows its own problem.
+        # One value cannot tell the two apart, so there a problem naming it is the value's.
+        new, old = results[:len(candidates)], results[len(candidates):]
+        new_common, old_common = (_common(runs, candidates) for runs in (new, old))
         out.append(f'Transplant, {named}, which the change adds. Each value ran through the head reader in '
                    f'{recorded[i][0]}, under the new kind and under the record\'s own kind `{rec["kind"]}`:')
-        if new_common - old_common:
+        if set(new_common) - set(old_common):
             out.append('Whatever the value, the new kind in this carrier also draws: '
-                       + '; '.join(_clip(p) for p in sorted(new_common - old_common)))
+                       + '; '.join(_clip(p) for p in sorted(set(new_common) - set(old_common))))
 
-        def verdict(found: set[str], common: set[str]) -> str:
-            extra = sorted(found - common)
+        def verdict(found: list[str], common: collections.Counter, value: str) -> str:
+            # Masked only here, for display: the same refusal then reads the same for every value.
+            extra = sorted({mask(p, value) for p in (collections.Counter(found) - common).elements()})
             return 'accepted' if not extra else 'refused: ' + _clip(extra[0])
 
         both = 0
-        for (label, _), n, o in zip(candidates, new, old):
-            under_new, under_old = verdict(n, new_common), verdict(o, old_common)
+        for (label, value), n, o in zip(candidates, new, old):
+            under_new, under_old = verdict(n, new_common, value), verdict(o, old_common, value)
             both += under_new == under_old == 'accepted'
             out.append(f'- {label}: new kind {under_new}; own kind {under_old}')
-        accepted_old = sum(verdict(o, old_common) == 'accepted' for o in old)
+        accepted_old = sum(verdict(o, old_common, v) == 'accepted' for (_, v), o in zip(candidates, old))
         out.append(f'The new kind accepts {both} of the {accepted_old} values the old kind accepts. Find what the '
                    'change says the new kind takes, and report each accepted value it says the kind must refuse.')
     return out

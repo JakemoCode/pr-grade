@@ -22,7 +22,8 @@ A format is an object:
     check       the command that reads instances, as a list; `{tree}` is the checkout whose reader
                 runs and `{instances}` a JSON file holding a list of instance texts. It runs from the
                 repository root and prints a JSON list, one list of problems per instance, empty
-                when the reader accepts it.
+                when the reader accepts it. Both runs use the head's command, and a file the reader
+                opens relative to the working directory is the head's: read through `{tree}`.
     tree        paths the base reader needs, extracted from the base commit (default: each reader's
                 directory)
     instances   where instances live, a list of {"prBodies": N} (the last N merged pull request
@@ -39,6 +40,7 @@ check that fails is printed as a note.
 from __future__ import annotations
 
 import argparse
+import datetime
 import importlib.util
 import io
 import json
@@ -98,20 +100,44 @@ def shape(value: str) -> str:
     return re.sub(r':\s.*', ': ...', value)
 
 
+def _time(stamp: str | None) -> datetime.datetime:
+    """An ISO time, compared as a time: a `Z` or an offset sorts by the instant it names. None sorts first."""
+    if not stamp:
+        return datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    parsed = datetime.datetime.fromisoformat(re.sub(r'[Zz]$', '+00:00', re.sub(r'(\.\d+)', '', stamp)))
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=datetime.timezone.utc)
+
+
+def mask(problem: str, value: str) -> str:
+    """`problem` with `value` replaced where it stands alone, so a problem naming the value reads the same
+    for every value. An empty value masks nothing, and `1` leaves line 12 alone."""
+    if not value:
+        return problem
+    return re.sub(rf'(?<![\w-]){re.escape(value)}(?![\w-])', '<value>', problem)
+
+
 def instances(root: Path, fork: str, fmt: dict, before: str | None) -> tuple[list[tuple[str, str]], list[str]]:
     """Every recorded instance as (where, text), oldest first, and a note for each source that failed."""
     found, notes = [], []
     tracked = None
     for source in fmt.get('instances', []):
         if 'prBodies' in source:
-            run = subprocess.run(['gh', 'pr', 'list', '--state', 'merged', '--limit', str(int(source['prBodies'])),
-                                  '--json', 'number,body,mergedAt'], cwd=root, capture_output=True, text=True)
+            try:
+                run = subprocess.run(['gh', 'pr', 'list', '--state', 'merged', '--limit', str(int(source['prBodies'])),
+                                      '--json', 'number,body,mergedAt'], cwd=root, capture_output=True, text=True)
+            except (OSError, ValueError, TypeError) as failed:
+                notes.append(f'pull request bodies were not read: gh did not start: {failed}')
+                continue
             if run.returncode != 0:
                 notes.append(f'pull request bodies were not read: gh exited {run.returncode}: {run.stderr.strip()}')
                 continue
-            prs = sorted(json.loads(run.stdout), key=lambda pr: pr['mergedAt'] or '')
+            try:
+                prs = sorted(json.loads(run.stdout), key=lambda pr: _time(pr['mergedAt']))
+            except (ValueError, TypeError, KeyError) as failed:
+                notes.append(f'pull request bodies were not read: gh printed {run.stdout[:80]!r}: {failed}')
+                continue
             found += [(f"PR #{pr['number']}", pr['body'] or '') for pr in prs
-                      if before is None or (pr['mergedAt'] or '') < before]
+                      if before is None or _time(pr['mergedAt']) < _time(before)]
             continue
         glob = source.get('files') or source.get('lines')
         if not glob:
@@ -128,9 +154,16 @@ def instances(root: Path, fork: str, fmt: dict, before: str | None) -> tuple[lis
     return found, notes
 
 
-def base_tree(root: Path, fork: str, fmt: dict, into: Path) -> Path:
-    """The paths the base reader needs, extracted from the base commit into `into`."""
-    paths = fmt.get('tree') or sorted({posixpath.dirname(re.split(r'[*?[]', r, 1)[0]) or '.' for r in fmt['readers']})
+def tree_paths(fmt: dict) -> list[str]:
+    return fmt.get('tree') or sorted({posixpath.dirname(re.split(r'[*?[]', r, 1)[0]) or '.' for r in fmt['readers']})
+
+
+def base_tree(root: Path, fork: str, fmt: dict, into: Path) -> Path | None:
+    """The paths the base reader needs, extracted from the base commit into `into`, or None when the base
+    holds none of them, as when the change adds the reader."""
+    paths = [p for p in tree_paths(fmt) if git(root, 'ls-tree', '--name-only', fork, '--', p).stdout.strip()]
+    if not paths:
+        return None
     archive = subprocess.run(['git', 'archive', fork, '--', *paths], cwd=root, capture_output=True, check=True).stdout
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         # The `data` filter, where this Python has it, refuses links and paths that leave the directory.
@@ -187,6 +220,11 @@ def _records(pattern: re.Pattern, text: str) -> list[re.Match]:
     return [m for m in pattern.finditer(text) if m.start('kind') >= 0]
 
 
+def _values(pattern: re.Pattern, text: str, start: int = 0) -> list[re.Match]:
+    """Each `values` match whose `value` group took part and holds something."""
+    return [m for m in pattern.finditer(text, start) if m.start('value') >= 0 and m['value']]
+
+
 def _type(match: re.Match) -> str:
     return (match.groupdict().get('type') or '') if 'type' in match.re.groupindex else ''
 
@@ -198,10 +236,22 @@ def _carrier(record: re.Pattern, value: re.Pattern, text: str, kind_type: str) -
         if _type(rec) != kind_type:
             continue
         limit = records[i + 1].start() if i + 1 < len(records) else len(text)
-        val = next((m for m in value.finditer(text, rec.end()) if m.start() < limit), None)
+        val = next((m for m in _values(value, text, rec.end()) if m.start() < limit), None)
         if val:
             return rec, val
     return None
+
+
+def _at_base(root: Path, fork: str, record: re.Pattern, kind: tuple[str, str]) -> bool:
+    """Whether any file the base commit holds already writes this kind of record."""
+    if not kind[1]:
+        return False
+    hits = git(root, 'grep', '-l', '-F', '-e', kind[1], fork, '--', check=False).stdout.splitlines()
+    for hit in hits:
+        text = git(root, 'show', hit, check=False).stdout
+        if any((_type(m), m['kind']) == kind for m in _records(record, text)):
+            return True
+    return False
 
 
 def transplant(root: Path, fork: str, head: str, fmt: dict, recorded: list[tuple[str, str]],
@@ -210,7 +260,7 @@ def transplant(root: Path, fork: str, head: str, fmt: dict, recorded: list[tuple
     old_kinds = {(_type(m), m['kind']) for _, text in recorded for m in _records(record, text)}
     counts: dict[str, list[str]] = {}
     for _, text in recorded:
-        for m in value.finditer(text):
+        for m in _values(value, text):
             counts.setdefault(shape(m['value']), []).append(m['value'])
 
     diff = git(root, 'diff', '--unified=0', '--no-ext-diff', fork, head).stdout
@@ -220,10 +270,11 @@ def transplant(root: Path, fork: str, head: str, fmt: dict, recorded: list[tuple
         shown = git(root, 'show', f'{fork}:{path}', check=False)
         base_text += shown.stdout + '\n' if shown.returncode == 0 else ''
     old_kinds |= {(_type(m), m['kind']) for m in _records(record, base_text)}
-    new_kinds = sorted({(_type(m), m['kind']) for m in _records(record, added)} - old_kinds)
+    new_kinds = sorted(k for k in {(_type(m), m['kind']) for m in _records(record, added)} - old_kinds
+                       if not _at_base(root, fork, record, k))
     if not new_kinds:
         return ['Transplant: the change adds no kind of record that the recorded instances and the base lack.']
-    new_values = sorted({m['value'] for m in value.finditer(added) if shape(m['value']) not in counts})
+    new_values = sorted({m['value'] for m in _values(value, added) if shape(m['value']) not in counts})
     candidates = [(f'`{s}` ({len(vs)} recorded)', vs[-1])
                   for s, vs in sorted(counts.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:VALUES_SHOWN]]
     candidates += [(f'`{v}` (new in this change)', v) for v in new_values]
@@ -251,9 +302,11 @@ def transplant(root: Path, fork: str, head: str, fmt: dict, recorded: list[tuple
             out.append(f'Transplant, {named}: the check failed, so no values were run: {failed}')
             continue
         # A problem that names the value is the same problem for every value once the value is masked.
-        masked = [{p.replace(v, '<value>') for p in problems} for (_, v), problems in zip(candidates * 2, results)]
+        masked = [{mask(p, v) for p in problems} for (_, v), problems in zip(candidates * 2, results)]
         new, old = masked[:len(candidates)], masked[len(candidates):]
-        new_common, old_common = set.intersection(*new), set.intersection(*old)
+        # The carrier's own problems are the ones every value draws without being named: one that names the
+        # value is the kind refusing the value, even when the kind refuses every value.
+        new_common, old_common = ({p for p in set.intersection(*runs) if '<value>' not in p} for runs in (new, old))
         out.append(f'Transplant, {named}, which the change adds. Each value ran through the head reader in '
                    f'{recorded[i][0]}, under the new kind and under the record\'s own kind `{rec["kind"]}`:')
         if new_common - old_common:
@@ -275,6 +328,33 @@ def transplant(root: Path, fork: str, head: str, fmt: dict, recorded: list[tuple
     return out
 
 
+def _replay_format(root: Path, fork: str, head: str, fmt: dict, before: str | None) -> list[str]:
+    out, (recorded, notes) = [], instances(root, fork, fmt, before)
+    out += [f'Note: {note}' for note in notes]
+    if not recorded:
+        return out + ['No recorded instance was read, so nothing was replayed.']
+    texts = [text for _, text in recorded]
+    label = 'pull request bodies' if all(w.startswith('PR #') for w, _ in recorded) else 'instances'
+    with tempfile.TemporaryDirectory() as tmp:
+        scratch = Path(tmp)
+        try:
+            tree = base_tree(root, fork, fmt, scratch / 'base')
+            base = check(root, fmt, tree, texts, scratch) if tree else None
+            head_results = check(root, fmt, root, texts, scratch)
+        except (RuntimeError, subprocess.CalledProcessError, tarfile.TarError) as failed:
+            detail = failed.stderr.decode(errors='replace') if isinstance(failed, subprocess.CalledProcessError) \
+                and isinstance(failed.stderr, bytes) else str(failed)
+            return out + [f'The replay failed, so nothing was replayed: {_clip(detail)}']
+        if base is None:
+            out.append(f"Note: the base commit holds none of {', '.join(tree_paths(fmt))}, so there is no base "
+                       'reader to replay against.')
+        else:
+            out += replay(recorded, base, head_results, label)
+        if fmt.get('records') and fmt.get('values'):
+            out += transplant(root, fork, head, fmt, recorded, head_results, scratch)
+    return out
+
+
 def report(root: Path, fork: str, head: str, config: dict, changed: list[str], before: str | None = None) -> list[str]:
     """The lines a grader holding the old-state lens reads, or none when the branch touches no declared reader."""
     out = []
@@ -282,29 +362,13 @@ def report(root: Path, fork: str, head: str, config: dict, changed: list[str], b
         if malformed(fmt):
             out.append(f'Note: {malformed(fmt)} in .claude/pr-grade.json, so it was not replayed.')
             continue
-        name = fmt.get('name', fmt['readers'][0])
-        out.append(f"### {name} (reader: {', '.join(fmt['readers'])})")
-        recorded, notes = instances(root, fork, fmt, before)
-        out += [f'Note: {note}' for note in notes]
-        if not recorded:
-            out.append('No recorded instance was read, so nothing was replayed.')
-            continue
-        texts = [text for _, text in recorded]
-        label = 'pull request bodies' if all(w.startswith('PR #') for w, _ in recorded) else 'instances'
-        with tempfile.TemporaryDirectory() as tmp:
-            scratch = Path(tmp)
-            try:
-                tree = base_tree(root, fork, fmt, scratch / 'base')
-                base = check(root, fmt, tree, texts, scratch)
-                head_results = check(root, fmt, root, texts, scratch)
-            except (RuntimeError, subprocess.CalledProcessError, tarfile.TarError) as failed:
-                detail = failed.stderr.decode(errors='replace') if isinstance(failed, subprocess.CalledProcessError) \
-                    and isinstance(failed.stderr, bytes) else str(failed)
-                out.append(f'The replay failed, so nothing was replayed: {_clip(detail)}')
-                continue
-            out += replay(recorded, base, head_results, label)
-            if fmt.get('records') and fmt.get('values'):
-                out += transplant(root, fork, head, fmt, recorded, head_results, scratch)
+        out.append(f"### {fmt.get('name', fmt['readers'][0])} (reader: {', '.join(fmt['readers'])})")
+        try:
+            out += _replay_format(root, fork, head, fmt, before)
+        except Exception as failed:  # noqa: BLE001
+            # Fails open: the replay is a floor for one lens, and a prep that stops here grades nothing.
+            out.append(f'The replay stopped, so this format is not replayed: {type(failed).__name__}: '
+                       f'{_clip(str(failed))}')
     return out
 
 

@@ -50,6 +50,10 @@ HEAD_READER = '''def problems(text):
                 found.append(f'value {value!r} is unknown')
     return found
 '''
+# The head as it should be: a guard record takes `record only` alone, and says so naming the value.
+STRICT_READER = HEAD_READER.replace("""            elif not (value == 'fixed'""", """            elif tag == 'guard':
+                found.append(f'value {value!r} is not for a guard record')
+            elif not (value == 'fixed'""")
 CHECK = '''import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location('reader', sys.argv[1] + '/fmt/reader.py')
 reader = importlib.util.module_from_spec(spec)
@@ -125,6 +129,42 @@ class ReportTest(unittest.TestCase):
                       'needs a guard record', out)
         self.assertIn('The new kind accepts 2 of the 2 values the old kind accepts.', '\n'.join(out))
 
+    def test_a_new_kind_that_refuses_every_old_value_reads_as_refusing_them(self) -> None:
+        # No value is new here, so every value draws the same masked refusal under the new kind; that is
+        # the kind refusing the values, not the carrier's own problem.
+        (self.repo / 'fmt/reader.py').write_text(STRICT_READER)
+        (self.repo / 'fmt/test_reader.py').write_text('GUARDED = "- Rec 1 | guard\\n"\n')
+        git(self.repo, 'commit', '-q', '-am', 'strict')
+        self.head = git(self.repo, 'rev-parse', 'HEAD').strip()
+        out = self.report(fmt())
+        self.assertIn("- `fixed` (1 recorded): new kind refused: value '<value>' is not for a guard record; "
+                      'own kind accepted', out)
+        self.assertIn('The new kind accepts 0 of the 2 values the old kind accepts.', '\n'.join(out))
+
+    def test_a_reader_the_base_lacks_still_gets_the_transplant(self) -> None:
+        # A path the base lacks is left out of the extract; the replay runs while the base holds the reader.
+        self.assertIn('Replay:', '\n'.join(self.report(fmt(tree=['fmt', 'nowhere']))))
+        lacking = '\n'.join(self.report(fmt(tree=['nowhere'])))
+        self.assertIn('Note: the base commit holds none of nowhere, so there is no base reader', lacking)
+        self.assertNotIn('Replay:', lacking)
+        self.assertIn('Transplant, kind ` | guard` of `Rec` records', lacking)
+
+    def test_an_optional_value_group_that_did_not_match_is_skipped(self) -> None:
+        out = '\n'.join(self.report(fmt(values=r'(?P<value>zzz)?  - ')))
+        self.assertNotIn('The replay stopped', out)
+        self.assertIn('Transplant, kind ` | guard`', out)
+
+    def test_a_kind_an_unchanged_base_file_holds_is_not_new(self) -> None:
+        git(self.repo, 'checkout', '-q', self.fork)
+        (self.repo / 'kinds.txt').write_text('- Rec 1 | guard\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'the guard kind, documented')
+        self.fork = git(self.repo, 'rev-parse', 'HEAD').strip()
+        git(self.repo, 'cherry-pick', self.head)
+        self.head = git(self.repo, 'rev-parse', 'HEAD').strip()
+        self.assertIn('Transplant: the change adds no kind of record that the recorded instances and the base lack.',
+                      self.report(fmt()))
+
     def test_a_kind_the_base_already_wrote_is_not_new(self) -> None:
         (self.repo / 'records/c.txt').write_text('- Rec 1 | guard\n  - fixed\n')
         git(self.repo, 'add', '-A')
@@ -169,6 +209,22 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(out, ["Note: format 'odd' needs `readers` as a list of strings in .claude/pr-grade.json, "
                                'so it was not replayed.'])
 
+    def test_a_missing_gh_is_a_note(self) -> None:
+        def run(command, *args, **kwargs):
+            raise FileNotFoundError(2, 'No such file or directory', command[0])
+
+        with mock.patch.object(history_replay.subprocess, 'run', run):
+            found, notes = history_replay.instances(self.repo, self.fork, {'instances': [{'prBodies': 3}]}, None)
+        self.assertEqual(found, [])
+        self.assertEqual(len(notes), 1)
+        self.assertIn('pull request bodies were not read: gh did not start:', notes[0])
+
+    def test_a_bad_pattern_stops_its_format_not_the_grade(self) -> None:
+        out = self.report(fmt(records='(?P<kind>'), fmt(name='second', records=None))
+        self.assertTrue(any(line.startswith('The replay stopped, so this format is not replayed: error:')
+                            for line in out), out)
+        self.assertIn('### second (reader: fmt/reader.py)', out)
+
     def test_an_unknown_source_is_a_note(self) -> None:
         out = self.report(fmt(instances=[{'rows': 'x'}, {'files': 'records/*.txt'}]))
         self.assertIn('Note: an instance source names no known key: {"rows": "x"}', out)
@@ -194,6 +250,31 @@ class ReportTest(unittest.TestCase):
                                                 '2026-10-09T00:00:00Z')
         self.assertEqual(found, [('PR #7', 'seven'), ('PR #8', '')])
 
+    def test_before_compares_times_not_strings(self) -> None:
+        # 23:30Z is 01:30 at +02:00, after the cutoff, though it sorts before it as text.
+        prs = [{'number': 7, 'body': 'seven', 'mergedAt': '2026-10-08T23:30:00Z'}]
+        with mock.patch.object(history_replay.subprocess, 'run', self.fake_gh(json.dumps(prs))):
+            found, _ = history_replay.instances(self.repo, self.fork, {'instances': [{'prBodies': 3}]},
+                                                '2026-10-09T01:00:00+02:00')
+        self.assertEqual(found, [])
+
+    def test_unreadable_gh_output_is_a_note_and_other_sources_still_read(self) -> None:
+        source = {'instances': [{'prBodies': 3}, {'files': 'records/b.txt'}]}
+        with mock.patch.object(history_replay.subprocess, 'run', self.fake_gh('warning: rate limit\n[]')):
+            found, notes = history_replay.instances(self.repo, self.fork, source, None)
+        self.assertEqual(found, [('records/b.txt', '- Rec 1\n  - issue #4\n')])
+        self.assertEqual(len(notes), 1)
+        self.assertIn('pull request bodies were not read: gh printed', notes[0])
+
+    def fake_gh(self, stdout: str):
+        real = subprocess.run
+
+        def run(command, *args, **kwargs):
+            if command[0] == 'gh':
+                return subprocess.CompletedProcess(command, 0, stdout, '')
+            return real(command, *args, **kwargs)
+        return run
+
     def test_a_failing_gh_is_a_note(self) -> None:
         def run(command, *args, **kwargs):
             return subprocess.CompletedProcess(command, 1, '', 'not logged in')
@@ -209,6 +290,14 @@ class ReportTest(unittest.TestCase):
             # The reader's directory as the base held it: no records, and no test the head added.
             self.assertEqual({p.relative_to(tree).as_posix(): p.read_text() for p in tree.rglob('*') if p.is_file()},
                              {'fmt/reader.py': BASE_READER})
+
+
+class MaskTest(unittest.TestCase):
+    def test_a_value_is_masked_only_where_it_stands_alone(self) -> None:
+        self.assertEqual(history_replay.mask('value 1 at line 12', '1'), 'value <value> at line 12')
+
+    def test_an_empty_value_masks_nothing(self) -> None:
+        self.assertEqual(history_replay.mask('value at line 12', ''), 'value at line 12')
 
 
 class ShapeTest(unittest.TestCase):

@@ -70,7 +70,7 @@ CONFIG, MODES, load_config, repo_root = grade_mode.CONFIG, grade_mode.MODES, gra
 TS_ADAPTER = HERE / 'check_then_act_ts.cjs'
 TS_SUFFIXES = ('.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs')
 
-DEFAULT_LENSES = [f'L{n}' for n in range(1, 9)]
+DEFAULT_LENSES = [f'L{n}' for n in range(1, 10)]
 # GitHub lists at most this many files, and says nothing when it stops.
 COMPARE_CAP = 300
 PR_FILE_CAP = 3000
@@ -102,7 +102,7 @@ def without_code(markdown: str) -> str:
 
 def lens_ids(text: str | None) -> list[str]:
     """Every lens the lens file text defines as a `### L<n>.` heading. A lens added there is required
-    with no code change. The skill's eight apply without a file, or when no heading matches, so a
+    with no code change. The skill's nine apply without a file, or when no heading matches, so a
     reworded heading can never leave nothing required."""
     return (LENS_HEADING.findall(text) if text else []) or DEFAULT_LENSES
 

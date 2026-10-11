@@ -18,7 +18,7 @@ SCRIPTS = Path(__file__).resolve().parent.parent / 'skills/pr-grade/scripts'
 sys.path.insert(0, str(SCRIPTS))
 import grade_prep  # noqa: E402
 
-LENSES = [f'L{n}' for n in range(1, 9)]
+LENSES = [f'L{n}' for n in range(1, 10)]
 
 
 def git(root: Path, *args: str) -> str:
@@ -32,14 +32,14 @@ class GroupsTest(unittest.TestCase):
 
     def test_the_lens_files_table_names_the_groups(self) -> None:
         table = ('## Fan-out groups\n\n| Group | Lenses | Shared reading |\n|---|---|---|\n'
-                 '| Timing | L1, L2, L7 | x |\n| Everything else | L3, L4, L5, L6, L8 | y |\n\n## Next\n')
+                 '| Timing | L1, L2, L7 | x |\n| Everything else | L3, L4, L5, L6, L8, L9 | y |\n\n## Next\n')
         self.assertEqual(grade_prep.groups_for('fan-out', LENSES, table, []),
-                         {'timing': ['L1', 'L2', 'L7'], 'everything-else': ['L3', 'L4', 'L5', 'L6', 'L8']})
+                         {'timing': ['L1', 'L2', 'L7'], 'everything-else': ['L3', 'L4', 'L5', 'L6', 'L8', 'L9']})
 
     def test_a_lens_no_group_holds_gets_a_grader_of_its_own(self) -> None:
         # A lens the lens file added must not go ungraded because the default groups predate it.
-        groups = grade_prep.groups_for('fan-out', [*LENSES, 'L9'], None, [])
-        self.assertEqual(groups['other-lenses'], ['L9'])
+        groups = grade_prep.groups_for('fan-out', [*LENSES, 'L10'], None, [])
+        self.assertEqual(groups['other-lenses'], ['L10'])
 
     def test_a_group_naming_a_lens_the_file_lacks_stops_the_run(self) -> None:
         with self.assertRaises(SystemExit):
@@ -58,16 +58,16 @@ class GroupsTest(unittest.TestCase):
 
     def test_a_skipped_lens_reaches_no_group_and_a_group_it_empties_is_dropped(self) -> None:
         self.assertEqual(grade_prep.groups_for('fan-out', LENSES, None, [], ['L2', 'L3', 'L4']),
-                         {'timing': ['L1', 'L7'], 'lifetime-and-contract': ['L5', 'L6', 'L8']})
+                         {'timing': ['L1', 'L7'], 'lifetime-and-contract': ['L5', 'L6', 'L8', 'L9']})
 
     def test_a_skipped_lens_leaves_the_lens_files_table_too(self) -> None:
-        table = '## Fan-out groups\n\n| Group | Lenses |\n|---|---|\n| Timing | L1, L2, L7 |\n| Rest | L3, L4, L5, L6, L8 |\n'
+        table = '## Fan-out groups\n\n| Group | Lenses |\n|---|---|\n| Timing | L1, L2, L7 |\n| Rest | L3, L4, L5, L6, L8, L9 |\n'
         self.assertEqual(grade_prep.groups_for('fan-out', LENSES, table, [], ['L2']),
-                         {'timing': ['L1', 'L7'], 'rest': ['L3', 'L4', 'L5', 'L6', 'L8']})
+                         {'timing': ['L1', 'L7'], 'rest': ['L3', 'L4', 'L5', 'L6', 'L8', 'L9']})
 
     def test_one_grader_holds_every_lens_not_skipped(self) -> None:
         self.assertEqual(grade_prep.groups_for('subagent', LENSES, None, [], ['L4']),
-                         {'grade': ['L1', 'L2', 'L3', 'L5', 'L6', 'L7', 'L8']})
+                         {'grade': ['L1', 'L2', 'L3', 'L5', 'L6', 'L7', 'L8', 'L9']})
 
     def test_a_given_group_naming_a_skipped_lens_stops_the_run(self) -> None:
         with self.assertRaises(SystemExit) as stopped:
@@ -76,7 +76,7 @@ class GroupsTest(unittest.TestCase):
 
     def test_a_skipped_lens_left_out_of_given_groups_gets_no_grader(self) -> None:
         self.assertEqual(grade_prep.groups_for('fan-out', LENSES, None, ['timing=L1,L7'], ['L2', 'L3']),
-                         {'timing': ['L1', 'L7'], 'other-lenses': ['L4', 'L5', 'L6', 'L8']})
+                         {'timing': ['L1', 'L7'], 'other-lenses': ['L4', 'L5', 'L6', 'L8', 'L9']})
 
 
 class SkipTest(unittest.TestCase):
@@ -175,7 +175,7 @@ class CliTest(unittest.TestCase):
         self.assertIn('Declined review findings, with reasons: rename x: out of scope', out)
 
     def test_each_grader_gets_its_own_copy_and_report_path_and_the_l7_holder_gets_the_scan(self) -> None:
-        out = self.prep('--groups', 'timing=L1,L2,L7', '--groups', 'rest=L3,L4,L5,L6,L8')
+        out = self.prep('--groups', 'timing=L1,L2,L7', '--groups', 'rest=L3,L4,L5,L6,L8,L9')
         copies = re.findall(r'- Your proof copy: (\S+)', out)
         self.assertEqual(len(set(copies)), 2)
         for copy in copies:
@@ -185,11 +185,11 @@ class CliTest(unittest.TestCase):
         self.assertNotIn('check-then-act candidates (L7)', rest)
         root = Path(re.search(r'^merge: .* merge (\S+)$', out, re.M).group(1))
         meta = json.loads((root / 'grade.json').read_text())
-        self.assertEqual((meta['mode'], meta['groups']['rest']), ('subagent', ['L3', 'L4', 'L5', 'L6', 'L8']))
+        self.assertEqual((meta['mode'], meta['groups']['rest']), ('subagent', ['L3', 'L4', 'L5', 'L6', 'L8', 'L9']))
         self.assertIn(f"- Write your report to: {root / 'timing' / 'grade.md'}", out)
 
     def test_a_skipped_lens_gets_no_grader_and_no_proof_copy(self) -> None:
-        out = self.prep('--groups', 'timing=L1,L7', '--groups', 'rest=L4,L5,L6,L8', '--skip', 'L2,L3')
+        out = self.prep('--groups', 'timing=L1,L7', '--groups', 'rest=L4,L5,L6,L8,L9', '--skip', 'L2,L3')
         self.assertEqual(len(re.findall(r'- Your proof copy: (\S+)', out)), 2)
         self.assertNotIn('===== other-lenses =====', out)
         self.assertIn('skipped: L2, L3', out)
@@ -295,6 +295,46 @@ class CliTest(unittest.TestCase):
         self.assertIn('the grade block keeps subagent', out)
         root = Path(re.search(r'^remove: .* remove (\S+)$', out, re.M).group(1))
         self.assertEqual(json.loads((root / 'grade.json').read_text())['mode'], 'subagent')
+
+    def declare_format(self, **config) -> None:
+        # A reader that accepts everything, over one recorded instance, so only where its output lands is tested.
+        check = [sys.executable, '-c', 'import json, sys; print(json.dumps([[] for _ in json.load(open(sys.argv[2]))]))',
+                 '{tree}', '{instances}']
+        fmt = {'name': 'store records', 'readers': ['store.py'], 'check': check, 'instances': [{'files': 'app.py'}]}
+        (self.repo / '.claude/pr-grade.json').write_text(json.dumps({'silent': ['store.py'], 'formats': [fmt], **config}))
+        git(self.repo, 'commit', '-q', '-am', 'declare a format')
+
+    def test_the_grader_holding_the_old_state_lens_gets_the_replay(self) -> None:
+        self.declare_format()
+        out = self.prep('--groups', 'timing=L1,L2,L7', '--groups', 'rest=L3,L4,L5,L6,L8,L9')
+        before_rest, rest = out.split('===== rest =====')
+        self.assertIn('history_replay.py at the head, for L9:\n### store records (reader: store.py)\n'
+                      'Replay: the base and head readers read 1 recorded instances.', rest)
+        self.assertNotIn('Replay:', before_rest)
+
+    def test_old_state_lens_names_the_lens_that_reads_it(self) -> None:
+        self.declare_format(oldStateLens='L4')
+        out = self.prep('--groups', 'timing=L1,L2,L7', '--groups', 'reach=L3,L4', '--groups', 'rest=L5,L6,L8,L9')
+        self.assertIn('history_replay.py at the head, for L4:', out.split('===== reach =====')[1].split('=====')[0])
+
+    def test_a_skipped_old_state_lens_skips_the_replay(self) -> None:
+        self.declare_format()
+        out = self.prep('--skip', 'L9')
+        self.assertIn('skipped: L9', out)
+        self.assertNotIn('Replay:', out)
+
+    def test_an_old_state_lens_no_grader_holds_puts_the_replay_in_the_shared_block(self) -> None:
+        self.declare_format(oldStateLens='L14')
+        shared = self.prep().split('===== shared block =====')[1].split('\n===== ')[0]
+        self.assertIn('No grader holds L14, so every grader reads what history_replay.py found:', shared)
+        self.assertIn('Replay: the base and head readers read 1 recorded instances.', shared)
+
+    def test_a_branch_touching_no_declared_reader_gets_no_replay(self) -> None:
+        self.declare_format()
+        path = self.repo / '.claude/pr-grade.json'
+        path.write_text(path.read_text().replace('"readers": ["store.py"]', '"readers": ["other.py"]'))
+        git(self.repo, 'commit', '-q', '-am', 'another reader')
+        self.assertNotIn('Replay:', self.prep())
 
     def test_uncommitted_edits_stop_it_before_anything_is_made(self) -> None:
         (self.repo / 'store.py').write_text('changed\n')

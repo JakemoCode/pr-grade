@@ -154,11 +154,20 @@ class ReportTest(unittest.TestCase):
     def test_a_check_that_fails_is_a_note_not_a_crash(self) -> None:
         out = '\n'.join(self.report(fmt(check=[sys.executable, '-c', 'import sys; sys.exit("boom")'])))
         self.assertIn('The replay failed, so nothing was replayed:', out)
-        self.assertIn('boom', out)
+        self.assertIn('exited 1: boom, from `', out)
+
+    def test_a_check_that_raises_names_the_error_not_the_frames(self) -> None:
+        out = '\n'.join(self.report(fmt(check=[sys.executable, '-c', 'import missing_reader_module'])))
+        self.assertIn("exited 1: ModuleNotFoundError: No module named 'missing_reader_module', from `", out)
 
     def test_a_check_printing_the_wrong_shape_is_a_note(self) -> None:
         out = '\n'.join(self.report(fmt(check=[sys.executable, '-c', 'print("[]")'])))
         self.assertIn('not one list of problem strings per instance (2)', out)
+
+    def test_a_malformed_format_is_named_even_when_untouched(self) -> None:
+        out = self.report({'name': 'odd', 'readers': 'fmt/reader.py'}, changed=['check.py'])
+        self.assertEqual(out, ["Note: format 'odd' needs `readers` as a list of strings in .claude/pr-grade.json, "
+                               'so it was not replayed.'])
 
     def test_an_unknown_source_is_a_note(self) -> None:
         out = self.report(fmt(instances=[{'rows': 'x'}, {'files': 'records/*.txt'}]))

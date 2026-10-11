@@ -45,10 +45,13 @@ def _load(name: str):
     return module
 
 
-grade_mode, grade_block, proof_dir, check_then_act = (_load(n) for n in ('grade_mode', 'grade_block', 'proof_dir',
-                                                                          'check_then_act'))
+grade_mode, grade_block, proof_dir, check_then_act, history_replay = (
+    _load(n) for n in ('grade_mode', 'grade_block', 'proof_dir', 'check_then_act', 'history_replay'))
 
-DEFAULT_GROUPS = {'timing': ['L1', 'L2', 'L7'], 'reach': ['L3', 'L4'], 'lifetime-and-contract': ['L5', 'L6', 'L8']}
+DEFAULT_GROUPS = {'timing': ['L1', 'L2', 'L7'], 'reach': ['L3', 'L4'],
+                  'lifetime-and-contract': ['L5', 'L6', 'L8', 'L9']}
+# The lens that reads history_replay.py's output, unless the config's `oldStateLens` names another.
+OLD_STATE_LENS = 'L9'
 GROUP_ROW = re.compile(r'(?m)^\|\s*([^|]*?[A-Za-z][^|]*?)\s*\|\s*(L\d+(?:\s*,\s*L\d+)*)\s*\|')
 LOCKS = ('package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lock', 'bun.lockb',
          'poetry.lock', 'uv.lock', 'Pipfile.lock', 'Cargo.lock', 'go.sum', 'composer.lock', 'Gemfile.lock')
@@ -243,6 +246,9 @@ def main() -> None:
     modified, notes = modified_functions(root, fork, lines, config)
     # Everything that can stop the run happens before the copies exist, so a failure leaves none behind.
     l7 = l7_block(root, args.base, committed) if any('L7' in ids for ids in groups.values()) else ''
+    old_state = config.get('oldStateLens', OLD_STATE_LENS)
+    replayed = [] if old_state in skipped else history_replay.report(root, fork, head, config, changed)
+    holder = next((name for name, ids in groups.items() if old_state in ids), None)
     try:
         made = proof_dir.make(root, head, list(groups), config, Path(tempfile.gettempdir()), since=fork)
     except subprocess.CalledProcessError as failed:
@@ -291,6 +297,8 @@ def main() -> None:
         'and cannot see a re-export, dynamic dispatch, or a name built from a string.',
         *caller_lines,
         *(['', 'Proof copies:', *[f'- {line}' for line in copy_notes]] if copy_notes else []),
+        *(['', f'No grader holds {old_state}, so every grader reads what history_replay.py found:', *replayed]
+          if replayed and holder is None else []),
     ]))
     for name, ids in groups.items():
         print(f'\n===== {name} =====\n')
@@ -301,6 +309,8 @@ def main() -> None:
                  f'- Write your report to: {proof_root / name / "grade.md"}']
         if 'L7' in ids:
             block += ['', 'check_then_act.py at the head:', l7]
+        if replayed and name == holder:
+            block += ['', f'history_replay.py at the head, for {old_state}:', *replayed]
         print('\n'.join(block))
     if mode != 'in-thread':
         print(f"\nmerge: python3 {HERE / 'grade_block.py'} merge {proof_root}")

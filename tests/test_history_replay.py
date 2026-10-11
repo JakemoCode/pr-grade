@@ -161,6 +161,14 @@ class ReportTest(unittest.TestCase):
                       "own kind refused: value '<value>' is unknown", out)
         self.assertIn('The new kind accepts 1 of the 1 values the old kind accepts.', '\n'.join(out))
 
+    def test_a_change_adding_two_kinds_gets_a_transplant_for_each(self) -> None:
+        (self.repo / 'fmt/test_reader.py').write_text(TEST_AT_HEAD + 'OTHER = "- Rec 2 | other\\n"\n')
+        git(self.repo, 'commit', '-q', '-am', 'a second kind')
+        self.head = git(self.repo, 'rev-parse', 'HEAD').strip()
+        out = '\n'.join(self.report(fmt()))
+        self.assertNotIn('The replay stopped', out)
+        self.assertEqual(out.count('Transplant, kind'), 2, out)
+
     def test_a_reader_the_base_lacks_still_gets_the_transplant(self) -> None:
         # A path the base lacks is left out of the extract; the replay runs while the base holds the reader.
         self.assertIn('Replay:', '\n'.join(self.report(fmt(tree=['fmt', 'nowhere']))))

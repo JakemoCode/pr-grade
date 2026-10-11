@@ -327,17 +327,17 @@ def transplant(root: Path, fork: str, head: str, fmt: dict, recorded: list[tuple
             out.append('Whatever the value, the new kind in this carrier also draws: '
                        + '; '.join(_clip(p) for p in sorted(set(new_common) - set(old_common))))
 
-        def verdict(found: list[str], common: collections.Counter, value: str) -> str:
+        def verdict(found: list[str], common: collections.Counter, example: str) -> str:
             # Masked only here, for display: the same refusal then reads the same for every value.
-            extra = sorted({mask(p, value) for p in (collections.Counter(found) - common).elements()})
+            extra = sorted({mask(p, example) for p in (collections.Counter(found) - common).elements()})
             return 'accepted' if not extra else 'refused: ' + _clip(extra[0])
 
         both = 0
-        for (label, value), n, o in zip(candidates, new, old):
-            under_new, under_old = verdict(n, new_common, value), verdict(o, old_common, value)
+        for (label, example), n, o in zip(candidates, new, old):
+            under_new, under_old = verdict(n, new_common, example), verdict(o, old_common, example)
             both += under_new == under_old == 'accepted'
             out.append(f'- {label}: new kind {under_new}; own kind {under_old}')
-        accepted_old = sum(verdict(o, old_common, v) == 'accepted' for (_, v), o in zip(candidates, old))
+        accepted_old = sum(verdict(o, old_common, example) == 'accepted' for (_, example), o in zip(candidates, old))
         out.append(f'The new kind accepts {both} of the {accepted_old} values the old kind accepts. Find what the '
                    'change says the new kind takes, and report each accepted value it says the kind must refuse.')
     return out

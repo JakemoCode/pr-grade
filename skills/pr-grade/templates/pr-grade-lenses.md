@@ -42,6 +42,10 @@ Replace every `<...>`. Delete a section that adds nothing over the skill; keep i
 
 <The defaults and fallbacks worth a sentence: optional dependencies, `??` values, catches that return something neutral.>
 
+### L9. Old state meets new code
+
+<What earlier versions wrote that new code reads: ledgers, PR bodies, rows, config files. Declare each format whose reader a change may touch under `formats` in `.claude/pr-grade.json`, so `history_replay.py` replays it.>
+
 ## Already settled
 
 <The deterministic checks graders take as given and never re-run: test suites, type checks, linters, architecture tests, mutation tests. Grade what they cannot see.>
@@ -56,7 +60,7 @@ Replace every `<...>`. Delete a section that adds nothing over the skill; keep i
 |---|---|---|
 | Timing | L1, L2, L7 | <every transaction, await, and status read in the diff> |
 | Reach | L3, L4 | <the caller list and any ownership registry> |
-| Lifetime and contract | L5, L6, L8 | <the specs cited and every fallback> |
+| Lifetime and contract | L5, L6, L8, L9 | <the specs cited and every fallback> |
 
 ## Growing this list
 

@@ -4,6 +4,12 @@ Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an 
 
 CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` without raising the version and adding its heading here. Label one `hold-release` to merge it unreleased, when a change lands over several pull requests.
 
+## 0.12.0
+
+- L9, old state meets new code: what earlier versions wrote that the new code will read. A changed reader must still read every instance the base read, and a new kind of record must refuse the values recorded under the old kinds that its rules exclude. The default groups put L9 with lifetime and contract, and `grade_block.py check` requires it of a repository without a lens file. A repository with one adds a `### L9.` heading, or names its own id in `oldStateLens`.
+- `history_replay.py` runs both checks for each format `.claude/pr-grade.json` declares under `formats` whose reader the branch changed. The replay runs the base and head readers over every recorded instance (merged pull request bodies, files, or lines of files at the base) and lists the ones they disagree on. The transplant puts each kind of record the change adds into a recorded instance and runs every recorded value through it beside the record's old kind. `grade_prep.py` gives the output to the grader holding the lens `oldStateLens` names, `L9` by default, or to every grader when none holds it. A repository that declares no format pays nothing.
+- Why the transplant: EngOS PR #825 added a tagged review pass whose findings take one disposition, and its validator let the tagged pass take every disposition an ordinary pass takes. Three grades missed it, the last after the lens file asked for this probe. Replayed blind on PR #825's head with the transplant's output and the L9 text, two graders out of two reported it at P2.
+
 ## 0.11.1
 
 - `merge` reads a finding whose file is written from the repository's or a proof copy's absolute path as the path inside it, so `<repo>/scripts/canary_scoring.py:95` reads as `scripts/canary_scoring.py:95`. 0.11.0 flagged it as not in the head commit though the diff changed it, and missed its overlap with the same line written relative. A path cited through a link, such as macOS's `/var` for the `/private/var` git prints, is read resolved, and a proof copy under the repository reads as the copy. An absolute path outside both keeps the note.

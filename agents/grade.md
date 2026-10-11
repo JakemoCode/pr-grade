@@ -1,6 +1,6 @@
 ---
 name: grade
-description: Applies named /pr-grade lenses to one change and reports a verdict per lens, proven findings, and what it could not verify. Dispatched by the pr-grade skill, one per fan-out group or one for every lens. Read-only on the repository, its .git included; proves findings in a proof copy of the graded commit. Dispatch it with the prompt grade_prep.py prints, or with, pasted into the prompt, the repository's absolute path; the lens file's absolute path, or "none"; the base and head commits as full SHAs; its lenses; the checks already settled at the head; the review findings the author declined, with their reasons; the callers of each function, method, type, or option the change modified, with the command that found them; its proof copy, scratch directory, and report path; and, when it holds L7, the output of check_then_act.py.
+description: Applies named /pr-grade lenses to one change and reports a verdict per lens, proven findings, and what it could not verify. Dispatched by the pr-grade skill, one per fan-out group or one for every lens. Read-only on the repository, its .git included; proves findings in a proof copy of the graded commit. Dispatch it with the prompt grade_prep.py prints, or with, pasted into the prompt, the repository's absolute path; the lens file's absolute path, or "none"; the base and head commits as full SHAs; its lenses; the checks already settled at the head; the review findings the author declined, with their reasons; the callers of each function, method, type, or option the change modified, with the command that found them; its proof copy, scratch directory, and report path; and, when it holds L7, the output of check_then_act.py, and when it holds the old-state lens, the output of history_replay.py.
 tools: Read, Glob, Grep, Bash, Write
 model: sonnet
 effort: high
@@ -22,6 +22,8 @@ The dispatch may carry findings a correctness review raised that the author decl
 The callers list is a floor, never a ceiling. It cannot see a re-export, dynamic dispatch, or a name built from a string, so search once for those before you clear L4.
 
 When you hold L7, the dispatch may carry the output of `check_then_act.py`. Answer every candidate on it: clear it with the reason the window is harmless, or prove the race. The list is a floor, never a ceiling; look for windows it cannot see as well.
+
+When you hold L9, or the lens the repository names for old state, the dispatch may carry the output of `history_replay.py`: the instances the base and head readers disagree on, and the recorded values each new kind of record accepts. Settle every new kind it lists: find what the change says that kind takes, and prove each accepted value it must refuse, or say why the kind takes it. The output is a floor, never a ceiling.
 
 ## Work
 

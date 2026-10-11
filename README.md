@@ -2,7 +2,7 @@
 
 A Claude Code plugin that grades a change the way an external reviewer will, before you push it.
 
-A correctness review asks whether the code does the right thing. The defects that get past one are about what happens to the work you stopped looking at, and who else shares the resource you just used. pr-grade applies eight lenses aimed at that class, decides how many agents should grade from what the diff touches, and writes a score into the PR body where a check can refuse a PR that was never graded or changed since.
+A correctness review asks whether the code does the right thing. The defects that get past one are about what happens to the work you stopped looking at, and who else shares the resource you just used. pr-grade applies nine lenses aimed at that class, decides how many agents should grade from what the diff touches, and writes a score into the PR body where a check can refuse a PR that was never graded or changed since.
 
 ## Install
 
@@ -15,7 +15,7 @@ A correctness review asks whether the code does the right thing. The defects tha
 
 | Piece | What it does |
 |---|---|
-| `pr-grade` skill | The eight lenses, the proof rule, the score, and the report shape. Run `/pr-grade` before opening a PR or marking one ready. |
+| `pr-grade` skill | The nine lenses, the proof rule, the score, and the report shape. Run `/pr-grade` before opening a PR or marking one ready. |
 | `pr-grade:grade` agent | Applies named lenses to one change and proves each finding by running something. Sonnet at `high`, 50 turns, read-only on the repository. |
 | `scripts/grade_prep.py` | One call that prepares a grade: picks the mode, splits the lenses among graders (leaving out any `--skip` names), lists the callers of each modified function, runs the L7 scan, makes the proof copies, and prints every grader's prompt. |
 | `scripts/proof_dir.py` | Makes one clone of the graded commit per grader outside the repository, with its installed dependencies linked in, and removes them afterwards. Nothing is registered in the repository. |
@@ -23,11 +23,12 @@ A correctness review asks whether the code does the right thing. The defects tha
 | `scripts/grade_block.py check <pr>` | Refuses a PR whose `## Grade` block is missing, below 5/5, missing a lens, in a cheaper mode than its files need, or older than its code. |
 | `scripts/grade_block.py merge <root>` | Merges the graders' reports, or takes one with `--report <group>=<file or ->` when its grader replied without writing it: where each lens ended, the findings with any two at one line flagged and any whose line the graded diff did not change flagged with the nearest changed line, the lowest score the rules allow, and a draft block that keeps each grader's notes and clears a skipped lens as not applicable. |
 | `scripts/check_then_act.py` | Lists the check-then-act windows (L7) in the functions a branch changed, for the grader to clear or prove. |
+| `scripts/history_replay.py` | For each format `.claude/pr-grade.json` declares whose reader a branch changed, runs the base and head readers over the recorded instances, and runs recorded values through each kind of record the change adds (L9). |
 | `templates/` | A lens file, a config, and a CI workflow to copy into a repository. |
 
-The scripts use only the Python standard library (3.9 or later). `check` also needs an authenticated `gh`, and the check-then-act scanner needs Node for TypeScript and JavaScript. It reads Python with the standard library.
+The scripts use only the Python standard library (3.9 or later). `check` and a format's `prBodies` source also need an authenticated `gh`, and the check-then-act scanner needs Node for TypeScript and JavaScript. It reads Python with the standard library.
 
-## The eight lenses
+## The nine lenses
 
 Each lens is a question a correctness review tends not to ask. Every one comes from a defect that got past a careful review.
 
@@ -41,8 +42,9 @@ Each lens is a question a correctness review tends not to ask. Every one comes f
 | L6. Contract drift | The behaviour moved. Did the docs, types, tests, error messages, tool descriptions, and registries that describe it move too? |
 | L7. Check then act | When does a guard's state change, relative to the work it guards? An `await` or a second read between the check and the write lets every caller in that window through. `check_then_act.py` lists the candidates. |
 | L8. Failure direction | For every new fallback, default, and failure path: which way does it fail, and why is that the cheap direction? |
+| L9. Old state meets new code | What did earlier versions write that the new code will read? A changed reader must still read it, and a new kind of record must refuse the old values its rules exclude. `history_replay.py` runs both checks over the formats a repository declares. |
 
-The list is incomplete by construction. A repository's lens file restates each lens for its own code, and adds one whenever a reviewer finds a defect no lens names. The full definitions, with an example for each, are in [the skill](skills/pr-grade/SKILL.md#3-the-eight-lenses).
+The list is incomplete by construction. A repository's lens file restates each lens for its own code, and adds one whenever a reviewer finds a defect no lens names. The full definitions, with an example for each, are in [the skill](skills/pr-grade/SKILL.md#3-the-nine-lenses).
 
 ## A real grade
 
@@ -104,7 +106,7 @@ Mode: subagent
 Graded: <full SHA of the last commit graded>
 Score: 5/5
 Blocking: nothing
-Verified and clear: L1, L2, L3, L4, L5, L6, L7, L8
+Verified and clear: L1, L2, L3, L4, L5, L6, L7, L8, L9
 Could not verify: none
 ```
 

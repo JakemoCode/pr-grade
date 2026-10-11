@@ -1,6 +1,6 @@
 ---
 name: pr-grade
-description: Grade a change the way an external reviewer will, before pushing it. Applies eight lenses for the defects a correctness review misses, picks how many agents grade from what the diff touches, and reports a score out of five in a block a PR check can enforce. Use before opening a pull request or marking one ready, when asked for a bot-reviewer-style assessment, or after a bot review finds something the local review missed.
+description: Grade a change the way an external reviewer will, before pushing it. Applies nine lenses for the defects a correctness review misses, picks how many agents grade from what the diff touches, and reports a score out of five in a block a PR check can enforce. Use before opening a pull request or marking one ready, when asked for a bot-reviewer-style assessment, or after a bot review finds something the local review missed.
 ---
 
 # Grading a change before a reviewer does
@@ -18,7 +18,7 @@ Run this before you push. It does not replace a correctness review such as `/cod
 Two optional files at the repository root tune this skill. Read both first when they exist.
 
 - **`.claude/pr-grade-lenses.md`** restates each lens for this codebase: its real bounded resources, its callers, its proof recipe, its fan-out groups. Where it and this file differ, it wins. [`templates/pr-grade-lenses.md`](templates/pr-grade-lenses.md) is a starting point.
-- **`.claude/pr-grade.json`** tells the mode selector which paths are silent-failure code and which are ordinary; code it names as neither grades as silent. [`templates/pr-grade.json`](templates/pr-grade.json) shows every key.
+- **`.claude/pr-grade.json`** tells the mode selector which paths are silent-failure code and which are ordinary; code it names as neither grades as silent. [`templates/pr-grade.json`](templates/pr-grade.json) shows every key. Its `formats` declare the records the repository keeps, for L9; one that declares none pays nothing.
 
 Without them the generic lenses below apply, and the selector uses its defaults.
 
@@ -42,11 +42,13 @@ It picks the mode from what the branch touches, as `grade_mode.py` does alone, a
 
 - **in-thread**: apply every lens yourself.
 - **subagent**: dispatch one `pr-grade:grade` agent to apply every lens.
-- **fan-out**: dispatch one `pr-grade:grade` agent per fan-out group. The lens file names the groups; without them use timing (L1, L2, L7), reach (L3, L4), and lifetime and contract (L5, L6, L8).
+- **fan-out**: dispatch one `pr-grade:grade` agent per fan-out group. The lens file names the groups; without them use timing (L1, L2, L7), reach (L3, L4), and lifetime and contract (L5, L6, L8, L9).
 
 A lens that does not apply to the change, by a rule the repository keeps for itself, such as a lens file that scopes a lens to some paths, goes to `--skip L2,L3`. No grader holds it and no proof copy is made for it. The merge clears it as `L2 (not applicable)`; in-thread, write it that way yourself. Skip only by a rule written down before the change, never because a lens looks unlikely to find anything.
 
 Then it prints a prompt for every grader: a shared block, and one block per grader. Paste the shared block and the grader's own block into its prompt, unchanged. The shared block holds the repository, the lens file, the base and head as full SHAs, the change as one diff command, what is settled, the declined findings, and the callers list. The base is the branch point, since `origin/main` moves when anything fetches and a diff against it shows main's new work as this change reverting it. A grader's own block holds its lenses, its proof copy, its scratch directory, and where to write its report. The grader holding L7 also gets `check_then_act.py`'s list of check-then-act windows in the functions the branch changed. For TypeScript and JavaScript the scanner needs Node and the repository's own `typescript` package; Python needs nothing, and the scanner names the files it skipped.
+
+The grader holding L9, or the lens `oldStateLens` in `.claude/pr-grade.json` names, gets `history_replay.py`'s output when the branch touches a reader that a declared format names. The replay runs the base and head readers over every recorded instance, such as the last few hundred merged pull request bodies, and lists each one they disagree on. The transplant takes each kind of record the change adds, puts it in a recorded instance, and runs every recorded value through it beside the record's old kind. A repository declares a format with the command that runs its reader over a list of instances, where the instances live, and the two regexes that find a record's kind and a value under it; the script's docstring has the keys. When no grader holds that lens, every grader gets the output in the shared block, and a skipped lens skips the run.
 
 A proof copy is a clone of the head commit outside the repository, with its installed dependencies linked in, one per grader. A grader copies a failing test there from its scratch directory and runs it without setup, and nothing is registered in the repository. Name any dependency beyond `node_modules` and `.venv` under `proofDir` in `.claude/pr-grade.json`. The prep ends with a `merge:` line, which section 5 runs, and a `remove:` line to run once every grader has reported. In-thread there are no reports to merge, and only the `remove:` line is printed. A branch that changed a dependency's pin files gets no linked dependency: the prep names the install to run in each copy instead, since what the author installed may predate the change. A grader told where nothing is searches the filesystem for it. Graders who did spent up to eight of their fifty turns on it, and read three different installed copies of this file.
 
@@ -56,7 +58,7 @@ Pass the declined findings as the review returned them, in whatever form it used
 
 A grader has fifty turns and cannot see which one it is on. When the harness says one stopped at its turn limit, send it one message with SendMessage: "Stop investigating and report now, in your report shape, from what you have. Put every claim you have not proven under Could not verify." Do not ask it to continue; a turn spent investigating is not spent reporting. Below the grade block, say which graders needed that message. When a group's grader stops at its limit in two rounds, split the group next round, one grader per lens. Each extra grader reads the whole change again, so split no sooner.
 
-## 3. The eight lenses
+## 3. The nine lenses
 
 Apply each one by name. A lens you skipped is a lens that finds nothing.
 
@@ -137,6 +139,17 @@ A counter raised after the work starts does not bound the work. A flag set in a 
 For every new failure path, fallback value, and default, say which way it fails and why that is the cheap direction. Write the sentence. If you cannot, the direction is probably wrong.
 
 Fail-open and fail-closed are both defensible. Choosing without noticing is not. An optional dependency that means "nothing blocking" when absent has chosen fail-open for everyone who forgets to pass it.
+
+### L9. Old state meets new code
+
+What already exists that the new code will read, accept, or rewrite? Records, rows, ledger lines, files, and pull request bodies an earlier version wrote. L5 asks when state goes away; this asks what is already there.
+
+- **A changed reader.** Every instance the base reader accepted should read the same at the head. One the head refuses, or reads differently, is a migration the change owes or a finding.
+- **A new kind in an existing format**, such as a tag, a record type, or a mode. It starts out accepting whatever the old kinds' fields accept. Find what the change says the new kind takes, in its docstring, docs, or spec, and run the values recorded under the old kinds through it. Each one it accepts that the change says it must refuse is a finding. A check that accepts what it exists to refuse is a P2, whoever writes that input today.
+
+When the repository declares its formats under `formats` in `.claude/pr-grade.json`, `history_replay.py` has made both runs and the prep gives its output to the grader holding this lens. The output is a floor. Prove a finding from it in the proof copy like any other, and look for state it does not cover, such as a database or a cache.
+
+*Example:* a review record gained a tag for a pass whose findings nobody acts on, and a disposition only that pass may take. The validator confined the new disposition to the tagged pass and never refused the old ones there, so a tagged pass accepted all seven dispositions the records held. Three grades missed it, the last after its lens file asked for exactly this probe: that grader ran the new value through both kinds of pass and never an old value through the new kind. Given the transplant's table of the old values the new kind accepts, two blind graders out of two reported it at P2.
 
 ## 4. What a finding must carry
 

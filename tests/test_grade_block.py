@@ -580,6 +580,23 @@ class FindingLineTest(unittest.TestCase):
         self.assertEqual((found['symbol'], found['title']), ('renderHtml (method)', 'cache dropped'))
 
 
+class RepeatedHeadingTest(unittest.TestCase):
+    def test_a_repeated_heading_keeps_both_lists(self) -> None:
+        # Replacing the list on the second heading dropped the first list's claims from the floor.
+        text = ('Score: 3/5\n'
+                'Could not verify:\n'
+                '- P2 L7 a.py:4 - first claim\n'
+                'Could not verify:\n'
+                '- P2 L7 b.py:9 - second claim\n')
+        self.assertEqual(grade_block.read_report(text)['fields']['Could not verify'],
+                         ['- P2 L7 a.py:4 - first claim', '- P2 L7 b.py:9 - second claim'])
+
+    def test_a_repeated_heading_with_its_first_item_inline_keeps_both(self) -> None:
+        text = ('Could not verify: - P2 L7 a.py:4 - first claim\n'
+                'Could not verify: - P2 L7 b.py:9 - second claim\n')
+        self.assertEqual(len(grade_block.read_report(text)['fields']['Could not verify']), 2)
+
+
 RENDER_BASE = '''def lookup(store, key):
     return store.get(key)
 

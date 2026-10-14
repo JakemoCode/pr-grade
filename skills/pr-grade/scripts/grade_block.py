@@ -244,7 +244,7 @@ def _inside(path: str, roots: tuple[str, ...]) -> str:
 def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
     """A grader's report as its fields and findings. A field runs on to the next field, finding, or
     closing line, and each of its lines is one item, joined by any more-indented lines that follow it:
-    a claim wrapped onto a second line is still one claim. A line that opens with a bullet, a lens id, or
+    a claim wrapped onto a second line is still one claim. A heading that repeats adds to its field. A line that opens with a bullet, a lens id, or
     a rank starts a new item at any depth, except a possessive under `Could not verify` (`L2's pool`) on a
     line naming no rank, below a claim that blocks. Under `Could not verify` or `Outside my lenses` a line shaped like a finding
     is still an item of that field: an unproven P2 is a claim. A finding's file written from one of `roots`,
@@ -270,8 +270,9 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
             current = None
         elif field:
             current = field[1]
-            fields[current] = [field[2].strip()] if field[2].strip() else []
-            indent = depth if fields[current] else None
+            inline = field[2].strip()
+            fields.setdefault(current, []).extend([inline] if inline else [])
+            indent = depth if inline else None
         elif (current and line and fields[current] and indent is not None and depth > indent
               and not _opens_item(line, current, fields[current][-1])):
             fields[current][-1] += ' ' + line

@@ -4,6 +4,10 @@ Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an 
 
 CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` without raising the version and adding its heading here. Label one `hold-release` to merge it unreleased, when a change lands over several pull requests.
 
+## 0.12.2
+
+- `merge` keeps every list when a grader's report repeats a heading. `read_report` replaced a field's items each time its heading opened, so a report with two `Could not verify:` lists kept only the second, and the first list's open claims dropped out of the score floor and the draft block. A repeated heading now adds to its field. Seen on EngOS's round 6 grade of `feat/review-records` (EngOS issue #742).
+
 ## 0.12.1
 
 - `history_replay.py`: a carrier record whose own text holds the example value no longer makes one of its other findings read as a refusal of every value. The transplant took the carrier's problems from the intersection of problems masked per value, and masking rewrote that finding for the example value alone, so it dropped out and showed on every other row as `new kind refused`. The carrier's problems are now the ones every value draws identically, unmasked, counted so a value the carrier's text also holds still shows its own refusal. A problem naming the value differs between values, so a new kind that refuses every value by name still reads as refusing them. Masking happens only when a row is printed. Seen on EngOS PR #1064's re-grade prep, with PR #1063 as the carrier (issue #49).

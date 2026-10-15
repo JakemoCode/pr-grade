@@ -55,7 +55,7 @@ Some sessions refuse a command they cannot prove stays inside the repository, an
 
 ## Proof
 
-Prove each suspect in your proof copy, the clone of the head commit the dispatch names, never in the repository. The copy is yours alone, and throwaway files and repositories go in your scratch directory. Take the cheapest run that shows the wrong output or state:
+Prove each suspect in your proof copy, the clone of the head commit the dispatch names, never in the repository. The copy is yours alone, and throwaway files and repositories go in your scratch directory. Delete only what you created, by the literal path it has inside your scratch directory or copy. Never remove by a pattern in a shared directory such as the system temp directory: other sessions' tests keep directories there under the same prefixes a proof's code uses, and a cleanup by pattern deletes them mid-run. Take the cheapest run that shows the wrong output or state:
 
 1. one command, such as `git`, `node -e`, or `python3 -c`, that prints the wrong value;
 2. a short script that calls the repository's code by absolute path;

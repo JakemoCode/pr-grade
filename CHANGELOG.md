@@ -4,6 +4,10 @@ Claude Code uses `version` in `.claude-plugin/plugin.json` to decide whether an 
 
 CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` without raising the version and adding its heading here. Label one `hold-release` to merge it unreleased, when a change lands over several pull requests.
 
+## 0.12.3
+
+- The grade agent deletes only what it created, by its literal path inside its scratch directory or proof copy, and never by a pattern in a shared directory. On EngOS PR #1211's round 3 grade a grader cleaned up with `rm -rf` on every `grade-rules-*` entry in the macOS temp directory, where another session's test kept its repositories under the same prefix.
+
 ## 0.12.2
 
 - `merge` keeps every list when a grader's report repeats a heading. `read_report` replaced a field's items each time its heading opened, so a report with two `Could not verify:` lists kept only the second, and the first list's open claims dropped out of the score floor and the draft block. A repeated heading now adds to its field. Seen on EngOS's round 6 grade of `feat/review-records` (EngOS issue #742).

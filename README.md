@@ -193,6 +193,10 @@ A repository that vendors the scripts and has selection rules the config cannot 
 
 `grade_block.py` loads its own `grade_mode.py` by path under a private name, so a `grade_mode` module of yours is neither picked up nor replaced.
 
+## Update history
+
+[`CHANGELOG.md`](CHANGELOG.md) records every release since 0.1.0, newest first. Each entry says what changed and why, and many name the grade that exposed the problem. EngOS PR #825 is one: three grades missed a new record type that accepted values it should refuse, which led to L9's transplant check in 0.12.0.
+
 ## Tests
 
 ```

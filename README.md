@@ -66,7 +66,7 @@ The full definitions, with an example each, are in [the skill](skills/pr-grade/S
 Every step is optional. With no setup, the generic lenses and default paths apply, and every change to code grades in at least one subagent.
 
 1. **Classify your code.** Copy [`templates/pr-grade.json`](skills/pr-grade/templates/pr-grade.json) to `.claude/pr-grade.json`. Under `silent`, list paths where a defect would pass every test. Under `ordinary`, list code a test would catch a defect in. Code that neither list names grades as silent.
-2. **Restate the lenses.** Copy [`templates/pr-grade-lenses.md`](skills/pr-grade/templates/pr-grade-lenses.md) to `.claude/pr-grade-lenses.md` and rewrite each lens for your code: its real bounded resources, the callers people forget, how a finding is proven, and the fan-out groups. Where it differs from the skill, it wins. A lens heading you add becomes one the check requires.
+2. **Restate the lenses.** Copy [`templates/pr-grade-lenses.md`](skills/pr-grade/templates/pr-grade-lenses.md) to `.claude/pr-grade-lenses.md` and rewrite each lens for your code: its real bounded resources, the callers people forget, how a finding is proven, and the fan-out groups. Where it differs from the skill, it wins. A lens heading you add becomes one the check requires, and a lens without a heading is neither graded nor required. So a lens file copied before 0.12.0 skips L9 until you add a `### L9.` heading.
 3. **Declare your formats**, if the code reads records an earlier version wrote: ledgers, structured PR bodies, JSONL logs, config files. See [Declaring a format](#declaring-a-format). This is what gives L9 a replay to work from.
 4. **Enforce the grade.** Copy [`templates/pr-grade-check.yml`](skills/pr-grade/templates/pr-grade-check.yml) to `.github/workflows/pr-grade.yml` and make its check required. It fetches the checker from a pinned pr-grade ref, so a PR cannot edit the check that judges it.
 
@@ -192,6 +192,10 @@ A repository that vendors the scripts and has selection rules the config cannot 
 - `grade_block.problems(..., assess=your_assess)` uses your selector in place of `grade_mode.assess`.
 
 `grade_block.py` loads its own `grade_mode.py` by path under a private name, so a `grade_mode` module of yours is neither picked up nor replaced.
+
+## Update history
+
+[`CHANGELOG.md`](CHANGELOG.md) records every release since 0.1.0, newest first. Each entry says what changed and why, and many name the grade that exposed the problem. EngOS PR #825 is one: three grades missed a new record type that accepted values it should refuse, which led to L9's transplant check in 0.12.0.
 
 ## Tests
 

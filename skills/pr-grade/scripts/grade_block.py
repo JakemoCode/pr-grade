@@ -490,7 +490,7 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
         repo = meta.get('repository') or '<repository>'
         out += ['', 'proof tests: move each to its path, see it red, and commit it alone before the remove: line, '
                 'which refuses while one is still here:']
-        out += [f"  mv {shlex.quote(f['proof_test']['path'])} {shlex.quote(f'{repo}/{f['proof_test']['at']}')}"
+        out += [f"  mv {shlex.quote(f['proof_test']['path'])} {shlex.quote(repo + '/' + f['proof_test']['at'])}"
                 for f in kept]
     out += ['', 'could not verify:']
     out += [f"  {group}: {claim}{'' if blocking else '  (P3, does not block)'}"

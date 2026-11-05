@@ -354,6 +354,83 @@ class MergeTest(unittest.TestCase):
         self.assertEqual(merged.count('same line as another finding'), 2)
         self.assertEqual(self.block()['Score'], '3/5')
 
+    def test_a_findings_proof_test_is_named_and_a_copy_line_is_printed(self) -> None:
+        meta = json.loads((self.root / 'grade.json').read_text())
+        (self.root / 'grade.json').write_text(json.dumps({**meta, 'repository': '/work/repo'}))
+        self.write('timing', report('4/5', 'L2', findings=(
+            'P1 L1 src/a.py:9 in f - late write lands\nwhat breaks\ncd copy && pytest tests/test_late.py: 1 failed\n'
+            'Proof test: proofs/late_write.py, ran at tests/test_late.py\n')))
+        self.write('reach', report('5/5', 'L3'))
+        kept = self.keep('timing', 'late_write.py')
+        merged = self.merged()
+        self.assertIn(f'P1 src/a.py:9 in f - late write lands  [timing L1]  (proof test: {kept}, ran at tests/test_late.py)',
+                      merged)
+        self.assertIn(f'mv {kept} /work/repo/tests/test_late.py', merged)
+        self.assertIn('commit it alone before the remove: line', merged)
+
+    def keep(self, group: str, name: str) -> Path:
+        proofs = self.root / group / 'proofs'
+        proofs.mkdir(parents=True, exist_ok=True)
+        (proofs / name).write_text('def test_late(): assert False\n')
+        return (proofs / name).resolve()
+
+    def test_the_move_line_is_quoted_for_the_shell_and_moves_the_file(self) -> None:
+        # The grader's text reaches a shell through this line: backticks around the paths, a space in the
+        # repository path, and a `;` in the test path all arrive as one argument each or not at all.
+        repo = self.root / 'my repo'
+        (repo / 'tests').mkdir(parents=True)
+        meta = json.loads((self.root / 'grade.json').read_text())
+        (self.root / 'grade.json').write_text(json.dumps({**meta, 'repository': str(repo)}))
+        self.write('timing', report('4/5', 'L2', findings=(
+            'P1 L1 src/a.py:9 - late write lands\n'
+            'Proof test: `proofs/late_write.py`, ran at `tests/test_late;touch$IFS.py`\n')))
+        self.write('reach', report('5/5', 'L3'))
+        kept = self.keep('timing', 'late_write.py')
+        line = next(l.strip() for l in self.merged().splitlines() if l.strip().startswith('mv '))
+        run = subprocess.run(['sh', '-c', line], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertFalse(kept.exists())
+        self.assertTrue((repo / 'tests' / 'test_late;touch$IFS.py').is_file())
+
+    def test_a_kept_test_named_without_its_directory_is_found_under_proofs(self) -> None:
+        self.write('timing', report('4/5', 'L2', findings=(
+            'P1 L1 src/a.py:9 - late write lands\nProof test: late_write.py, ran at tests/test_late.py\n')))
+        self.write('reach', report('5/5', 'L3'))
+        kept = self.keep('timing', 'late_write.py')
+        self.assertIn(f'(proof test: {kept}, ran at tests/test_late.py)', self.merged())
+
+    def test_a_kept_test_the_merge_cannot_find_gets_no_move_line(self) -> None:
+        self.write('timing', report('4/5', 'L2', findings=(
+            'P1 L1 src/a.py:9 - late write lands\nProof test: proofs/gone.py, ran at tests/test_late.py\n')))
+        self.write('reach', report('5/5', 'L3'))
+        merged = self.merged()
+        self.assertIn('not found', merged)
+        self.assertNotIn('\n  mv ', merged)
+
+    def test_a_path_written_as_inline_code_keeps_its_comma_and_space(self) -> None:
+        found = grade_block.read_report('P1 L1 src/a.py:9 - x\n'
+                                        'Proof test: `proofs/my test.py`, ran at `tests/a,b test.py`.\n')
+        self.assertEqual(found['findings'][0]['proof_test'], {'file': 'proofs/my test.py', 'at': 'tests/a,b test.py'})
+
+    def test_words_after_the_repository_path_are_not_part_of_it(self) -> None:
+        found = grade_block.read_report('P1 L1 src/a.py:9 - x\nProof test: proofs/t.py, ran at tests/t.py (new file).\n')
+        self.assertEqual(found['findings'][0]['proof_test'], {'file': 'proofs/t.py', 'at': 'tests/t.py'})
+
+    def test_a_proof_test_without_a_repository_path_gets_no_copy_line(self) -> None:
+        self.write('timing', report('4/5', 'L2', findings='P1 L1 src/a.py:9 - late write lands\nProof test: proofs/x.py\n'))
+        self.write('reach', report('5/5', 'L3'))
+        merged = self.merged()
+        self.assertIn('(proof test: ', merged)
+        self.assertIn('no repository path given', merged)
+        self.assertNotIn('\n  mv ', merged)
+
+    def test_a_proof_test_line_above_any_finding_is_ignored(self) -> None:
+        self.write('timing', 'Proof test: proofs/x.py, ran at tests/x.py\n' + report('5/5', 'L1, L2'))
+        self.write('reach', report('5/5', 'L3'))
+        merged = self.merged()
+        self.assertIn('findings (0):', merged)
+        self.assertNotIn('proof test', merged)
+
     def test_a_finding_shaped_line_under_could_not_verify_stays_a_claim(self) -> None:
         self.write('timing', report('5/5', 'L1', unverified='\nP2 L2 src/a.py:10 - maybe a race; runs 1-3 passed'))
         self.write('reach', report('5/5', 'L3'))

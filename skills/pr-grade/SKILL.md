@@ -54,7 +54,7 @@ It picks the mode from what the branch touches, as `grade_mode.py` does alone, a
 
 A lens that does not apply to the change, by a rule the repository keeps for itself, such as a lens file that scopes a lens to some paths, goes to `--skip L2,L3`. No grader holds it and no proof copy is made for it. The merge clears it as `L2 (not applicable)`; in-thread, write it that way yourself. Skip only by a rule written down before the change, never because a lens looks unlikely to find anything.
 
-Then it prints a prompt for every grader: a shared block, and one block per grader. Paste the shared block and the grader's own block into its prompt, unchanged, then the `Probe first:` list from section 1 when it has an entry. The shared block holds the repository, the lens file, the base and head as full SHAs, the change as one diff command, what is settled, the declined findings, and the callers list. The base is the branch point, since `origin/main` moves when anything fetches and a diff against it shows main's new work as this change reverting it. A grader's own block holds its lenses, its proof copy, its scratch directory, and where to write its report. The grader holding L7 also gets `check_then_act.py`'s list of check-then-act windows in the functions the branch changed. For TypeScript and JavaScript the scanner needs Node and the repository's own `typescript` package; Python needs nothing, and the scanner names the files it skipped.
+Then it prints a prompt for every grader: a shared block, and one block per grader. Paste the shared block and the grader's own block into its prompt, unchanged, then the `Probe first:` list from section 1 when it has an entry. The shared block holds the repository, the lens file, the base and head as full SHAs, the change as one diff command, what is settled, the declined findings, and the callers list. The base is the branch point, since `origin/main` moves when anything fetches and a diff against it shows main's new work as this change reverting it. A grader's own block holds its lenses, its proof copy, its scratch directory, its proofs directory, where a proof test it kept waits for the repair, and where to write its report. The grader holding L7 also gets `check_then_act.py`'s list of check-then-act windows in the functions the branch changed. For TypeScript and JavaScript the scanner needs Node and the repository's own `typescript` package; Python needs nothing, and the scanner names the files it skipped.
 
 The grader holding L9, or the lens `oldStateLens` in `.claude/pr-grade.json` names, gets `history_replay.py`'s output when the branch touches a reader that a declared format names. The replay runs the base and head readers over every recorded instance, such as the last few hundred merged pull request bodies, and lists each one they disagree on. The transplant takes each kind of record the change adds, puts it in a recorded instance, and runs every recorded value through it beside the record's old kind. A repository declares a format with the command that runs its reader over a list of instances, where the instances live, and the two regexes that find a record's kind and a value under it; the script's docstring has the keys. When no grader holds that lens, every grader gets the output in the shared block, and a skipped lens skips the run.
 
@@ -163,7 +163,7 @@ When the repository declares its formats under `formats` in `.claude/pr-grade.js
 
 A finding without a run is a suspicion.
 
-Each one needs a concrete failure: real inputs or real state, and the wrong output or wrong resource state that follows. Prove it by running something. The strongest proof is a test that fails on an assertion naming the defect, run against the unfixed code; the repository's lens file may name its own recipe.
+Each one needs a concrete failure: real inputs or real state, and the wrong output or wrong resource state that follows. Prove it by running something. The strongest proof is a test that fails on an assertion naming the defect, run against the unfixed code; the repository's lens file may name its own recipe. A grader keeps that test under its proofs directory and names it in the finding, so the repair starts from the test that already reached the trigger instead of a second one written from the finding's description.
 
 Then try to refute it. Name the sub-claims that did not survive. The author of a claim does not verify it: if the change is yours, hand the verification to a grading agent, or let a failing test do it, and accept a result that contradicts you. Where a failing test is the proof, the test does the breaking and no separate verifier runs; otherwise run the verifier on the strongest model available, since a cheaper model accepts a plausible claim instead of breaking it.
 
@@ -214,15 +214,18 @@ Could not verify: <every claim left unproven, labelled as a guess, or "none">
 P1 <file>:<line> in <symbol> - <title>
 <what breaks, with the inputs and the resulting state>
 <the command that showed it, and its output>
+Proof test: <the path inside the repository the kept test was committed at, when the proof was a test>
 ```
 
 Say each finding once, at the line the defect lives on in the head, as the grade agent's Report section defines it.
 
 ## 7. Fix, then re-grade
 
+Start each repair from the finding's proof test. The merge printed a `mv` line for each test a grader kept: run it, run the test at its repository path and see it red, and commit it alone, before the fix. The fix commit turns that same test green, and the pull request carries the test that reached the trigger instead of a second one written from the finding's description.
+
 Commit the fixes and review them the way step 1 reviews the change, keeping what you declined for the graders. A merge from the base branch is a change too. On one branch, two graders each spent their whole budget proving a defect a merge brought in, and the review run after them found it in twenty turns.
 
-Run the old `remove:` line, then prepare the re-grade from the fix commits alone:
+Run the old `remove:` line, which refuses while a kept test is still there (`--drop-proofs` deletes them, for a P3 you leave listed), then prepare the re-grade from the fix commits alone:
 
 ```sh
 python3 <base>/scripts/grade_prep.py --base <the last commit graded> --settled '...' --declined '...'
@@ -238,7 +241,7 @@ This is not ceremony. On the pull request above:
 
 Every time, the local suite stayed green. **A fix that satisfies a finding is the most likely place for the next one**, and the lens most likely to catch it is the one written from the finding you just repaired.
 
-The loop ends at the first round with no P1 or P2. A P3 can stay listed; one you fix anyway is a change, and its fix is graded like the rest.
+The loop ends at the first round with no P1 or P2. A P3 can stay listed; one you fix anyway is a change, ships with its proof test like a P1's fix, and its fix is graded like the rest. A P3 left listed ships nothing, since the suite stays green.
 
 The `## Grade` block keeps the whole branch's mode and moves `Graded` to the last fix commit graded. `grade_block.py check` compares `Mode` with every file the pull request touches, so a block that names a fix's lighter mode is refused.
 

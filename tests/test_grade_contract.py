@@ -19,7 +19,9 @@ import grade_block  # noqa: E402
 # What a grader needs from the coordinator. A coordinator that never loads the skill sees only the
 # agent's description, so each one has to be named there, in the agent's Inputs, and in the skill.
 DISPATCH = ['repository', 'lens file', 'base and head', 'settled', 'declined', 'callers', 'check_then_act.py', 'proof copy',
-            'report']
+            'proofs directory', 'report']
+# Lines that describe one finding, not the report: the merge reads them with their own pattern.
+FINDING_LINES = {'Proof test'}
 
 
 def frontmatter(text: str) -> dict[str, str]:
@@ -71,7 +73,8 @@ class WriteTest(unittest.TestCase):
     def test_the_write_rule_names_the_only_places_it_may_write(self) -> None:
         rule = re.search(r'(?m)^- Write a file with the Write tool, (.*)$', section(AGENT, 'Shell'))
         self.assertTrue(rule, 'the Shell section has no Write tool rule')
-        self.assertIn('only to the report path or inside your scratch directory', rule.group(1))
+        self.assertIn('only to the report path, a file under the `proofs` directory beside it, or inside your scratch directory',
+                      rule.group(1))
 
     def test_the_report_is_written_with_the_write_tool(self) -> None:
         self.assertIn('Write the report to the path the dispatch names with the Write tool', section(AGENT, 'Report'))
@@ -84,7 +87,7 @@ class WriteTest(unittest.TestCase):
 class ReportTest(unittest.TestCase):
     def report_fields(self) -> set[str]:
         block = re.search(r'(?s)```\n(Score:.*?)```', section(AGENT, 'Report')).group(1)
-        return set(re.findall(r'(?m)^([A-Z][A-Za-z0-9 ]+):', block))
+        return set(re.findall(r'(?m)^([A-Z][A-Za-z0-9 ]+):', block)) - FINDING_LINES
 
     def test_the_grade_block_draws_only_on_fields_a_grader_reports(self) -> None:
         grade = re.search(r'(?s)## Grade\n\n(.*?)\n\n', SKILL).group(1)
@@ -108,6 +111,17 @@ class ReportTest(unittest.TestCase):
         self.assertTrue(example, "the Report section gives no example finding line")
         self.assertEqual(grade_block.read_report(example.group(1))['findings'][0]['symbol'],
                          'RunReportRenderer.renderHtml')
+
+    def test_the_proof_test_line_is_read_as_part_of_its_finding(self) -> None:
+        # The grader keeps a proof test beside its report and names it under the finding; the merge reads
+        # the line with the finding, never as a report field, and the skill's block carries the path.
+        block = re.search(r'(?s)```\n(Score:.*?)```', section(AGENT, 'Report')).group(1)
+        self.assertRegex(block, r'(?m)^Proof test: ')
+        self.assertIn('Proof test: <', re.search(r'(?s)## Grade\n\n(.*?)\n\n(?=Say each)', SKILL).group(1))
+        found = grade_block.read_report('P1 L4 src/a.py:7 in f - stale row\nwhat breaks\n'
+                                        'Proof test: proofs/stale_row.test.ts, ran at tests/stale_row.test.ts\n')
+        self.assertEqual(found['findings'][0]['proof_test'],
+                         {'file': 'proofs/stale_row.test.ts', 'at': 'tests/stale_row.test.ts'})
 
     def test_the_fields_the_merge_names_are_in_the_report(self) -> None:
         merge = section(SKILL, '5. Score it')

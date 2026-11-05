@@ -4,12 +4,14 @@ with the repository's installed dependencies linked in, so a grader writes a fai
 without building anything first.
 
     python3 proof_dir.py make [--sha HEAD] [--since <ref>] [name ...]
-    python3 proof_dir.py remove <root>
+    python3 proof_dir.py remove [--drop-proofs] <root>
 
 Run `make` from inside the repository being graded, once per grade, with one name per grader, for
 example its fan-out group; with no name it makes one copy called `grade`. It prints each path absolute
 and resolved, for the dispatch to carry as printed, and ends with the `remove` command to run once
-every grader has reported. Copies go under the temp directory, or under TMPDIR when it is set.
+every grader has reported. Copies go under the temp directory, or under TMPDIR when it is set. Beside
+each copy is a `proofs` directory for the tests that proved the grader's findings; `remove` refuses
+while one is still there, since the repair starts from it, unless `--drop-proofs` says to delete them.
 
 Each copy is a local clone of the repository, checked out detached at the graded commit. Git hardlinks
 a local clone's objects rather than borrowing them, so a reset and `gc` in the author's checkout while
@@ -188,7 +190,8 @@ def sweep(parent: Path, repo: Path, now: float) -> None:
 
 
 def make(repo: Path, sha: str, names: list[str], config: dict, parent: Path, since: str | None = None) -> list[str]:
-    """One copy and one scratch directory per name under a new root in `parent`; returns the lines to
+    """One copy, one scratch directory, and one empty `proofs` directory per name under a new root in
+    `parent`; returns the lines to
     print. A failure removes the root before it propagates."""
     if not all(NAME.fullmatch(n) for n in names) or len(set(names)) != len(names):
         sys.exit(f"copy names must be distinct, made of letters, digits, '-' and '_': {' '.join(names)}")
@@ -203,12 +206,13 @@ def make(repo: Path, sha: str, names: list[str], config: dict, parent: Path, sin
         # author's, global or local, runs in a copy.
         env = {**os.environ, 'GIT_LFS_SKIP_SMUDGE': '1'}
         for name in names:
-            copy, scratch = root / name / 'repo', root / name / 'scratch'
+            copy, scratch, proofs = root / name / 'repo', root / name / 'scratch', root / name / 'proofs'
             scratch.mkdir(parents=True)
+            proofs.mkdir()
             git(root, 'clone', '--quiet', '--no-checkout', str(common), str(copy))
             git(copy, '-c', f'core.hooksPath={os.devnull}', '-c', 'advice.detachedHead=false', 'checkout',
                 '--quiet', '--detach', sha, env=env)
-            lines += [f'copy {name}: {copy}', f'scratch {name}: {scratch}']
+            lines += [f'copy {name}: {copy}', f'scratch {name}: {scratch}', f'proofs {name}: {proofs}']
             copies.append(copy)
         lines += link(repo, sha, wanted, 'proofDir' in config, copies, since)
     except BaseException:
@@ -224,10 +228,18 @@ def make(repo: Path, sha: str, names: list[str], config: dict, parent: Path, sin
     return lines
 
 
-def remove(root: Path) -> str:
-    """Deletes a root `make` printed. A link inside it is unlinked, never followed."""
+def remove(root: Path, drop_proofs: bool = False) -> str:
+    """Deletes a root `make` printed. A link inside it is unlinked, never followed. A proof test a grader
+    kept under `<name>/proofs/` is the repair's starting point, so the root stays until each one is moved
+    out, unless `drop_proofs` says to delete them."""
     if root.is_symlink() or not (root / MARKER).is_file():
         sys.exit(f'{root} holds no {MARKER}, so it is not a proof root; nothing was removed')
+    kept = sorted(path for path in root.glob('*/proofs/**/*') if path.is_file() and not path.is_symlink())
+    if kept and not drop_proofs:
+        sys.exit('not removed: a grader kept a proof test here that nothing has moved out yet:\n'
+                 + '\n'.join(f'  {path}' for path in kept)
+                 + '\nMove each to the repository path the merge printed and commit it alone, then run this '
+                 'again; or add --drop-proofs to delete them.')
     shutil.rmtree(root)
     return f'removed: {root}'
 
@@ -241,10 +253,12 @@ def main() -> None:
     make_ap.add_argument('names', nargs='*', help='one per grader, for example its fan-out group')
     remove_ap = commands.add_parser('remove', help='remove a root make printed')
     remove_ap.add_argument('root', type=Path)
+    remove_ap.add_argument('--drop-proofs', action='store_true',
+                           help='delete the proof tests graders kept instead of refusing while they are there')
     args = ap.parse_args()
     try:
         if args.command == 'remove':
-            print(remove(args.root))
+            print(remove(args.root, args.drop_proofs))
             return
         repo = repo_root()
         sha = git(repo, 'rev-parse', '--verify', f'{args.sha}^{{commit}}').strip()

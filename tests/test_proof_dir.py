@@ -209,6 +209,34 @@ class RemoveTest(Fixture):
         self.assertFalse(root.exists())
         self.assertTrue(self.installed())
 
+    def test_each_name_gets_an_empty_proofs_directory_beside_its_report(self) -> None:
+        out = self.make('timing', 'reach')
+        for name in ('timing', 'reach'):
+            with self.subTest(name=name):
+                proofs = Path(out[f'proofs {name}'])
+                self.assertEqual(proofs, Path(out['root']) / name / 'proofs')
+                self.assertEqual(list(proofs.iterdir()), [])
+
+    def test_remove_refuses_while_a_kept_proof_test_is_still_there(self) -> None:
+        out = self.make('reach')
+        kept = Path(out['proofs reach']) / 'stale_row.test.js'
+        kept.write_text('test\n')
+        with self.assertRaises(SystemExit) as refused:
+            proof_dir.remove(Path(out['root']))
+        self.assertIn(str(kept), str(refused.exception))
+        self.assertIn('--drop-proofs', str(refused.exception))
+        self.assertTrue(kept.is_file())
+        # The merge prints `mv`, so a moved test leaves nothing behind and the next remove goes through.
+        kept.rename(self.repo / 'stale_row.test.js')
+        proof_dir.remove(Path(out['root']))
+        self.assertFalse(Path(out['root']).exists())
+
+    def test_remove_with_drop_proofs_deletes_the_kept_tests_too(self) -> None:
+        out = self.make('reach')
+        (Path(out['proofs reach']) / 'stale_row.test.js').write_text('test\n')
+        proof_dir.remove(Path(out['root']), drop_proofs=True)
+        self.assertFalse(Path(out['root']).exists())
+
     def test_remove_refuses_a_directory_make_did_not_make(self) -> None:
         with self.assertRaises(SystemExit):
             proof_dir.remove(self.repo)

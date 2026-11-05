@@ -47,19 +47,19 @@ Hand the graders the review findings you declined, each with its reason. They tr
 
 ## The nine lenses
 
-| Lens | What it asks | Script | Agent judges |
-|---|---|---|---|
-| L1. Abandoned work | For every timeout, race, early return, cancel, and retry: what happens to the operation nobody is waiting for any more? It still runs, still holds what it held, and still writes when it lands. | None | All of it. |
-| L2. Shared bounded resources | For every pool, queue, lock, cache, and rate limit the change touches: what is the bound, who else uses it, and what happens when it is reached? | None | All of it. |
-| L3. Unguarded failure reach | Where does a failure in the new code go? A handler, job, or listener that a framework calls may log an uncaught error, drop it, or end the process. | None | All of it. |
-| L4. Every other caller | The change was written with one caller in mind. What does it do to the others? A default that was right when written can turn wrong once a change binds what it stood in for. | `grade_prep.py` lists the callers of each TypeScript, JavaScript, or Python function the branch modified. It names files in any other language as not derived, and says nothing about a changed type, option, or constant. | Walks each caller, and finds by hand the callers of anything the script does not cover. |
-| L5. State that outlives its reason | For everything written and never deleted (cache entries, listeners, pending rows, leases, timers, temp files): which line removes it? | None | All of it. |
-| L6. Contract drift | The behaviour moved. Did the docs, types, tests, error messages, tool descriptions, and registries that describe it move too? | None | All of it. |
-| L7. Check then act | When does a guard's state change, relative to the work it guards? An `await` or a second read between the check and the write lets every caller in that window through. | `check_then_act.py` lists functions with a check, then an `await`, a transaction boundary, or a second read, then a write. It reads TypeScript, JavaScript, and Python. | Clears each candidate by naming what makes the window harmless, or proves the race. Looks past the list, since an empty list clears nothing. |
-| L8. Failure direction | For every new fallback, default, and failure path: which way does it fail, and why is that the cheap direction? | None | All of it. |
-| L9. Old state meets new code | What did earlier versions write that the new code will read? A changed reader must still read it, and a new kind of record must refuse the old values its rules exclude. | `history_replay.py` runs recorded instances through the base and head readers, and old values through each new kind of record. It runs only when the branch touches a reader of a format the repository declares under `formats`. | Proves each finding from the output in the proof copy, and looks for state the replay does not cover, such as a database or a cache. |
+| Lens | What it asks |
+|---|---|
+| L1. Abandoned work | For every timeout, race, early return, cancel, and retry: what happens to the operation nobody is waiting for any more? It still runs, still holds what it held, and still writes when it lands. |
+| L2. Shared bounded resources | For every pool, queue, lock, cache, and rate limit the change touches: what is the bound, who else uses it, and what happens when it is reached? |
+| L3. Unguarded failure reach | Where does a failure in the new code go? A handler, job, or listener that a framework calls may log an uncaught error, drop it, or end the process. |
+| L4. Every other caller | The change was written with one caller in mind. What does it do to the others? A default that was right when written can turn wrong once a change binds what it stood in for. `grade_prep.py` lists the callers of each TypeScript, JavaScript, or Python function the branch modified. A changed type, option, or constant gets no list. |
+| L5. State that outlives its reason | For everything written and never deleted (cache entries, listeners, pending rows, leases, timers, temp files): which line removes it? |
+| L6. Contract drift | The behaviour moved. Did the docs, types, tests, error messages, tool descriptions, and registries that describe it move too? |
+| L7. Check then act | When does a guard's state change, relative to the work it guards? An `await` or a second read between the check and the write lets every caller in that window through. `check_then_act.py` lists candidate windows in TypeScript, JavaScript, and Python for the grader to clear or prove. |
+| L8. Failure direction | For every new fallback, default, and failure path: which way does it fail, and why is that the cheap direction? |
+| L9. Old state meets new code | What did earlier versions write that the new code will read? A changed reader must still read it, and a new kind of record must refuse the old values its rules exclude. When the branch touches a reader of a format the repository declares under `formats`, `history_replay.py` runs recorded instances through the base and head readers, and old values through each new kind of record. |
 
-The agent makes the call on every lens. A script hands it a starting list for three of them, and no script output clears a lens on its own. `proof_dir.py` gives every grader a clone of the graded commit to prove findings in, whatever its lenses.
+The grader makes the call on every lens. The scripts behind L4, L7, and L9 hand it a starting list, and no script output clears a lens on its own. `proof_dir.py` gives every grader a clone of the graded commit to prove findings in, whatever its lenses.
 
 The full definitions, with an example each, are in [the skill](skills/pr-grade/SKILL.md#3-the-nine-lenses).
 

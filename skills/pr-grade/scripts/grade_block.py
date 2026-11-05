@@ -47,6 +47,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -90,8 +91,9 @@ REPORT_LINE = re.compile(r'^(Score|Blocking|Verified and clear|Could not verify|
 # so a symbol written with words after it still parses, and a finding without one still reads. A column
 # after the line, as in `<file>:78:5`, is dropped.
 FINDING = re.compile(r'^(P[123])[ \t]+((?:L\d+[ \t,]*)*)(\S+?):(\d+)(?::\d+)?(?:-(\d+))?(?:[ \t]+in[ \t]+(.+?))?[ \t]+-[ \t]+(.+)$')
-# The line under a finding naming the test the grader kept, and the repository path it ran at.
-PROOF_TEST = re.compile(r'^Proof test:[ \t]*(\S+?)(?:,?[ \t]+ran at[ \t]+(\S+?))?\.?$')
+# The line under a finding naming the test the grader kept, and the repository path it ran at. Each path
+# may be written as inline code; words after the second path are not part of it.
+PROOF_TEST = re.compile(r'^Proof test:[ \t]*`?([^`\s,]+)`?(?:,?[ \t]+ran at[ \t]+`?([^`\s,]+)`?)?')
 BLOCKING = re.compile(r'\bP[12]\b')
 NEW_ITEM = re.compile(r'([-*+]|\d+[.)])[ \t]|(L\d+|P[123])\b')
 # `L2's pool releases` continues a claim, unless its line names a rank or the claim above is a P3.
@@ -279,7 +281,8 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
             current, last_finding = None, findings[-1]
         elif current is None and last_finding is not None and PROOF_TEST.match(line):
             kept = PROOF_TEST.match(line)
-            last_finding['proof_test'] = {'file': kept[1], 'at': kept[2]}
+            # A sentence-ending period is not part of a path.
+            last_finding['proof_test'] = {'file': kept[1].rstrip('.'), 'at': kept[2].rstrip('.') if kept[2] else None}
         elif field:
             current, last_finding = field[1], None
             inline = field[2].strip()
@@ -420,9 +423,13 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
         scores.append(f"{group} {' '.join(fields.get('Score', ['?']))}")
         for found in report['findings']:
             if found.get('proof_test'):
-                # The grader names the kept test from its own directory; the coordinator copies it from here.
+                # The grader names the kept test from its own directory, or by its name alone; the coordinator
+                # moves it from the path printed, so a file the merge cannot find gets no move line.
                 file = Path(found['proof_test']['file'])
-                found['proof_test']['path'] = str(file if file.is_absolute() else (proof_root / group / file).resolve())
+                tried = [file] if file.is_absolute() else [proof_root / group / file, proof_root / group / 'proofs' / file]
+                there = next((path for path in tried if path.is_file()), None)
+                found['proof_test']['path'] = str((there or tried[0]).resolve())
+                found['proof_test']['missing'] = there is None
             findings.append({**found, 'by': f"{group} {','.join(found['lenses']) or 'no lens named'}"})
             if found['rank'] != 'P3':
                 for lens in found['lenses'] or held:
@@ -468,6 +475,7 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
         out.append(f"  {f['rank']} {f['where']}" + (f" in {f['symbol']}" if f['symbol'] else '')
                    + f" - {f['title']}  [{f['by']}]"
                    + (f"  (proof test: {f['proof_test']['path']}, "
+                      + ('not found, ' if f['proof_test']['missing'] else '')
                       + (f"ran at {f['proof_test']['at']})" if f['proof_test']['at'] else 'no repository path given)')
                       if f.get('proof_test') else '')
                    + ('  (same line as another finding: one defect or two?)' if shared else '')
@@ -476,12 +484,14 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
         out.append('  none')
     if unchecked:
         out.append(f'  anchors: not checked, {unchecked}')
-    kept = [f for f in findings if f.get('proof_test') and f['proof_test']['at']]
+    kept = [f for f in findings if f.get('proof_test') and f['proof_test']['at'] and not f['proof_test']['missing']]
     if kept:
+        # The paths are grader text on their way to a shell, so each one is quoted.
         repo = meta.get('repository') or '<repository>'
-        out += ['', 'proof tests: copy each to its path, see it red, and commit it alone before the remove: line, '
+        out += ['', 'proof tests: move each to its path, see it red, and commit it alone before the remove: line, '
                 'which refuses while one is still here:']
-        out += [f"  cp {f['proof_test']['path']} {repo}/{f['proof_test']['at']}" for f in kept]
+        out += [f"  mv {shlex.quote(f['proof_test']['path'])} {shlex.quote(f'{repo}/{f['proof_test']['at']}')}"
+                for f in kept]
     out += ['', 'could not verify:']
     out += [f"  {group}: {claim}{'' if blocking else '  (P3, does not block)'}"
             for group, claim, blocking in open_claims] or ['  none']

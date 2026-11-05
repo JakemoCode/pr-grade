@@ -221,11 +221,11 @@ Say each finding once, at the line the defect lives on in the head, as the grade
 
 ## 7. Fix, then re-grade
 
-Start each repair from the finding's proof test. The merge printed a `cp` line for each test a grader kept: run it, run the test at its repository path and see it red, and commit it alone, before the fix. The fix commit turns that same test green, and the pull request carries the test that reached the trigger instead of a second one written from the finding's description.
+Start each repair from the finding's proof test. The merge printed a `mv` line for each test a grader kept: run it, run the test at its repository path and see it red, and commit it alone, before the fix. The fix commit turns that same test green, and the pull request carries the test that reached the trigger instead of a second one written from the finding's description.
 
 Commit the fixes and review them the way step 1 reviews the change, keeping what you declined for the graders. A merge from the base branch is a change too. On one branch, two graders each spent their whole budget proving a defect a merge brought in, and the review run after them found it in twenty turns.
 
-Run the old `remove:` line, which refuses while a kept test is still uncopied (`--drop-proofs` deletes them, for a P3 you leave listed), then prepare the re-grade from the fix commits alone:
+Run the old `remove:` line, which refuses while a kept test is still there (`--drop-proofs` deletes them, for a P3 you leave listed), then prepare the re-grade from the fix commits alone:
 
 ```sh
 python3 <base>/scripts/grade_prep.py --base <the last commit graded> --settled '...' --declined '...'

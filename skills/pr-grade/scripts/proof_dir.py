@@ -230,15 +230,15 @@ def make(repo: Path, sha: str, names: list[str], config: dict, parent: Path, sin
 
 def remove(root: Path, drop_proofs: bool = False) -> str:
     """Deletes a root `make` printed. A link inside it is unlinked, never followed. A proof test a grader
-    kept under `<name>/proofs/` is the repair's starting point, so the root stays until each one is copied
+    kept under `<name>/proofs/` is the repair's starting point, so the root stays until each one is moved
     out, unless `drop_proofs` says to delete them."""
     if root.is_symlink() or not (root / MARKER).is_file():
         sys.exit(f'{root} holds no {MARKER}, so it is not a proof root; nothing was removed')
     kept = sorted(path for path in root.glob('*/proofs/**/*') if path.is_file() and not path.is_symlink())
     if kept and not drop_proofs:
-        sys.exit('not removed: a grader kept a proof test here that nothing has copied out yet:\n'
+        sys.exit('not removed: a grader kept a proof test here that nothing has moved out yet:\n'
                  + '\n'.join(f'  {path}' for path in kept)
-                 + '\nCopy each to the repository path the merge printed and commit it alone, then run this '
+                 + '\nMove each to the repository path the merge printed and commit it alone, then run this '
                  'again; or add --drop-proofs to delete them.')
     shutil.rmtree(root)
     return f'removed: {root}'

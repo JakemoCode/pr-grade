@@ -226,6 +226,10 @@ class RemoveTest(Fixture):
         self.assertIn(str(kept), str(refused.exception))
         self.assertIn('--drop-proofs', str(refused.exception))
         self.assertTrue(kept.is_file())
+        # The merge prints `mv`, so a moved test leaves nothing behind and the next remove goes through.
+        kept.rename(self.repo / 'stale_row.test.js')
+        proof_dir.remove(Path(out['root']))
+        self.assertFalse(Path(out['root']).exists())
 
     def test_remove_with_drop_proofs_deletes_the_kept_tests_too(self) -> None:
         out = self.make('reach')

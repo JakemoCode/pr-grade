@@ -14,9 +14,9 @@ Each entry says what changed, where, and why. Under it, **Before** is the old be
   - **Seen on:** EngOS's dispute path, which sends a fresh grader to confirm that an author's scenario test reaches the trigger a grader's own test already reached (issue #42).
 - `proof_dir.py`: added a `proofs` directory per grader to `make`, printed as `proofs <name>:`, and made `remove` refuse while a kept test is still there, naming each file, unless `--drop-proofs` is passed.
   - **Before:** `remove` deleted the root whatever it held, so a kept test lasted exactly as long as the coordinator remembered to copy it first.
-- `grade_block.py merge`: changed the finding list to read a `Proof test:` line as part of the finding above it, print the kept file and its repository path on the finding's line, and print one `cp` line per kept test for the coordinator to run before the `remove:` line.
+- `grade_block.py merge`: changed the finding list to read a `Proof test:` line as part of the finding above it, print the kept file and its repository path on the finding's line, and print one `mv` line per kept test, quoted for the shell, for the coordinator to run before the `remove:` line. A file named without its directory is looked for under `proofs`, and one the merge cannot find is said to be missing and gets no line.
 - `grade_prep.py`: added the grader's proofs directory to its prompt block.
-- `SKILL.md`: changed section 7 to start each repair from the kept test, copied to its path, seen red, and committed alone before the fix; a P3 the author fixes ships with its test the same way, and one left listed ships nothing. Section 6's finding shape carries the committed test's path.
+- `SKILL.md`: changed section 7 to start each repair from the kept test, moved to its path, seen red, and committed alone before the fix; a P3 the author fixes ships with its test the same way, and one left listed ships nothing. Section 6's finding shape carries the committed test's path.
 
 ## 0.14.0
 

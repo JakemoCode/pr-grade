@@ -214,6 +214,18 @@ class World(unittest.TestCase):
         self.assertNotIn('old', out[-3])
         self.assertFalse((self.copy / 'old').exists())
 
+    def test_a_stray_written_before_a_failing_directory_is_still_removed(self) -> None:
+        (self.copy / 'locked').mkdir(mode=0o500)
+        self.changed = ['tests/test_world.py', 'locked/x.txt']
+        try:
+            out = self.sweep(self.LOOSE)
+        finally:
+            (self.copy / 'locked').chmod(0o700)
+        rows = [line for line in out if '.DS_Store' in line]
+        self.assertTrue(rows and 'could not run (PermissionError' in rows[0], '\n'.join(out))
+        self.assertFalse((self.copy / 'tests/.DS_Store').exists())
+        self.assertTrue(any('CRLF' in line for line in out), 'later rows still ran')
+
     def test_a_change_with_no_data_file_says_the_crlf_run_was_skipped(self) -> None:
         self.changed = ['tests/test_world.py']
         out = self.sweep(self.LOOSE)
@@ -242,14 +254,24 @@ class ReportTest(unittest.TestCase):
             self.assertIn('Not run: the repository declares no `envSweep`', out[-1])
             config = {**CONFIG, 'envSweep': {'command': ['x', '{tests}']}}
             self.assertIn('no test file', ambient.report(root, {'a.py': None}, ['a.py'], config, None)[-1])
+            (root / 'tests').mkdir()
+            (root / 'tests/test_a.py').write_text('')
             self.assertIn('no proof copy', ambient.report(root, {}, ['tests/test_a.py'], config, None)[-1])
 
     def test_a_config_without_tests_globs_uses_the_defaults_and_does_not_stop_the_report(self) -> None:
         config = {'envSweep': {'command': ['x', '{tests}']}}
         self.assertEqual(ambient.sweep_targets(['tests/test_a.py', 'a.py'], config), ['tests/test_a.py'])
         with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / 'tests').mkdir()
+            (Path(tmp) / 'tests/test_a.py').write_text('')
             out = ambient.report(Path(tmp), {}, ['tests/test_a.py'], config, None)
             self.assertIn('no proof copy', out[-1])
+
+    def test_a_report_whose_every_changed_test_is_gone_says_so(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = {**CONFIG, 'envSweep': {'command': ['x', '{tests}']}}
+            out = ambient.report(Path(tmp), {}, ['tests/test_gone.py'], config, None)
+            self.assertIn('deleted or renamed away', out[-1])
 
     def test_sweep_targets_follow_the_tests_globs(self) -> None:
         self.assertEqual(ambient.sweep_targets(['src/a.py', 'tests/test_a.py', 'b.spec.ts'], CONFIG),

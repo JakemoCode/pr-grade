@@ -290,6 +290,10 @@ def _run(copy: Path, argv: list[str], env: dict, timeout: float, umask: int | No
     except subprocess.TimeoutExpired:
         _kill_group(proc)
         return 'timed out', f'after {timeout:g}s; the run and its children were killed'
+    except BaseException:
+        # The run is in its own session, so nothing else reaches it when the prep is interrupted.
+        _kill_group(proc)
+        raise
     seconds = time.monotonic() - started
     if proc.returncode == 0:
         return 'pass', f'{seconds:.1f}s'
@@ -310,24 +314,27 @@ def _kill_group(proc: subprocess.Popen) -> None:
         pass
 
 
-def _unlink(path: Path) -> None:
-    """Removes a stray the sweep wrote; one the tests removed first is already gone."""
+def _unlink(path: Path) -> bool:
+    """Removes a stray the sweep wrote. One the tests removed first is already gone; one that cannot be
+    removed is reported by the caller, never raised."""
     try:
         path.unlink()
     except FileNotFoundError:
         pass
+    except OSError:
+        return False
+    return True
 
 
-def _write_strays(copy: Path, dirs: list[str], name: str, content: bytes) -> list[Path]:
-    made = []
+def _write_strays(copy: Path, dirs: list[str], name: str, content: bytes, made: list[Path]) -> None:
+    """Writes one stray per directory, appending each to `made` as it lands, so a failure partway leaves
+    the caller holding what to remove."""
     for d in dirs:
         target = copy / d / name
         if target.exists():
             continue
-        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
         made.append(target)
-    return made
 
 
 def env_sweep(copy: Path, tests: list[str], changed: list[str], config: dict) -> list[str]:
@@ -366,15 +373,16 @@ def env_sweep(copy: Path, tests: list[str], changed: list[str], config: dict) ->
     ]
     for label, extra, umask, stray in runs:
         # A row that cannot be set up or cleaned up costs that row, never the rows already run.
-        made = []
+        made: list[Path] = []
         try:
-            made = _write_strays(copy, dirs, *stray) if stray else []
+            if stray:
+                _write_strays(copy, dirs, *stray, made)
             verdict, detail = _run(copy, argv, {**base_env, **extra}, timeout, umask)
         except Exception as failed:  # noqa: BLE001
             verdict, detail = 'could not run', f'{type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}'
-        finally:
-            for path in made:
-                _unlink(path)
+        left = [path for path in made if not _unlink(path)]
+        if left:
+            detail += f"; could not remove {', '.join(str(p.relative_to(copy)) for p in left)}"
         out.append(f'- {label}: {verdict} ({detail})')
     if data:
         originals = {p: (copy / p).read_bytes() for p in data}
@@ -426,14 +434,16 @@ def report(root: Path, lines: dict, changed: list[str], config: dict, copy: Path
         out.append(f'The scan stopped, so no process call is listed: {type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}')
     out.append('### Env sweep')
     try:
-        tests = sweep_targets(changed, config, copy)
+        tests = sweep_targets(changed, config, copy or root)
     except Exception as failed:  # noqa: BLE001
         out.append(f'The sweep stopped before it began: {type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}')
         return out
     if not config.get('envSweep'):
         out.append('Not run: the repository declares no `envSweep` in .claude/pr-grade.json.')
     elif not tests:
-        out.append('Not run: the change adds or modifies no test file, so there is nothing of its own to sweep.')
+        gone = sweep_targets(changed, config)
+        out.append('Not run: every test file the change touches was deleted or renamed away, so there is nothing to run.'
+                   if gone else 'Not run: the change adds or modifies no test file, so there is nothing of its own to sweep.')
     elif copy is None:
         out.append('Not run: no proof copy was given to run it in.')
     else:

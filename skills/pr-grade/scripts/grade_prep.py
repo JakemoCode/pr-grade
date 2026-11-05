@@ -27,7 +27,8 @@ no before.
 
 Callers are derived for functions in TypeScript, JavaScript, and Python that existed before the branch.
 A changed type, option, or constant, and code in any other language, is named as not derived, never
-left out silently.
+left out silently. A hit in a file `notCode` names is dropped, unless `countAsCode` names it too: a
+function called `clear` is also a word, and prose that uses it is not a caller.
 """
 from __future__ import annotations
 

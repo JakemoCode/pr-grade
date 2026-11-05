@@ -60,7 +60,7 @@ A grader has fifty turns and cannot see which one it is on. When the harness say
 
 ## 3. The nine lenses
 
-Apply each one by name. A lens you skipped is a lens that finds nothing.
+Apply each one by name. A lens you skipped is a lens that finds nothing. Close each with the strongest input you tried against it and where that input failed to break the code. A clearance that names a fact about the code and no input is an assertion nothing checked, and it is where a subtle defect survives a first look.
 
 **This list is incomplete by construction.** It was written from the findings of one external review and then missed the next one, which arrived fifteen minutes later against the fix for the first. Each lens is a defect that already escaped a careful review. When a reviewer finds something no lens names, add the lens to the repository's lens file and name the case. A list that only ever gets applied stops growing while the code does not.
 
@@ -175,7 +175,7 @@ One score for the change: the honest answer to "would a reviewer merge this with
 
 Rank findings `P1` (fix before merge), `P2` (fix or justify), `P3` (note). The score counts P1 and P2; a P3 is listed and leaves the score at 5, or one standing note would hold a change below 5 forever.
 
-Rank by what the defect does to a run. When a run fails either way, in the same direction, and the only defect is how the failure reads, such as a traceback where a message belongs, the finding is a P3. That holds in a re-grade whose fix was itself about messages, where the next traceback looks like the fix left unfinished.
+Rank by what the defect does to a run. Rank a defect in a check by what the check exists to refuse, never by whether today's callers write the input it lets through: a version check that passes a prerelease of the next minor is a P2 when no build writes that range yet, because the check is the only thing between that input and the code, and callers change. When a run fails either way, in the same direction, and the only defect is how the failure reads, such as a traceback where a message belongs, the finding is a P3. That holds in a re-grade whose fix was itself about messages, where the next traceback looks like the fix left unfinished.
 
 Merge the graders' reports before you score, with the `merge:` line the prep printed. Two graders on one branch each scored the same proven P1 as 2/5, and a third cleared the path it broke as outside its lenses. The merge reads every grader's report and prints where each lens ended, the findings with any two at one line flagged and any whose line the graded diff did not change flagged `anchor:`, the defects raised outside their lenses, the lowest score these rules allow, and a draft block. The draft keeps each grader's notes in `Verified and clear`, and writes a lens the prep skipped as `L2 (not applicable)`; leave both as written. Then settle what it leaves to you:
 

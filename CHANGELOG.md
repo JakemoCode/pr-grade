@@ -7,6 +7,15 @@
 
 Each entry says what changed, where, and why. Under it, **Before** is the old behavior and **Seen on** is the grade that exposed it.
 
+## 0.14.0
+
+- `agents/grade.md`, `SKILL.md`: changed how a lens closes, so that a clearance names the strongest input the grader tried and where that input failed to break the code, to keep a lens from closing on a claim nothing checked.
+  - **Before:** step 2 said "clear, naming the line or fact that makes it so", which rewards closing at first look. A clearance read `the range is compared with semver.gte` and recorded an opinion; now it reads `0.4.0-beta.1 and >=0.4.0-0 both refused at line 73` and records what was tried.
+  - **Seen on:** EngOS PR #905, where the grade found that a prerelease of the next minor passed the later-Runtime refusal and ranked it P3 because "no build writes that range". The lens was cleared on a claim about today's callers, not on an input that tried to break it (issue #40).
+- `SKILL.md`, `agents/grade.md`: added a ranking rule to section 5, so that a defect in a check ranks by what the check exists to refuse, never by whether today's callers write the input it lets through.
+  - **Before:** section 5 ranked by what a defect does to a run, and a grader read a check's defect as harmless when no current caller produced the input. The check is the only thing between that input and the code, and callers change.
+  - **Seen on:** the same PR #905 grade.
+
 ## 0.13.3
 
 - `templates/pr-grade-check.yml`: changed the `actions/setup-python` pin from v7.0.0 to v7.1.0 to match this repository's own workflows, which Dependabot bumped.

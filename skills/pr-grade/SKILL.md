@@ -26,7 +26,7 @@ Without them the generic lenses below apply, and the selector uses its defaults.
 
 `git diff origin/main...HEAD --stat`, plus any uncommitted work, then read every changed hunk. Grade the change itself, never a summary of it.
 
-Every grader gets the callers of what the branch modified, with file and line. `grade_prep.py` in step 2 lists them for each function in TypeScript, JavaScript, or Python that existed before the branch, with `git grep -n -a -w -e '<name>'`. A plain `grep` or `rg` skips a file it takes for binary: on one branch that hid a caller behind a single NUL byte. For a type, option, or constant you modified, or code in another language, list the callers yourself with the same command and pass them with `--callers`. L4, the lens that most often fires, starts from this list.
+Every grader gets the callers of what the branch modified, with file and line. `grade_prep.py` in step 2 lists them for each function in TypeScript, JavaScript, or Python that existed before the branch, with `git grep -n -a -F -w -e '<name>'`, outside the paths `notCode` names. A plain `grep` or `rg` skips a file it takes for binary: on one branch that hid a caller behind a single NUL byte. For a type, option, or constant you modified, or code in another language, list the callers yourself with the same command and pass them with `--callers`. L4, the lens that most often fires, starts from this list.
 
 Grade after a correctness review, never alongside one. Run the review the repository uses, fix what it proves, and commit. Keep each finding you declined, with the reason. This skill was built against Claude Code's `/code-review`, but any review that returns findings works the same way: another plugin, a second model, or a person's comments. Grading first spends the graders' turns re-finding what the review catches: on one pull request, four of the graders' seven findings were already in the review. With no review, grade anyway; the lenses do not depend on one.
 
@@ -243,3 +243,39 @@ python3 <base>/scripts/grade_block.py check <pr>
 ```
 
 Run it before marking a PR ready. To make it a merge gate, copy [`templates/pr-grade-check.yml`](templates/pr-grade-check.yml) to `.github/workflows/` and make its check required. It runs on `opened`, `edited`, `synchronize`, `reopened`, and `ready_for_review`, so a commit pushed after the grade fails until it is graded and a block pasted into the body is read at once. It runs the checker from a pinned pr-grade ref, and the checker reads the config and lens file from the base branch, so a pull request cannot loosen the rules it is checked against.
+
+## 9. Grading a surface
+
+A surface grade applies the same nine lenses to code that no branch is changing: the files under some paths, as committed at HEAD. The base is the empty tree, so the prep treats every function as if a diff had introduced it. Nothing about it is a pull request, so the grade block it drafts is not one either.
+
+### When
+
+Only on a trigger, never on a cadence. The triggers:
+
+- A class of bug escaped every review. On 2026-11-04 it was what a screen shows between a write and its subscription echo.
+- A hotspot is about to be refactored.
+- A milestone closes and the hotspot list names the surfaces that moved.
+
+A surface nobody touched buys nothing and costs about six branch grades.
+
+### How
+
+Run one command per surface, from inside the repository with the code committed:
+
+```sh
+python3 <base>/scripts/grade_prep.py --surface <path> [<path> ...] --settled '...' --declined '...'
+```
+
+Choose surfaces by layer, so each grader reads one kind of code. For a React and Firestore app that is hooks, repositories, shared components, pages, engine, and views. `--base` and `--branch-base` are refused, since a surface has no before. Tests under the paths are left out of the change and the caller list, and stay in the proof copy as evidence.
+
+Paste the prompts as printed, dispatch the graders, and run the `merge:` line. The mode comes from the surface's files by the same rule as a branch. Callers outside the surface are listed, the ones inside are counted, and L7 scans the whole surface instead of a diff. The draft block carries a `Surface:` line after `Mode:`.
+
+### Reading the result
+
+- The score is the surface's. Nothing enforces it, and `grade_block.py check` refuses a body whose block carries a `Surface:` line.
+- Every P2 still needs a failing test before it counts, as in section 4.
+- Findings go into the repository's tracker, not a pull request body. A fix is a branch like any other and gets a branch grade.
+
+### Cost
+
+The baby-day-planner run on 2026-11-04 graded six surfaces and 139 production files. It used about 900k subagent tokens and 25 minutes of wall clock with six graders in parallel, and proved eight P2s and fifteen P3s.

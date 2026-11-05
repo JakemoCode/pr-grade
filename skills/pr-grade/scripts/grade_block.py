@@ -18,6 +18,9 @@ The block is a `## Grade` section in the PR body, outside any code block, one fi
     Verified and clear: L1, L2, L3, L4, L5, L6, L7, L8, L9
     Could not verify: none
 
+A grade of paths instead of a change (`grade_prep.py --surface`) adds a `Surface:` line after `Mode`.
+`check` refuses any block that carries one: it graded code no pull request changed.
+
 `check` refuses the PR when the block is missing or below 5/5; when a lens the lens file defines (or
 L1 to L9, without one) is missing from `Verified and clear`; when `Mode` is cheaper than grade_mode.py
 requires for the PR's files; when the graded commit is not in the PR's history or a file the grade
@@ -75,7 +78,8 @@ DEFAULT_LENSES = [f'L{n}' for n in range(1, 10)]
 COMPARE_CAP = 300
 PR_FILE_CAP = 3000
 SECTION = re.compile(r'(?ms)^##[ \t]+Grade[ \t]*$(.*?)(?=^##[ \t]|\Z)')
-FIELD = re.compile(r'(?m)^(Mode|Graded|Score|Verified and clear):[ \t]*(.*?)[ \t]*$')
+FIELD = re.compile(r'(?m)^(Mode|Surface|Graded|Score|Verified and clear):[ \t]*(.*?)[ \t]*$')
+SURFACE_REFUSED = 'a surface grade is not a pull request grade'
 LENS_HEADING = re.compile(r'(?m)^###[ \t]+(L\d+)\.')
 LENS_ID = re.compile(r'L\d+\b')
 LEAD_ID = re.compile(r'(L\d+)\b[ \t]*')
@@ -179,6 +183,8 @@ def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[
     repository with rules of its own; it takes and returns what `grade_mode.assess` does."""
     if block is None:
         return ['The body has no `## Grade` section. Grade the branch with /pr-grade and put its block in the body.']
+    if 'Surface' in block:
+        return [SURFACE_REFUSED]
     required, reasons, covered = (assess or grade_mode.assess)(pr_files, root, config)
     if required not in MODES:
         return [f"The selector returned mode {required!r}, which is not one of {', '.join(MODES)}."]
@@ -334,6 +340,8 @@ def anchors(meta: dict, findings: list[dict]) -> tuple[list[str], str | None]:
     """For each finding, why its line looks misplaced, or an empty string when it touches a line the
     graded diff changed; and why none could be checked, when that is so. A defect can sit in code the diff
     left alone, such as a caller the change broke, so this flags and never refuses."""
+    if meta.get('surface'):
+        return [''] * len(findings), 'a surface grade has no diff to anchor a finding to'
     repo, base, head = meta.get('repository'), meta.get('base'), meta.get('head')
     missing = [key for key, value in (('repository', repo), ('base', base), ('head', head)) if not value]
     if missing:
@@ -462,7 +470,8 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
     out += [f'  {item}' for item in outside] or ['  none']
     out += ['', f'score floor: {floor}/5. Two lines with one cause, a clearance against a proof, a 3 for a design',
             'decision, and a 1 for a finding that contradicts the stated purpose are yours to judge.', '',
-            '## Grade', '', f"Mode: {meta['mode']}", f"Graded: {meta['head']}", f'Score: {floor}/5',
+            '## Grade', '', f"Mode: {meta['mode']}", *([f"Surface: {' '.join(meta['surface'])}"] if meta.get('surface') else []),
+            f"Graded: {meta['head']}", f'Score: {floor}/5',
             f"Blocking: {first or 'nothing'}", f"Verified and clear: {', '.join(clear) or 'none'}",
             'Could not verify: ' + ('; '.join(f'guess: {claim}' for _, claim, _ in open_claims) or 'none')]
     return '\n'.join(out)

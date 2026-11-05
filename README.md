@@ -84,7 +84,7 @@ Every key in `.claude/pr-grade.json` is optional. A key you set replaces its def
 | `silentCommand` | none | A command that prints more silent paths, one per line, for a repository that already keeps that list. |
 | `ordinary` | empty | Code a test would catch a defect in. `silent` wins over it. |
 | `tests` | common test paths | Files that never count toward size and are never unclassified. |
-| `notCode` | docs, Markdown, lockfiles, `LICENSE` | Files that never count toward size. |
+| `notCode` | docs, Markdown, lockfiles, `LICENSE` | Files that never count toward size, and whose hits are dropped from the caller list, since prose that uses a function's name is not a caller. A script listed here loses its callers; list it under `countAsCode` instead. |
 | `countAsCode` | empty | Paths that count toward size even under `tests` or `notCode`, such as a data file in `docs/` that the code reads. |
 | `checkThenAct` | built-in name lists | Overrides for the L7 scanner: `writes`, `secondReads`, `transactions`, `locks`, `ignore`. |
 | `formats` | empty | Records the code reads, for the L9 replay. |
@@ -172,7 +172,7 @@ All live in `skills/pr-grade/scripts/`. The skill calls them; you rarely run one
 
 | Script | What it does |
 |---|---|
-| `grade_prep.py` | Prepares a grade in one call: mode, lens groups (minus any `--skip`), callers, the L7 scan, the L9 replay, proof clones, and every grader's prompt. |
+| `grade_prep.py` | Prepares a grade in one call: mode, lens groups (minus any `--skip`), callers, the L7 scan, the L9 replay, proof clones, and every grader's prompt. `--surface <path ...>` grades the code under paths with no diff (SKILL.md section 9). |
 | `grade_mode.py` | Picks the mode alone and prints the files that decided it. |
 | `proof_dir.py` | Makes and removes the proof clones outside the repository, with dependencies linked in. Nothing is registered in the repository. |
 | `check_then_act.py` | Lists check-then-act windows (L7) in the functions a branch changed: a check, then an `await`, transaction boundary, or external call, then the write the check guards. A grader clears each one or proves the race. It never gates anything, and an empty list clears nothing. |

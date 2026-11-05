@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -128,6 +129,7 @@ class CliTest(unittest.TestCase):
         (self.repo / '.claude/pr-grade.json').write_text('{"silent": ["store.py"]}\n')
         (self.repo / 'store.py').write_text('def claim(x):\n    return x\n\n\ndef other():\n    return 1\n')
         (self.repo / 'app.py').write_text('from store import claim\n\nprint(claim(1))\n')
+        (self.repo / 'NOTES.md').write_text('Always claim before you release.\n')
         git(self.repo, 'add', '-A')
         git(self.repo, 'commit', '-q', '-m', 'base')
         git(self.repo, 'checkout', '-q', '-b', 'topic')
@@ -160,6 +162,31 @@ class CliTest(unittest.TestCase):
         # `fresh` is new on the branch and `other` is untouched: neither has a caller worth walking.
         self.assertNotIn('`fresh`', out)
         self.assertNotIn('`other`', out)
+
+    def test_prose_that_uses_a_function_name_is_not_a_caller(self) -> None:
+        # NOTES.md writes "claim" as a word; a hit under `notCode` is dropped, as the change command leaves it out.
+        self.assertNotIn('NOTES.md', self.prep())
+
+    def test_a_file_countascode_names_is_searched_though_notcode_covers_it(self) -> None:
+        (self.repo / 'docs/tools').mkdir(parents=True)
+        (self.repo / 'docs/tools/run.py').write_text('from store import claim\n\nclaim(3)\n')
+        (self.repo / 'docs/tools/run.md').write_text('claim\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'docs tool')
+        config = {**grade_prep.grade_mode.DEFAULTS, 'countAsCode': ['docs/tools/*.py']}
+        head = git(self.repo, 'rev-parse', 'HEAD').strip()
+        [line] = grade_prep.callers(self.repo, head, {'claim': ['store.py:1']}, config)
+        self.assertIn('docs/tools/run.py:3', line)
+        self.assertNotIn('run.md', line)
+
+    def test_a_name_with_a_dollar_sign_is_matched_as_a_fixed_string(self) -> None:
+        (self.repo / 'app.js').write_text('const items$ = load();\nitems$();\n')
+        (self.repo / 'lib.js').write_text('const items = [];\nreturn items\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'js')
+        head = git(self.repo, 'rev-parse', 'HEAD').strip()
+        [line] = grade_prep.callers(self.repo, head, {'items$': ['app.js:1']}, grade_prep.grade_mode.DEFAULTS)
+        self.assertEqual(line, '- `items$`, defined app.js:1: app.js:2')
 
     def test_code_it_cannot_parse_is_named_not_dropped(self) -> None:
         self.assertIn('- not derived for deploy.sh: no adapter reads this language; search by hand', self.prep())
@@ -342,6 +369,199 @@ class CliTest(unittest.TestCase):
         self.assertNotEqual(run.returncode, 0)
         self.assertIn('uncommitted edits', run.stderr)
         self.assertEqual(list(self.proofs.iterdir()), [])
+
+
+class SurfaceTest(unittest.TestCase):
+    """One commit on main, graded by path: no branch touched `src`."""
+
+    EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        base = Path(self.tmp.name).resolve()
+        self.repo, self.proofs = base / 'repo', base / 'proofs'
+        for folder in (self.repo / '.claude', self.repo / 'src', self.repo / 'tests', self.repo / 'lib', self.repo / 'docs',
+                       self.proofs):
+            folder.mkdir(parents=True)
+        (self.repo / 'docs/plan.md').write_text('Callers claim a row, then release it; peek never writes.\n')
+        git(self.repo, 'init', '-q', '-b', 'main')
+        (self.repo / '.claude/pr-grade.json').write_text('{"silent": ["src/store.py"], "ordinary": ["src/*", "lib/*"]}\n')
+        (self.repo / 'src/store.py').write_text(
+            'def claim(x):\n    return x\n\n\ndef release(x):\n    return x\n\n\ndef peek():\n    return 1\n')
+        (self.repo / 'src/inner.py').write_text('from store import claim\n\nclaim(1)\n')
+        (self.repo / 'src/window.py').write_text(
+            'async def reserve(repo, stream, item_id):\n    row = repo.get(item_id)\n    if row:\n        return\n'
+            '    events = [event async for event in stream]\n    repo.update(item_id, events)\n')
+        (self.repo / 'tests/test_store.py').write_text('from src.store import claim\n\nclaim(2)\n')
+        (self.repo / 'lib/other.py').write_text('def unrelated():\n    return 2\n')
+        (self.repo / 'app.py').write_text('from src.store import claim\n\nprint(claim(1))\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'only commit')
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def run_cli(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(SCRIPTS / 'grade_prep.py'), *args], cwd=self.repo,
+                              env={**os.environ, 'TMPDIR': str(self.proofs)}, capture_output=True, text=True)
+
+    def surface(self, *args: str) -> str:
+        run = self.run_cli('--surface', *args)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        return run.stdout
+
+    def test_it_lists_every_function_though_no_branch_touched_one(self) -> None:
+        out = self.surface('src')
+        for name in ('claim', 'release', 'peek', 'reserve'):
+            with self.subTest(name=name):
+                self.assertRegex(out, rf'(?m)^- `{name}`, defined src/\w+\.py:\d+:')
+
+    def test_the_change_command_names_the_empty_tree_the_head_and_only_the_paths(self) -> None:
+        out = self.surface('src')
+        head = git(self.repo, 'rev-parse', 'HEAD').strip()
+        change = re.search(r'- Change: `(.+?)` \(', out).group(1)
+        self.assertIn(f'diff {self.EMPTY_TREE} {head} -- src ', change)
+        self.assertNotIn('-- .', change)
+        self.assertIn('- Surface: src', out)
+        self.assertIn('This is a surface grade. Treat every function in the change as if the diff introduced it.', out)
+
+    def test_the_whole_repository_can_be_a_surface(self) -> None:
+        out = self.surface('.')
+        self.assertIn('- Surface: .', out)
+        self.assertRegex(out, r'(?m)^- `unrelated`, defined lib/other\.py:1:')
+
+    def test_a_repeated_surface_flag_adds_to_the_first(self) -> None:
+        run = self.run_cli('--surface', 'src', '--surface', 'lib')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn('- Surface: src lib', run.stdout)
+
+    def test_the_change_command_selects_the_surfaces_code_and_no_tests(self) -> None:
+        out = self.surface('src', 'tests')
+        command = re.search(r'- Change: `git -C \S+ (.+?)` \(', out).group(1)
+        args = shlex.split(command)
+        args.insert(1, '--name-only')
+        names = git(self.repo, *args).split()
+        self.assertEqual(sorted(names), ['src/inner.py', 'src/store.py', 'src/window.py'])
+
+    def test_callers_outside_the_surface_are_listed_and_the_rest_counted(self) -> None:
+        line = next(l for l in self.surface('src').splitlines() if l.startswith('- `claim`'))
+        # src/inner.py is inside the surface, tests/test_store.py is a test: two hits each.
+        self.assertEqual(line, '- `claim`, defined src/store.py:1: app.py:1, app.py:3, and 4 more inside the surface or in tests')
+
+    def test_a_function_with_no_outside_caller_says_so(self) -> None:
+        line = next(l for l in self.surface('src').splitlines() if l.startswith('- `peek`'))
+        self.assertEqual(line, '- `peek`, defined src/store.py:9: none found outside the surface')
+
+    def test_documentation_under_notcode_is_not_searched_for_callers(self) -> None:
+        out = self.surface('src')
+        self.assertNotIn('docs/plan.md', out)
+        self.assertIn('- `release`, defined src/store.py:5: none found outside the surface', out)
+
+    def test_a_base_is_refused(self) -> None:
+        for flag in ('--base', '--branch-base'):
+            with self.subTest(flag=flag):
+                run = self.run_cli('--surface', 'src', flag, 'main')
+                self.assertNotEqual(run.returncode, 0)
+                self.assertIn('a surface grade has no base', run.stderr)
+        self.assertEqual(list(self.proofs.iterdir()), [])
+
+    def test_a_missing_path_is_refused_by_name(self) -> None:
+        run = self.run_cli('--surface', 'src', 'nope/')
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('nope/', run.stderr)
+        self.assertEqual(list(self.proofs.iterdir()), [])
+
+    def test_a_path_outside_the_repository_is_refused_by_name(self) -> None:
+        run = self.run_cli('--surface', '../elsewhere')
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('../elsewhere', run.stderr)
+
+    def test_a_file_that_exists_only_on_disk_is_refused(self) -> None:
+        # Graders read commits, not the working tree.
+        (self.repo / 'src/draft.py').write_text('def draft():\n    return 0\n')
+        run = self.run_cli('--surface', 'src/draft.py')
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('src/draft.py', run.stderr)
+
+    def test_a_surface_of_tests_alone_has_nothing_to_grade(self) -> None:
+        run = self.run_cli('--surface', 'tests')
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('tests', run.stderr)
+
+    def test_l7_scans_the_whole_surface_not_a_diff(self) -> None:
+        out = self.surface('src')
+        self.assertRegex(out, r'check-then-act candidates \(L7\): 1 in \d+ functions')
+        self.assertIn('src/window.py:1  reserve', out)
+
+    def test_grade_json_holds_the_surface_and_the_empty_tree_as_base(self) -> None:
+        out = self.surface('src', 'lib')
+        root = Path(re.search(r'merge (\S+)$', out, re.M).group(1))
+        meta = json.loads((root / 'grade.json').read_text())
+        self.assertEqual((meta['surface'], meta['base']), (['src', 'lib'], self.EMPTY_TREE))
+        self.assertEqual(meta['head'], git(self.repo, 'rev-parse', 'HEAD').strip())
+
+    def test_the_mode_comes_from_the_surfaces_files(self) -> None:
+        self.assertIn('mode: subagent', self.surface('src'))
+        self.assertIn('mode: in-thread', self.surface('lib'))
+
+    def test_the_proof_copy_keeps_the_tests(self) -> None:
+        copy = Path(re.search(r'- Your proof copy: (\S+)', self.surface('src')).group(1))
+        self.assertTrue((copy / 'tests/test_store.py').is_file())
+
+    def test_a_pinned_install_is_linked_because_a_surface_has_no_since(self) -> None:
+        # With the empty tree as `since`, every pin file reads as changed on the branch and the
+        # install would be dropped from the copy.
+        config = {'silent': ['src/store.py'], 'ordinary': ['src/*'],
+                  'proofDir': [{'path': '.venv', 'pinnedBy': ['requirements.txt']}]}
+        (self.repo / '.claude/pr-grade.json').write_text(json.dumps(config))
+        (self.repo / 'requirements.txt').write_text('pytest\n')
+        (self.repo / '.gitignore').write_text('.venv/\n')
+        (self.repo / '.venv').mkdir()
+        (self.repo / '.venv/marker').write_text('installed\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'pin an install')
+        copy = Path(re.search(r'- Your proof copy: (\S+)', self.surface('src')).group(1))
+        self.assertTrue((copy / '.venv/marker').is_file())
+
+    def test_history_replay_runs_for_a_format_whose_reader_is_under_the_surface(self) -> None:
+        config = {'silent': ['src/store.py'], 'ordinary': ['src/*', 'lib/*'], 'formats': [
+            {'name': 'store', 'readers': ['src/store.py'], 'check': ['true'], 'instances': []},
+            {'name': 'other', 'readers': ['lib/other.py'], 'check': ['true'], 'instances': []}]}
+        (self.repo / '.claude/pr-grade.json').write_text(json.dumps(config))
+        git(self.repo, 'commit', '-q', '-am', 'declare formats')
+        out = self.surface('src')
+        self.assertIn('### store (reader: src/store.py)', out)
+        self.assertNotIn('### other', out)
+
+    def test_the_transplant_does_not_call_the_whole_repository_the_change(self) -> None:
+        # Diffed against the empty tree, every record kind in the repository would read as added.
+        reader = ['python3', '-c', 'import json,sys;print(json.dumps([[] for _ in json.load(open(sys.argv[1]))]))',
+                  '{instances}']
+        config = {'silent': ['src/store.py'], 'ordinary': ['src/*'], 'formats': [
+            {'name': 'notes', 'readers': ['src/store.py'], 'check': reader, 'instances': [{'files': 'notes/*.txt'}],
+             'records': r'^(?P<kind>[a-z]+): ', 'values': r'value=(?P<value>\w+)'}]}
+        (self.repo / '.claude/pr-grade.json').write_text(json.dumps(config))
+        (self.repo / 'notes').mkdir()
+        (self.repo / 'notes/a.txt').write_text('alpha: value=one\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'record something')
+        out = self.surface('src')
+        self.assertIn('Transplant: the change adds no kind of record', out)
+
+    def test_uncommitted_edits_stop_it(self) -> None:
+        (self.repo / 'src/store.py').write_text('changed\n')
+        run = self.run_cli('--surface', 'src')
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('uncommitted edits', run.stderr)
+
+    def test_a_branch_grade_prints_no_surface(self) -> None:
+        git(self.repo, 'checkout', '-q', '-b', 'topic')
+        (self.repo / 'src/store.py').write_text('def claim(x):\n    return x + 1\n')
+        git(self.repo, 'commit', '-q', '-am', 'change')
+        run = self.run_cli('--base', 'main')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn('Surface:', run.stdout)
+        self.assertNotIn('surface grade', run.stdout)
 
 
 if __name__ == '__main__':

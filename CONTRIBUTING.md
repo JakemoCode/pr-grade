@@ -16,12 +16,12 @@ What a pull request to pr-grade has to carry. [CLAUDE.md](CLAUDE.md) has the wor
 
 ## Release
 
-- A change to `skills/`, `agents/`, or `.claude-plugin/plugin.json` raises `version` in `plugin.json` and adds a `## <version>` heading to [CHANGELOG.md](CHANGELOG.md), with one bullet per file in the shape the changelog's preamble gives. `.github/scripts/check_release.py` refuses the pull request otherwise.
+- A change to `skills/`, `agents/`, or `.claude-plugin/plugin.json` raises `version` in `plugin.json` and adds a `## <version>` heading to [CHANGELOG.md](CHANGELOG.md), with a bullet per change in the shape the changelog's preamble gives, naming the file it touched. `.github/scripts/check_release.py` refuses a pull request whose version did not rise or whose heading is missing.
 - A change that lands over several pull requests carries the `hold-release` label on all but the last.
 
 ## Grade
 
-- Every pull request carries a `## Grade` block from `/pr-grade` in its body: `Score: 5/5`, `Graded` at the head commit, every lens in `Verified and clear`. The `grade` check is required, and a push after the grade fails it until the branch is re-graded. `dependabot/` branches are exempt.
+- Every pull request carries a `## Grade` block from `/pr-grade` in its body: `Score: 5/5`, `Graded` at the head commit, every lens in `Verified and clear`. The `grade` check is required, and a push that changes code after the grade fails it until those commits are re-graded. `dependabot/` branches are exempt.
 - A pull request body has a Summary, Evidence (the checks that passed), Merge Danger (door, blast radius, grade notes), and the Grade block. Pull request #48 is the model.
 
 ## Merging

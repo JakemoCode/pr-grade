@@ -7,6 +7,19 @@
 
 Each entry says what changed, where, and why. Under it, **Before** is the old behavior and **Seen on** is the grade that exposed it.
 
+## 0.13.0
+
+- `grade_prep.py`: added `--surface <path ...>` to grade the code under some paths as committed at HEAD, with the empty tree as the base, to reach code that no branch is changing.
+  - **Before:** a grade began at a diff, so code nobody touched had no way in. The only route was a throwaway branch that rewrote the files.
+  - Every function counts as new. Test files under the paths are left out of the change and the caller list but stay in the proof copy. Callers outside the surface are listed and the ones inside are counted. L7 scans the whole surface, and the mode comes from the surface's files by the rule a branch uses.
+  - It takes one surface per command and refuses `--base` and `--branch-base`. A path outside the repository, or with no file committed at HEAD, stops the run with the path named.
+  - `history_replay.py` runs for a declared format whose reader is under the paths, with the head as its own base: the empty tree holds no instance and would make the transplant call every record kind in the repository an addition. The replay lists recorded instances but finds no disagreement. Proof copies pass `since=None`, so no pinned install reads as drifted against an empty base.
+  - **Seen on:** the baby-day-planner code health audit on 2026-11-04, where a class of bug had passed every branch review and no open branch touched the code that held it.
+- `grade_block.py`: added a `Surface:` line to the draft block after `Mode:`, read from `grade.json`, and made `check` refuse a body whose block carries one with "a surface grade is not a pull request grade", to keep a surface grade out of a merge gate.
+  - **Before:** nothing marked a block as a surface's, so one pasted into a pull request body could pass for that pull request's grade.
+- `SKILL.md`: added section 9, Grading a surface, with when to run one (on a trigger, never a cadence), the command, how to read the score, and what the first run cost, to keep a surface grade from becoming a routine.
+  - **Seen on:** the same run, six surfaces and 139 production files for about 900k subagent tokens, with eight proven P2s and fifteen P3s.
+
 ## 0.12.3
 
 - `agents/grade.md`: limited the grade agent to deleting only what it created, by its literal path in its scratch directory or proof copy and never by a pattern in a shared directory, to keep a grader's cleanup out of other sessions' files.

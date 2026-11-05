@@ -55,6 +55,9 @@ class ProblemsTest(Fixture):
     def test_a_complete_current_block_passes(self) -> None:
         self.assertEqual(self.problems(body()), [])
 
+    def test_a_surface_block_is_refused_whatever_else_it_holds(self) -> None:
+        self.assertEqual(self.problems(body(Surface='src lib')), ['a surface grade is not a pull request grade'])
+
     def test_a_body_without_a_grade_section_is_refused(self) -> None:
         self.assertTrue(any('## Grade' in p for p in self.problems('Summary\n\nScore: 5/5\n')))
 
@@ -243,6 +246,11 @@ class CheckTest(Fixture):
     def test_a_missing_grade_is_refused(self) -> None:
         self.assertTrue(any('## Grade' in p for p in self.run_check(text='Summary\n')[1]))
 
+    def test_a_surface_grade_pasted_into_a_pull_request_is_refused(self) -> None:
+        verified = ', '.join(f'L{n}' for n in range(1, 10))
+        self.assertEqual(self.run_check(text=body(Surface='src', **{'Verified and clear': verified})),
+                         (True, ['a surface grade is not a pull request grade']))
+
     def test_a_draft_needs_no_grade(self) -> None:
         self.assertEqual(self.run_check(text='Summary\n', draft=True), (False, []))
 
@@ -314,6 +322,20 @@ class MergeTest(unittest.TestCase):
         self.write('reach', '```\n' + report('5/5', 'L3') + '```\n')
         block = self.block()
         self.assertEqual((block['Score'], block['Verified and clear'], block['Graded']), ('5/5', 'L1, L2, L3', HEAD))
+
+    def test_a_surface_grade_drafts_a_surface_line_after_mode(self) -> None:
+        meta = json.loads((self.root / 'grade.json').read_text())
+        (self.root / 'grade.json').write_text(json.dumps({**meta, 'surface': ['src', 'lib']}))
+        self.write('timing', report('5/5', 'L1, L2'))
+        self.write('reach', report('5/5', 'L3'))
+        lines = self.merged().splitlines()
+        self.assertEqual(lines[lines.index('Mode: fan-out') + 1], 'Surface: src lib')
+        self.assertEqual(self.block()['Surface'], 'src lib')
+
+    def test_a_branch_grade_drafts_no_surface_line(self) -> None:
+        self.write('timing', report('5/5', 'L1, L2'))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertNotIn('Surface', self.merged())
 
     def test_one_finding_scored_as_a_2_by_its_grader_is_a_4(self) -> None:
         # The case that motivated the merge: a grader read one P1 as the table's 2.

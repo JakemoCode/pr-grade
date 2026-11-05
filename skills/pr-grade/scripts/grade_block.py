@@ -92,8 +92,10 @@ REPORT_LINE = re.compile(r'^(Score|Blocking|Verified and clear|Could not verify|
 # after the line, as in `<file>:78:5`, is dropped.
 FINDING = re.compile(r'^(P[123])[ \t]+((?:L\d+[ \t,]*)*)(\S+?):(\d+)(?::\d+)?(?:-(\d+))?(?:[ \t]+in[ \t]+(.+?))?[ \t]+-[ \t]+(.+)$')
 # The line under a finding naming the test the grader kept, and the repository path it ran at. Each path
-# may be written as inline code; words after the second path are not part of it.
-PROOF_TEST = re.compile(r'^Proof test:[ \t]*`?([^`\s,]+)`?(?:,?[ \t]+ran at[ \t]+`?([^`\s,]+)`?)?')
+# may be written as inline code, which keeps a space or comma inside it; words after the second path are
+# not part of it.
+PROOF_TEST = re.compile(r'^Proof test:[ \t]*(?:`([^`]+)`|([^`\s,]+))'
+                        r'(?:,?[ \t]+ran at[ \t]+(?:`([^`]+)`|([^`\s,]+)))?')
 BLOCKING = re.compile(r'\bP[12]\b')
 NEW_ITEM = re.compile(r'([-*+]|\d+[.)])[ \t]|(L\d+|P[123])\b')
 # `L2's pool releases` continues a claim, unless its line names a rank or the claim above is a P3.
@@ -282,7 +284,8 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
         elif current is None and last_finding is not None and PROOF_TEST.match(line):
             kept = PROOF_TEST.match(line)
             # A sentence-ending period is not part of a path.
-            last_finding['proof_test'] = {'file': kept[1].rstrip('.'), 'at': kept[2].rstrip('.') if kept[2] else None}
+            file, at = kept[1] or kept[2], kept[3] or kept[4]
+            last_finding['proof_test'] = {'file': file.rstrip('.'), 'at': at.rstrip('.') if at else None}
         elif field:
             current, last_finding = field[1], None
             inline = field[2].strip()

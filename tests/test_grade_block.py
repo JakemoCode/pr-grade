@@ -407,6 +407,11 @@ class MergeTest(unittest.TestCase):
         self.assertIn('not found', merged)
         self.assertNotIn('\n  mv ', merged)
 
+    def test_a_path_written_as_inline_code_keeps_its_comma_and_space(self) -> None:
+        found = grade_block.read_report('P1 L1 src/a.py:9 - x\n'
+                                        'Proof test: `proofs/my test.py`, ran at `tests/a,b test.py`.\n')
+        self.assertEqual(found['findings'][0]['proof_test'], {'file': 'proofs/my test.py', 'at': 'tests/a,b test.py'})
+
     def test_words_after_the_repository_path_are_not_part_of_it(self) -> None:
         found = grade_block.read_report('P1 L1 src/a.py:9 - x\nProof test: proofs/t.py, ran at tests/t.py (new file).\n')
         self.assertEqual(found['findings'][0]['proof_test'], {'file': 'proofs/t.py', 'at': 'tests/t.py'})

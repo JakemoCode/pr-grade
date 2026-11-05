@@ -19,7 +19,7 @@ import grade_block  # noqa: E402
 # What a grader needs from the coordinator. A coordinator that never loads the skill sees only the
 # agent's description, so each one has to be named there, in the agent's Inputs, and in the skill.
 DISPATCH = ['repository', 'lens file', 'base and head', 'settled', 'declined', 'callers', 'check_then_act.py', 'proof copy',
-            'proofs directory', 'report']
+            'proofs directory', 'ambient.py', 'report']
 # Lines that describe one finding, not the report: the merge reads them with their own pattern.
 FINDING_LINES = {'Proof test'}
 

@@ -1,6 +1,6 @@
 ---
 name: pr-grade
-description: Grade a change the way an external reviewer will, before pushing it. Applies nine lenses for the defects a correctness review misses, picks how many agents grade from what the diff touches, and reports a score out of five in a block a PR check can enforce. Use before opening a pull request or marking one ready, when asked for a bot-reviewer-style assessment, or after a bot review finds something the local review missed.
+description: Grade a change the way an external reviewer will, before pushing it. Applies ten lenses for the defects a correctness review misses, picks how many agents grade from what the diff touches, and reports a score out of five in a block a PR check can enforce. Use before opening a pull request or marking one ready, when asked for a bot-reviewer-style assessment, or after a bot review finds something the local review missed.
 ---
 
 # Grading a change before a reviewer does
@@ -18,7 +18,7 @@ Run this before you push. It does not replace a correctness review such as `/cod
 Two optional files at the repository root tune this skill. Read both first when they exist.
 
 - **`.claude/pr-grade-lenses.md`** restates each lens for this codebase: its real bounded resources, its callers, its proof recipe, its fan-out groups. Where it and this file differ, it wins. [`templates/pr-grade-lenses.md`](templates/pr-grade-lenses.md) is a starting point.
-- **`.claude/pr-grade.json`** tells the mode selector which paths are silent-failure code and which are ordinary; code it names as neither grades as silent. [`templates/pr-grade.json`](templates/pr-grade.json) shows every key. Its `formats` declare the records the repository keeps, for L9; one that declares none pays nothing.
+- **`.claude/pr-grade.json`** tells the mode selector which paths are silent-failure code and which are ordinary; code it names as neither grades as silent. [`templates/pr-grade.json`](templates/pr-grade.json) shows every key. Its `formats` declare the records the repository keeps, for L9, and its `envSweep` the command that runs the tests a change touches, for L10; one that declares neither pays nothing.
 
 Without them the generic lenses below apply, and the selector uses its defaults.
 
@@ -50,13 +50,15 @@ It picks the mode from what the branch touches, as `grade_mode.py` does alone, a
 
 - **in-thread**: apply every lens yourself.
 - **subagent**: dispatch one `pr-grade:grade` agent to apply every lens.
-- **fan-out**: dispatch one `pr-grade:grade` agent per fan-out group. The lens file names the groups; without them use timing (L1, L2, L7), reach (L3, L4), and lifetime and contract (L5, L6, L8, L9).
+- **fan-out**: dispatch one `pr-grade:grade` agent per fan-out group. The lens file names the groups; without them use timing (L1, L2, L7), reach (L3, L4, L10), and lifetime and contract (L5, L6, L8, L9).
 
 A lens that does not apply to the change, by a rule the repository keeps for itself, such as a lens file that scopes a lens to some paths, goes to `--skip L2,L3`. No grader holds it and no proof copy is made for it. The merge clears it as `L2 (not applicable)`; in-thread, write it that way yourself. Skip only by a rule written down before the change, never because a lens looks unlikely to find anything.
 
 Then it prints a prompt for every grader: a shared block, and one block per grader. Paste the shared block and the grader's own block into its prompt, unchanged, then the `Probe first:` list from section 1 when it has an entry. The shared block holds the repository, the lens file, the base and head as full SHAs, the change as one diff command, what is settled, the declined findings, and the callers list. The base is the branch point, since `origin/main` moves when anything fetches and a diff against it shows main's new work as this change reverting it. A grader's own block holds its lenses, its proof copy, its scratch directory, its proofs directory, where a proof test it kept waits for the repair, and where to write its report. The grader holding L7 also gets `check_then_act.py`'s list of check-then-act windows in the functions the branch changed. For TypeScript and JavaScript the scanner needs Node and the repository's own `typescript` package; Python needs nothing, and the scanner names the files it skipped.
 
 The grader holding L9, or the lens `oldStateLens` in `.claude/pr-grade.json` names, gets `history_replay.py`'s output when the branch touches a reader that a declared format names. The replay runs the base and head readers over every recorded instance, such as the last few hundred merged pull request bodies, and lists each one they disagree on. The transplant takes each kind of record the change adds, puts it in a recorded instance, and runs every recorded value through it beside the record's old kind. A repository declares a format with the command that runs its reader over a list of instances, where the instances live, and the two regexes that find a record's kind and a value under it; the script's docstring has the keys. When no grader holds that lens, every grader gets the output in the shared block, and a skipped lens skips the run.
+
+The grader holding L10, or the lens `ambientLens` names, gets `ambient.py`'s output: every process call the change adds or modifies, in Python, JavaScript, TypeScript, or a shell script, with what the call site does with the exit code and the registry's note when the command's exit codes surprise people, and, when the repository declares `envSweep`, the tests the change touches run once per perturbation in a proof copy of their own. A repository extends the registry under `exitCodes`. When no grader holds that lens, every grader gets the output in the shared block, and a skipped lens skips both.
 
 A proof copy is a clone of the head commit outside the repository, with its installed dependencies linked in, one per grader. A grader copies a failing test there from its scratch directory and runs it without setup, and nothing is registered in the repository. Name any dependency beyond `node_modules` and `.venv` under `proofDir` in `.claude/pr-grade.json`. The prep ends with a `merge:` line, which section 5 runs, and a `remove:` line to run once every grader has reported. In-thread there are no reports to merge, and only the `remove:` line is printed. A branch that changed a dependency's pin files gets no linked dependency: the prep names the install to run in each copy instead, since what the author installed may predate the change. A grader told where nothing is searches the filesystem for it. Graders who did spent up to eight of their fifty turns on it, and read three different installed copies of this file.
 
@@ -66,7 +68,7 @@ Pass the declined findings as the review returned them, in whatever form it used
 
 A grader has fifty turns and cannot see which one it is on. When the harness says one stopped at its turn limit, send it one message with SendMessage: "Stop investigating and report now, in your report shape, from what you have. Put every claim you have not proven under Could not verify." Do not ask it to continue; a turn spent investigating is not spent reporting. Below the grade block, say which graders needed that message. When a group's grader stops at its limit in two rounds, split the group next round, one grader per lens. Each extra grader reads the whole change again, so split no sooner.
 
-## 3. The nine lenses
+## 3. The ten lenses
 
 Apply each one by name. A lens you skipped is a lens that finds nothing. Close each with the strongest input you tried against it and where that input failed to break the code. A clearance that names a fact about the code and no input is an assertion nothing checked, and it is where a subtle defect survives a first look.
 
@@ -158,6 +160,19 @@ What already exists that the new code will read, accept, or rewrite? Records, ro
 When the repository declares its formats under `formats` in `.claude/pr-grade.json`, `history_replay.py` has made both runs and the prep gives its output to the grader holding this lens. The output is a floor. Prove a finding from it in the proof copy like any other, and look for state it does not cover, such as a database or a cache.
 
 *Example:* a review record gained a tag for a pass whose findings nobody acts on, and a disposition only that pass may take. The validator confined the new disposition to the tagged pass and never refused the old ones there, so a tagged pass accepted all seven dispositions the records held. Three grades missed it, the last after its lens file asked for exactly this probe: that grader ran the new value through both kinds of pass and never an old value through the new kind. Given the transplant's table of the old values the new kind accepts, two blind graders out of two reported it at P2.
+
+### L10. Ambient assumptions
+
+What does the change assume about the world outside the process, and which of those assumptions differ between the author's run and the run that matters? L1, L2, and L7 ask about concurrency inside the process. This asks about everything around it: the tools it starts, the clock, the locale, the filesystem, the runtime, and the other sessions sharing the machine.
+
+- **A tool's exit code.** For each process the change starts, name the codes the tool uses and the ones the call distinguishes. `grep` and `gh pr checks` exit 1 to say they found nothing, and `tar` exits 2 for a fatal error. A call that reads "found nothing" as failure, or a fatal error as a finding, is a defect.
+- **The clock and the locale.** A date computed in local time compared with one recorded in UTC moves a day at midnight in either zone. A lowercase, a sort, or a number format changes under another locale.
+- **The filesystem.** A listing that trips on a `.DS_Store`, a parser that reads CRLF as no section, a search that skips a file holding a NUL byte, a path that collides on a case-insensitive disk.
+- **The shared machine.** A ref another worktree's fetch moves between the read and the use; a runtime the daemon provides at one version and the shell at another.
+
+`ambient.py` lists every process call the change adds or modifies, with what the call site does with the exit code and the registry's note on the command, and, when the repository declares an `envSweep`, runs the tests the change touches once per perturbation: a timezone east and one west of UTC, a non-English locale, `umask 077`, a stray dotfile and then a NUL-byte file in each directory the change touches, and CRLF line endings in each data file it touches. A failing row names the perturbation, and the proof is the same run in the proof copy with the assertion that names the defect. For a tool's exit code, the proof is a shim: a script of that name first on the copy's `PATH`, exiting with the code in question. Both lists are floors. The sweep cannot see an assumption the tests never exercise, and the scan cannot see a process a library starts.
+
+*Example:* a merge train called `gh pr checks` and read its exit 1 as a failed check, so it stopped on every pull request that had no checks at all. A ledger tool defaulted `--on` to the local date while its records were stamped in UTC, so a correction filed in the evening landed on the next day's row. A rebuild stopped on a `.DS_Store` in a directory it listed. A report parser split a section by hand and read a CRLF body as having none. A caller search missed a caller because one NUL byte made `grep` take the file for binary. Each one passed its author's run.
 
 ## 4. What a finding must carry
 
@@ -257,7 +272,7 @@ Run it before marking a PR ready. To make it a merge gate, copy [`templates/pr-g
 
 ## 9. Grading a surface
 
-A surface grade applies the same nine lenses to code that no branch is changing: the files under some paths, as committed at HEAD. The base is the empty tree, so the prep treats every function as if a diff had introduced it. Nothing about it is a pull request, so the grade block it drafts is not one either.
+A surface grade applies the same ten lenses to code that no branch is changing: the files under some paths, as committed at HEAD. The base is the empty tree, so the prep treats every function as if a diff had introduced it. Nothing about it is a pull request, so the grade block it drafts is not one either.
 
 ### When
 

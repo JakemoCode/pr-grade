@@ -46,6 +46,10 @@ Replace every `<...>`. Delete a section that adds nothing over the skill; keep i
 
 <What earlier versions wrote that new code reads: ledgers, PR bodies, rows, config files. Declare each format whose reader a change may touch under `formats` in `.claude/pr-grade.json`, so `history_replay.py` replays it.>
 
+### L10. Ambient assumptions
+
+<What the code here assumes about the world around it: the tools it starts and their exit codes, the clock and timezone its records use, the locale, the filesystem, other sessions sharing a ref or a port. Declare the test command under `envSweep` in `.claude/pr-grade.json`, so `ambient.py` sweeps the tests a change touches, and add this codebase's own tools under `exitCodes`.>
+
 ## Already settled
 
 <The deterministic checks graders take as given and never re-run: test suites, type checks, linters, architecture tests, mutation tests. Grade what they cannot see.>
@@ -59,7 +63,7 @@ Replace every `<...>`. Delete a section that adds nothing over the skill; keep i
 | Group | Lenses | Shared reading |
 |---|---|---|
 | Timing | L1, L2, L7 | <every transaction, await, and status read in the diff> |
-| Reach | L3, L4 | <the caller list and any ownership registry> |
+| Reach | L3, L4, L10 | <the caller list, any ownership registry, and every process the diff starts> |
 | Lifetime and contract | L5, L6, L8, L9 | <the specs cited and every fallback> |
 
 ## Growing this list

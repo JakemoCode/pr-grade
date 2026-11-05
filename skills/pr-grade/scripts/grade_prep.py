@@ -8,7 +8,8 @@
 Run it from inside the repository once the change is committed. It picks the mode as grade_mode.py
 does, splits the lenses among graders (the lens file's `## Fan-out groups` table, or timing, reach, and
 lifetime and contract), lists the callers of each function the branch modified, runs check_then_act.py
-for whoever holds L7, and makes one proof copy per grader with proof_dir.py. It prints a shared block
+for whoever holds L7, history_replay.py for whoever holds L9, ambient.py for whoever holds L10, and makes
+one proof copy per grader with proof_dir.py, plus one for the env sweep when the repository declares one. It prints a shared block
 and one block per grader: a grader's prompt is the shared block followed by its own, pasted unchanged.
 It ends with the command that merges the graders' reports and the one that removes the proof copies.
 
@@ -57,13 +58,17 @@ def _load(name: str):
     return module
 
 
-grade_mode, grade_block, proof_dir, check_then_act, history_replay = (
-    _load(n) for n in ('grade_mode', 'grade_block', 'proof_dir', 'check_then_act', 'history_replay'))
+grade_mode, grade_block, proof_dir, check_then_act, history_replay, ambient = (
+    _load(n) for n in ('grade_mode', 'grade_block', 'proof_dir', 'check_then_act', 'history_replay', 'ambient'))
 
-DEFAULT_GROUPS = {'timing': ['L1', 'L2', 'L7'], 'reach': ['L3', 'L4'],
+DEFAULT_GROUPS = {'timing': ['L1', 'L2', 'L7'], 'reach': ['L3', 'L4', 'L10'],
                   'lifetime-and-contract': ['L5', 'L6', 'L8', 'L9']}
 # The lens that reads history_replay.py's output, unless the config's `oldStateLens` names another.
 OLD_STATE_LENS = 'L9'
+# The lens that reads ambient.py's output, unless the config's `ambientLens` names another.
+AMBIENT_LENS = 'L10'
+# The proof copy the env sweep perturbs, beside the graders' own.
+SWEEP_COPY = 'env-sweep'
 GROUP_ROW = re.compile(r'(?m)^\|\s*([^|]*?[A-Za-z][^|]*?)\s*\|\s*(L\d+(?:\s*,\s*L\d+)*)\s*\|')
 LOCKS = ('package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lock', 'bun.lockb',
          'poetry.lock', 'uv.lock', 'Pipfile.lock', 'Cargo.lock', 'go.sum', 'composer.lock', 'Gemfile.lock')
@@ -335,14 +340,21 @@ def main() -> None:
     replayed = ([] if old_state in skipped
                 else history_replay.report(root, head if surface else fork, head, config, changed))
     holder = next((name for name, ids in groups.items() if old_state in ids), None)
+    ambient_lens = config.get('ambientLens', AMBIENT_LENS)
+    # The sweep writes stray files into its copy and puts them back, so it gets a copy of its own.
+    sweep_tests = (ambient.sweep_targets(changed, config)
+                   if config.get('envSweep') and ambient_lens not in skipped else [])
     try:
-        made = proof_dir.make(root, head, list(groups), config, Path(tempfile.gettempdir()),
-                              since=None if surface else fork)
+        made = proof_dir.make(root, head, list(groups) + ([SWEEP_COPY] if sweep_tests else []), config,
+                              Path(tempfile.gettempdir()), since=None if surface else fork)
     except subprocess.CalledProcessError as failed:
         sys.exit(f"grade_prep: making the proof copies failed at `git {' '.join(failed.cmd[1:3])}`: "
                  f"{(failed.stderr or '').strip()}")
     fields = dict(line.split(': ', 1) for line in made if ': ' in line)
     proof_root = Path(fields['root'])
+    ambient_lines = ([] if ambient_lens in skipped else ambient.report(
+        root, lines, changed, config, Path(fields[f'copy {SWEEP_COPY}']) if sweep_tests else None))
+    ambient_holder = next((name for name, ids in groups.items() if ambient_lens in ids), None)
     (proof_root / 'grade.json').write_text(json.dumps(
         {'repository': str(root), 'mode': branch_mode, 'roundMode': mode, 'base': fork, 'head': head, 'lenses': lenses,
          'groups': groups, 'skipped': skipped, **({'surface': paths} if surface else {})},
@@ -404,6 +416,8 @@ def main() -> None:
         *(['', 'Proof copies:', *[f'- {line}' for line in copy_notes]] if copy_notes else []),
         *(['', f'No grader holds {old_state}, so every grader reads what history_replay.py found:', *replayed]
           if replayed and holder is None else []),
+        *(['', f'No grader holds {ambient_lens}, so every grader reads what ambient.py found:', *ambient_lines]
+          if ambient_lines and ambient_holder is None else []),
     ]))
     for name, ids in groups.items():
         print(f'\n===== {name} =====\n')
@@ -417,6 +431,8 @@ def main() -> None:
             block += ['', 'check_then_act.py at the head:', l7]
         if replayed and name == holder:
             block += ['', f'history_replay.py at the head, for {old_state}:', *replayed]
+        if ambient_lines and name == ambient_holder:
+            block += ['', f'ambient.py at the head, for {ambient_lens}:', *ambient_lines]
         print('\n'.join(block))
     if mode != 'in-thread':
         print(f"\nmerge: python3 {HERE / 'grade_block.py'} merge {proof_root}")

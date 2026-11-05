@@ -7,6 +7,19 @@
 
 Each entry says what changed, where, and why. Under it, **Before** is the old behavior and **Seen on** is the grade that exposed it.
 
+## 0.16.0
+
+- `SKILL.md`, `templates/pr-grade-lenses.md`: added L10, ambient assumptions, to ask what a change assumes about the world outside the process: a tool's exit codes, the clock and locale, the filesystem, and the other sessions on the machine.
+  - The default groups put L10 with reach. `grade_block.py check` requires L10 of a repository without a lens file. A repository with one adds a `### L10.` heading, or names its own id in `ambientLens`.
+  - **Before:** L1, L2, and L7 asked about concurrency inside the process, and nothing asked about the environment. A blind `/code-review high` on the same commits kept finding this class and the grade did not.
+  - **Seen on:** EngOS PR #752 (`gh pr checks` exits 1 when a pull request has no checks), PR #910 (a local date against UTC records), PR #840 (a `.DS_Store` blocked a rebuild), PR #990 (a CRLF body read as no section), and issue #310 (a NUL byte hid a caller from grep) (issue #39).
+- `ambient.py`: added two lists for the grader holding L10. The exit-code list names every process call the change adds or modifies, in Python, JavaScript, TypeScript, or a shell script, with what the call site does with the exit code and a registry note when the command's codes surprise people; a repository extends the registry under `exitCodes`. The env sweep runs the tests the change touches, in a proof copy of its own, once per perturbation: a timezone east and west of UTC, a Turkish locale, `umask 077`, a `.DS_Store` and a NUL-byte file in each changed directory, and CRLF in each changed data file. A repository opts in under `envSweep` with the command that runs `{tests}`.
+  - **Before:** a grader that wanted to prove a `tar` exit 2 was misread built a shim by hand and spent most of a proof budget on it, and no run tried the author's tests under another zone or locale (issues #46 and #38).
+- `grade_prep.py`: added `ambient.py`'s output to the block of the grader holding `ambientLens` (default L10), or to the shared block when none does, and one more proof copy, `env-sweep`, when a declared sweep has a changed test to run; a skipped L10 skips both.
+- `grade_block.py`: changed `DEFAULT_LENSES` to L1 through L10.
+- `agents/grade.md`: added how to read `ambient.py`'s output: settle every call with a registry note by a shim on the copy's `PATH` or the reason the call site handles the code, and treat a failing sweep row as a suspect until the run in the copy names the defect.
+- `templates/pr-grade.json`: added `ambientLens`, `exitCodes`, and `envSweep`.
+
 ## 0.15.0
 
 - `agents/grade.md`: added keeping a proof test, so that a grader whose proof is a test writes it to a `proofs` directory beside its report and names it under the finding as `Proof test: <file>, ran at <repository path>`, to give the repair the test that already reached the trigger.

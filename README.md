@@ -172,7 +172,7 @@ All live in `skills/pr-grade/scripts/`. The skill calls them; you rarely run one
 
 | Script | What it does |
 |---|---|
-| `grade_prep.py` | Prepares a grade in one call: mode, lens groups (minus any `--skip`), callers, the L7 scan, the L9 replay, proof clones, and every grader's prompt. |
+| `grade_prep.py` | Prepares a grade in one call: mode, lens groups (minus any `--skip`), callers, the L7 scan, the L9 replay, proof clones, and every grader's prompt. `--surface <path ...>` grades the code under paths with no diff (SKILL.md section 9). |
 | `grade_mode.py` | Picks the mode alone and prints the files that decided it. |
 | `proof_dir.py` | Makes and removes the proof clones outside the repository, with dependencies linked in. Nothing is registered in the repository. |
 | `check_then_act.py` | Lists check-then-act windows (L7) in the functions a branch changed: a check, then an `await`, transaction boundary, or external call, then the write the check guards. A grader clears each one or proves the race. It never gates anything, and an empty list clears nothing. |

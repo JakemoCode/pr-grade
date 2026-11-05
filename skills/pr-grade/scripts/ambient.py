@@ -33,6 +33,7 @@ import importlib.util
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -83,7 +84,9 @@ REGISTRY = {
 
 PY_CALL = re.compile(r'\b(?:subprocess\.(?:run|call|check_call|check_output|Popen)|os\.system|os\.popen)\s*\(')
 JS_CALL = re.compile(r'(?:\b(?:child_process|childProcess|cp)\.|(?<![\w.]))(?:execFileSync|execFile|execSync|exec|spawnSync|spawn)\s*\(')
-STRING = re.compile(r'''(?:[rbfu]{0,2})(['"`])((?:\\.|(?!\1).)*)\1''', re.S)
+# One alternative per quote, each body a run of escapes or non-quote characters, so a literal the window cuts
+# before its closing quote fails in one pass instead of backtracking over every escape.
+STRING = re.compile(r'''(?:[rbfu]{0,2})(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|`((?:\\.|[^`\\])*)`)''', re.S)
 PY_HANDLES = ('check=True', 'check_returncode', 'returncode', 'CalledProcessError', 'check_call', 'check_output')
 JS_HANDLES = ('.status', '.exitCode', 'catch', 'error', 'ExecException', '.code')
 SH_WORDS = {'if', 'then', 'elif', 'else', 'while', 'until', 'do', 'exec', 'time', 'sudo', 'env', 'command', '!',
@@ -116,23 +119,36 @@ def _in_ranges(line: int, ranges) -> bool:
     return ranges is None or any(start <= line <= end for start, end in ranges)
 
 
+def _body(match: re.Match) -> str:
+    return next(group for group in match.groups() if group is not None)
+
+
+def _words(text: str) -> list[str]:
+    """Shell words, or whitespace-split words when a quote is unmatched: one apostrophe costs that call its
+    exact words, never the list."""
+    try:
+        return shlex.split(text, posix=True)
+    except ValueError:
+        return text.split()
+
+
 def command_words(call: str) -> list[str]:
     """The command a call starts, as words, from the first string literal of its first argument: the words of
     a command string, or each literal of a list up to its closing bracket. Empty when the argument is a name."""
     after = call[call.index('(') + 1:].lstrip()
     if after.startswith('['):
         end = after.find(']')
-        return [m.group(2) for m in STRING.finditer(after[1:end if end > 0 else None])][:4]
+        return [_body(m) for m in STRING.finditer(after[1:end if end > 0 else None])][:4]
     found = STRING.match(after)
     if not found:
         return []
-    words = shlex.split(found.group(2), posix=True)[:4] if found.group(2).strip() else []
+    words = _words(_body(found))[:4] if _body(found).strip() else []
     rest = after[found.end():].lstrip()
     if words and rest.startswith(',') and rest[1:].lstrip().startswith('['):
         # execFile('tsc', ['--noEmit']): the arguments come as a list after the command.
         rest = rest[1:].lstrip()
         end = rest.find(']')
-        words += [m.group(2) for m in STRING.finditer(rest[1:end if end > 0 else None])]
+        words += [_body(m) for m in STRING.finditer(rest[1:end if end > 0 else None])]
     return words[:4]
 
 
@@ -143,10 +159,7 @@ def _handles(window: str, tokens: tuple[str, ...]) -> str:
 
 def scan_file(path: str, text: str, ranges, notes: dict) -> list[dict]:
     """Every process call on a changed line of one file."""
-    lines = text.splitlines()
-    starts = [0]
-    for line in lines:
-        starts.append(starts[-1] + len(line) + 1)
+    lines = text.split('\n')
     found = []
     is_py, is_sh = path.endswith('.py'), is_shell(path, text)
     pattern = PY_CALL if is_py else None if is_sh else JS_CALL
@@ -170,10 +183,10 @@ def scan_file(path: str, text: str, ranges, notes: dict) -> list[dict]:
             if not _in_ranges(number, ranges) or line.lstrip().startswith('#'):
                 continue
             # Segments and the operators between them, so `grep x; cp a b || exit 1` tests only the cp.
-            parts = re.split(r'(\|\||&&|\||;|\$\(|`)', line)
+            parts = re.split(r'(\|\||&&|\||;|\$\(|\)|`)', line)
             for i in range(0, len(parts), 2):
                 segment, after = parts[i], parts[i + 1] if i + 1 < len(parts) else ''
-                raw = [w for w in (shlex.split(segment, posix=True) if _splittable(segment) else segment.split())]
+                raw = _words(segment)
                 words = [w for w in raw if ('=' not in w or w.startswith('-')) and w not in SH_WORDS]
                 note = note_for(words, notes)
                 if note is None:
@@ -184,14 +197,6 @@ def scan_file(path: str, text: str, ranges, notes: dict) -> list[dict]:
                               else 'set -e stops the script on any nonzero' if strict else 'nothing on the line examines the exit code',
                               'note': note})
     return found
-
-
-def _splittable(segment: str) -> bool:
-    try:
-        shlex.split(segment, posix=True)
-        return True
-    except ValueError:
-        return False
 
 
 def is_shell(path: str, text: str) -> bool:
@@ -249,9 +254,11 @@ def _test_globs(config: dict) -> list[str]:
     return globs if isinstance(globs, list) else grade_mode.DEFAULTS['tests']
 
 
-def sweep_targets(changed: list[str], config: dict) -> list[str]:
-    """The changed files the config's `tests` globs match."""
-    return [path for path in changed if grade_mode.matches(path, _test_globs(config))]
+def sweep_targets(changed: list[str], config: dict, tree: Path | None = None) -> list[str]:
+    """The changed files the config's `tests` globs match and, given `tree`, that exist there: the changed
+    list names a deleted file and the old side of a rename, which no command can run."""
+    return [path for path in changed if grade_mode.matches(path, _test_globs(config))
+            and (tree is None or (tree / path).is_file())]
 
 
 def malformed_sweep(sweep: object) -> str | None:
@@ -273,19 +280,42 @@ def _run(copy: Path, argv: list[str], env: dict, timeout: float, umask: int | No
     started = time.monotonic()
     pre = (lambda: os.umask(umask)) if umask is not None else None
     try:
-        run = subprocess.run(argv, cwd=copy, env=env, capture_output=True, text=True, errors='replace',
-                             timeout=timeout, preexec_fn=pre)
-    except subprocess.TimeoutExpired:
-        return 'timed out', f'after {timeout:g}s'
+        # Its own session, so a timeout can kill the test command and every child it started.
+        proc = subprocess.Popen(argv, cwd=copy, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                errors='replace', start_new_session=True, preexec_fn=pre)
     except OSError as failed:
         return 'could not run', failed.strerror or str(failed)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_group(proc)
+        return 'timed out', f'after {timeout:g}s; the run and its children were killed'
     seconds = time.monotonic() - started
-    if run.returncode == 0:
+    if proc.returncode == 0:
         return 'pass', f'{seconds:.1f}s'
-    tail = [line for line in (run.stderr + '\n' + run.stdout).splitlines()
+    tail = [line for line in (stderr + '\n' + stdout).splitlines()
             if line.strip() and not re.fullmatch(r'[-=]{5,}', line.strip())][-OUTPUT_LINES:]
     detail = ' | '.join(tail)
-    return f'FAIL (exit {run.returncode})', detail[:OUTPUT_CHARS] + ('...' if len(detail) > OUTPUT_CHARS else '')
+    return f'FAIL (exit {proc.returncode})', detail[:OUTPUT_CHARS] + ('...' if len(detail) > OUTPUT_CHARS else '')
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        proc.kill()
+    try:
+        proc.communicate(timeout=5)
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        pass
+
+
+def _unlink(path: Path) -> None:
+    """Removes a stray the sweep wrote; one the tests removed first is already gone."""
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def _write_strays(copy: Path, dirs: list[str], name: str, content: bytes) -> list[Path]:
@@ -306,14 +336,19 @@ def env_sweep(copy: Path, tests: list[str], changed: list[str], config: dict) ->
     why = malformed_sweep(sweep)
     if why:
         return [f'Note: {why} in .claude/pr-grade.json, so nothing was swept.']
-    argv = [arg for part in sweep['command'] for arg in (tests if part == '{tests}' else [part])]
     timeout = float(sweep.get('timeout', 300))
     base_env = {k: v for k, v in os.environ.items() if k not in ('TZ', 'LANG', 'LC_ALL')}
     base_env['LANG'] = base_env['LC_ALL'] = 'C.UTF-8'
-    dirs = sorted({os.path.dirname(p) or '.' for p in changed})
+    dirs = sorted({os.path.dirname(p) or '.' for p in changed if (copy / (os.path.dirname(p) or '.')).is_dir()})
     data = [p for p in changed if not grade_mode.matches(p, _test_globs(config)) and not _is_code_like(p)
             and (copy / p).is_file() and _is_text(copy / p)]
-    out = [f"Tests the change touches: {', '.join(tests)}; command: {' '.join(shlex.quote(a) for a in argv)}, run from the copy"]
+    gone = [t for t in tests if not (copy / t).is_file()]
+    tests = [t for t in tests if (copy / t).is_file()]
+    if not tests:
+        return ['Not run: every test file the change touches was deleted or renamed away, so there is nothing to run.']
+    argv = [arg for part in sweep['command'] for arg in (tests if part == '{tests}' else [part])]
+    out = [f"Tests the change touches: {', '.join(tests)}; command: {' '.join(shlex.quote(a) for a in argv)}, run from the copy"
+           + (f"; left out as deleted or renamed away: {', '.join(gone)}" if gone else '')]
     verdict, detail = _run(copy, argv, base_env, timeout)
     out.append(f'- baseline, no perturbation: {verdict} ({detail})')
     if verdict != 'pass':
@@ -322,18 +357,24 @@ def env_sweep(copy: Path, tests: list[str], changed: list[str], config: dict) ->
     runs = [
         ('TZ=Pacific/Kiritimati, 14 hours east of UTC', {'TZ': 'Pacific/Kiritimati'}, None, None),
         ('TZ=Pacific/Pago_Pago, 11 hours west of UTC', {'TZ': 'Pacific/Pago_Pago'}, None, None),
-        ('LANG=tr_TR.UTF-8 and LC_ALL=tr_TR.UTF-8, a locale whose case folding differs', {'LANG': 'tr_TR.UTF-8', 'LC_ALL': 'tr_TR.UTF-8'}, None, None),
+        ('LANG=tr_TR.UTF-8 and LC_ALL=tr_TR.UTF-8, a locale whose case folding differs'
+         + ('' if _locale_installed('tr_TR') else ' (not installed on this machine, so this row cannot fail)'),
+         {'LANG': 'tr_TR.UTF-8', 'LC_ALL': 'tr_TR.UTF-8'}, None, None),
         ('umask 077, so a file the tests create is private', {}, 0o077, None),
         (f"a .DS_Store in each directory the change touches ({', '.join(dirs)})", {}, None, ('.DS_Store', b'\x00\x00\x00\x01Bud1\x00')),
         (f"a file holding a NUL byte in each directory the change touches ({', '.join(dirs)})", {}, None, ('stray-nul-byte.txt', b'a\x00b\n')),
     ]
     for label, extra, umask, stray in runs:
-        made = _write_strays(copy, dirs, *stray) if stray else []
+        # A row that cannot be set up or cleaned up costs that row, never the rows already run.
+        made = []
         try:
+            made = _write_strays(copy, dirs, *stray) if stray else []
             verdict, detail = _run(copy, argv, {**base_env, **extra}, timeout, umask)
+        except Exception as failed:  # noqa: BLE001
+            verdict, detail = 'could not run', f'{type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}'
         finally:
             for path in made:
-                path.unlink()
+                _unlink(path)
         out.append(f'- {label}: {verdict} ({detail})')
     if data:
         originals = {p: (copy / p).read_bytes() for p in data}
@@ -341,6 +382,8 @@ def env_sweep(copy: Path, tests: list[str], changed: list[str], config: dict) ->
             for p, text in originals.items():
                 (copy / p).write_bytes(text.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))
             verdict, detail = _run(copy, argv, base_env, timeout)
+        except Exception as failed:  # noqa: BLE001
+            verdict, detail = 'could not run', f'{type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}'
         finally:
             for p, text in originals.items():
                 (copy / p).write_bytes(text)
@@ -348,6 +391,14 @@ def env_sweep(copy: Path, tests: list[str], changed: list[str], config: dict) ->
     else:
         out.append('- CRLF line endings: not run, the change touches no data file (a changed file that is neither code nor a test)')
     return out
+
+
+def _locale_installed(name: str) -> bool:
+    try:
+        listed = subprocess.run(['locale', '-a'], capture_output=True, text=True, errors='replace', timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return name in listed.stdout
 
 
 def _is_code_like(path: str) -> bool:
@@ -375,7 +426,7 @@ def report(root: Path, lines: dict, changed: list[str], config: dict, copy: Path
         out.append(f'The scan stopped, so no process call is listed: {type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}')
     out.append('### Env sweep')
     try:
-        tests = sweep_targets(changed, config)
+        tests = sweep_targets(changed, config, copy)
     except Exception as failed:  # noqa: BLE001
         out.append(f'The sweep stopped before it began: {type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}')
         return out

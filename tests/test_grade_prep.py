@@ -277,6 +277,20 @@ class CliTest(unittest.TestCase):
         self.assertTrue((root / 'env-sweep' / 'repo' / 'store.py').is_file())
         self.assertNotIn('env-sweep', json.loads((root / 'grade.json').read_text())['groups'])
 
+    def test_a_lens_file_without_l10_gets_no_scan_sweep_or_sweep_copy(self) -> None:
+        (self.repo / '.claude/pr-grade-lenses.md').write_text(''.join(f'### L{n}. Lens\n' for n in range(1, 10)))
+        (self.repo / 'tests').mkdir()
+        (self.repo / 'tests/test_claim.py').write_text('import unittest\n\n\nclass T(unittest.TestCase):\n'
+                                                      '    def test_ok(self):\n        self.assertTrue(True)\n')
+        (self.repo / '.claude/pr-grade.json').write_text(json.dumps(
+            {'silent': ['store.py'], 'envSweep': {'command': [sys.executable, '-m', 'unittest', '{tests}'], 'timeout': 60}}))
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'nine lenses and a sweep')
+        out = self.prep()
+        self.assertNotIn('ambient.py', out)
+        root = Path(re.search(r'^merge: .* merge (\S+)$', out, re.M).group(1))
+        self.assertFalse((root / 'env-sweep').exists())
+
     def test_without_a_sweep_the_exit_code_list_still_reaches_the_l10_holder(self) -> None:
         out = self.prep()
         self.assertIn('### Exit codes', out)

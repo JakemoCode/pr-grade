@@ -22,7 +22,7 @@ A grade of paths instead of a change (`grade_prep.py --surface`) adds a `Surface
 `check` refuses any block that carries one: it graded code no pull request changed.
 
 `check` refuses the PR when the block is missing or below 5/5; when a lens the lens file defines (or
-L1 to L9, without one) is missing from `Verified and clear`; when `Mode` is cheaper than grade_mode.py
+L1 to L10, without one) is missing from `Verified and clear`; when `Mode` is cheaper than grade_mode.py
 requires for the PR's files; when the graded commit is not in the PR's history or a file the grade
 must cover changed after it; when GitHub's lists are cut off; or when the PR moved during the check.
 

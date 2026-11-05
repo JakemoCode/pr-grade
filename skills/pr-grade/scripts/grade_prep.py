@@ -342,8 +342,9 @@ def main() -> None:
     holder = next((name for name, ids in groups.items() if old_state in ids), None)
     ambient_lens = config.get('ambientLens', AMBIENT_LENS)
     # The sweep writes stray files into its copy and puts them back, so it gets a copy of its own.
-    sweep_tests = (ambient.sweep_targets(changed, config)
-                   if config.get('envSweep') and ambient_lens not in skipped else [])
+    # A lens file without the ambient lens grades nothing with it, so nothing is scanned or swept for it.
+    ambient_graded = ambient_lens in lenses and ambient_lens not in skipped
+    sweep_tests = ambient.sweep_targets(changed, config, root) if config.get('envSweep') and ambient_graded else []
     try:
         made = proof_dir.make(root, head, list(groups) + ([SWEEP_COPY] if sweep_tests else []), config,
                               Path(tempfile.gettempdir()), since=None if surface else fork)
@@ -352,8 +353,8 @@ def main() -> None:
                  f"{(failed.stderr or '').strip()}")
     fields = dict(line.split(': ', 1) for line in made if ': ' in line)
     proof_root = Path(fields['root'])
-    ambient_lines = ([] if ambient_lens in skipped else ambient.report(
-        root, lines, changed, config, Path(fields[f'copy {SWEEP_COPY}']) if sweep_tests else None))
+    ambient_lines = (ambient.report(root, lines, changed, config, Path(fields[f'copy {SWEEP_COPY}']) if sweep_tests else None)
+                     if ambient_graded else [])
     ambient_holder = next((name for name, ids in groups.items() if ambient_lens in ids), None)
     (proof_root / 'grade.json').write_text(json.dumps(
         {'repository': str(root), 'mode': branch_mode, 'roundMode': mode, 'base': fork, 'head': head, 'lenses': lenses,

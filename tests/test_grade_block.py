@@ -202,10 +202,10 @@ class LensIdsTest(Fixture):
         text = '# lenses\n\n### L1. Abandoned work\n\ntext L9.\n\n### L10. New lens\n'
         self.assertEqual(grade_block.lens_ids(text), ['L1', 'L10'])
 
-    def test_without_a_lens_file_the_skills_nine_are_required(self) -> None:
+    def test_without_a_lens_file_the_skills_ten_are_required(self) -> None:
         self.assertEqual(grade_block.lens_ids(None), [f'L{n}' for n in range(1, 11)])
 
-    def test_a_lens_file_with_no_matching_heading_still_requires_the_nine(self) -> None:
+    def test_a_lens_file_with_no_matching_heading_still_requires_the_ten(self) -> None:
         # `### L1 Abandoned work`, with no period, must not leave nothing required.
         self.assertEqual(grade_block.lens_ids('### L1 Abandoned work\n### L2: Shared\n'), [f'L{n}' for n in range(1, 11)])
 

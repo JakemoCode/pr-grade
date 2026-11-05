@@ -92,6 +92,15 @@ class ExitCodeScanTest(unittest.TestCase):
         calls = self.scan('a.py', text)
         self.assertEqual([c['handles'] for c in calls], ['returncode', 'returncode'])
 
+    def test_a_command_captured_with_dollar_paren_keeps_its_subcommand(self) -> None:
+        [call] = self.scan('s.sh', '#!/bin/sh\nstatus=$(gh pr checks 12)\n')
+        self.assertEqual((call['command'], call['note'][0]), ('gh pr checks', 'gh pr checks'))
+
+    def test_a_form_feed_in_the_source_does_not_shift_the_handling_window(self) -> None:
+        text = "import subprocess\n\x0c\nsubprocess.run(['grep', 'x'])\nif run.returncode:\n    pass\n"
+        [call] = self.scan('a.py', text)
+        self.assertEqual((call['line'], call['handles']), (3, 'returncode'))
+
     def test_set_e_is_named_as_what_handles_a_bare_shell_line(self) -> None:
         [call] = self.scan('scan.sh', '#!/bin/sh\nset -euo pipefail\ntar -xzf x.tgz\n')
         self.assertEqual(call['handles'], 'set -e stops the script on any nonzero')
@@ -197,6 +206,14 @@ class World(unittest.TestCase):
         self.assertEqual(out[2], 'The baseline fails, so no perturbation was run: a failure under one would prove nothing.')
         self.assertEqual(len(out), 3)
 
+    def test_a_deleted_test_and_its_directory_are_left_out_and_named(self) -> None:
+        self.changed = ['tests/test_world.py', 'old/test_gone.py']
+        (self.copy / 'tests/test_world.py').write_text(self.LOOSE)
+        out = ambient.env_sweep(self.copy, ['tests/test_world.py', 'old/test_gone.py'], self.changed, self.config)
+        self.assertIn('left out as deleted or renamed away: old/test_gone.py', out[0])
+        self.assertNotIn('old', out[-3])
+        self.assertFalse((self.copy / 'old').exists())
+
     def test_a_change_with_no_data_file_says_the_crlf_run_was_skipped(self) -> None:
         self.changed = ['tests/test_world.py']
         out = self.sweep(self.LOOSE)
@@ -205,7 +222,7 @@ class World(unittest.TestCase):
     def test_a_command_that_times_out_is_reported_as_such(self) -> None:
         self.config['envSweep'] = {'command': [sys.executable, '-c', 'import time; time.sleep(5)', '{tests}'], 'timeout': 0.5}
         out = self.sweep(self.LOOSE)
-        self.assertIn('- baseline, no perturbation: timed out (after 0.5s)', out[1])
+        self.assertIn('- baseline, no perturbation: timed out (after 0.5s; the run and its children were killed)', out[1])
 
     def test_a_malformed_declaration_is_a_note(self) -> None:
         for sweep, word in (({'command': 'pytest {tests}'}, 'list of strings'), ({'command': ['pytest']}, '{tests}'),

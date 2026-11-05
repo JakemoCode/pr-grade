@@ -60,9 +60,9 @@ Hand the graders the review findings you declined, each with its reason. They tr
 | L9. Old state meets new code | What did earlier versions write that the new code will read? A changed reader must still read it, and a new kind of record must refuse the old values its rules exclude. When the branch touches a reader of a format the repository declares under `formats`, `history_replay.py` runs recorded instances through the base and head readers, and old values through each new kind of record. |
 | L10. Ambient assumptions | What does the change assume about the world outside the process: a tool's exit codes, the clock and timezone, the locale, the filesystem, the other sessions on the machine? `ambient.py` lists every process call the change adds with what the call site does with its exit code and what the registry says the command's codes mean, and, when the repository declares an `envSweep`, runs the tests the change touches under a shifted clock, locale, umask, and filesystem. |
 
-The grader makes the call on every lens. The scripts behind L4, L7, and L9 hand it a starting list, and no script output clears a lens on its own. `proof_dir.py` gives every grader a clone of the graded commit to prove findings in, whatever its lenses.
+The grader makes the call on every lens. The scripts behind L4, L7, L9, and L10 hand it a starting list, and no script output clears a lens on its own. `proof_dir.py` gives every grader a clone of the graded commit to prove findings in, whatever its lenses.
 
-The full definitions, with an example each, are in [the skill](skills/pr-grade/SKILL.md#3-the-nine-lenses).
+The full definitions, with an example each, are in [the skill](skills/pr-grade/SKILL.md#3-the-ten-lenses).
 
 ## Set up a repository
 
@@ -149,7 +149,7 @@ An env sweep tells `ambient.py` how to run the tests a branch adds or modifies. 
 "envSweep": {"command": ["python3", "-m", "unittest", "{tests}"], "timeout": 300}
 ```
 
-`{tests}` stands for the changed test files, one argument each. The command runs from the copy's root with `timeout` seconds per run (default 300). A baseline run comes first, and when it fails nothing else runs. A repository that declares no `envSweep` pays nothing, and a change that touches no test is not swept. `exitCodes`, a map of command to note, extends the registry of commands whose exit codes surprise people; the docstring of [`ambient.py`](skills/pr-grade/scripts/ambient.py) has the built-in entries.
+`{tests}` stands for the changed test files, one argument each. The command runs from the copy's root with `timeout` seconds per run (default 300). A baseline run comes first, and when it fails nothing else runs. A repository that declares no `envSweep` pays nothing, and a change that touches no test is not swept. `exitCodes`, a map of command to note, extends the registry of commands whose exit codes surprise people; the `REGISTRY` table at the top of [`ambient.py`](skills/pr-grade/scripts/ambient.py) holds the built-in entries. The eight runs are serial, so a prep with a sweep can take up to eight times `timeout`; size `timeout` to the test files a change usually touches, and run the prep in the background when they take more than a minute.
 
 ## The grade block
 

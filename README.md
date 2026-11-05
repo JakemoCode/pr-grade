@@ -19,7 +19,7 @@ To update later, run this in the shell, then `/reload-plugins` in the session:
 claude plugin marketplace update jakemocode && claude plugin update pr-grade@jakemocode
 ```
 
-The scripts need Python 3.9 or later and nothing outside the standard library. The CI check and pull-request-body history also need an authenticated `gh`. The check-then-act scanner needs Node and the repository's own `typescript` package to read TypeScript and JavaScript; it reads Python with no extra setup.
+The scripts need Python 3.10 or later and nothing outside the standard library. The CI check and pull-request-body history also need an authenticated `gh`. The check-then-act scanner needs Node and the repository's own `typescript` package to read TypeScript and JavaScript; it reads Python with no extra setup.
 
 ## What it does
 

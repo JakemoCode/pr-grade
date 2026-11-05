@@ -15,6 +15,9 @@ Each entry says what changed, where, and why. Under it, **Before** is the old be
 - `SKILL.md`, `agents/grade.md`: added a ranking rule to section 5, so that a defect in a check ranks by what the check exists to refuse, never by whether today's callers write the input it lets through.
   - **Before:** section 5 ranked by what a defect does to a run, and a grader read a check's defect as harmless when no current caller produced the input. The check is the only thing between that input and the code, and callers change.
   - **Seen on:** the same PR #905 grade.
+- `SKILL.md`, `agents/grade.md`: added a `Probe first:` list to section 1, so that the coordinator names the hunks carrying one of three shapes that keep preceding real defects, and every grader spends its proof turns there first.
+  - **Before:** a smell was graded as a note, when it could direct attention. The shapes are a status read out of prose, a second reader of a format another module already reads, and a compound condition of four or more clauses. The list orders a grader's work and moves no score.
+  - **Seen on:** EngOS PR #900, where "withdrawn status comes from prose" sat beside the P2 it caused; PR #990, where a second reader flagged as a cleanup P3 was the CRLF P2; and PR #930, where a five-clause ternary held the range defects (issue #41).
 
 ## 0.13.3
 

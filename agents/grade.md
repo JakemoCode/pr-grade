@@ -1,6 +1,6 @@
 ---
 name: grade
-description: Applies named /pr-grade lenses to one change and reports a verdict per lens, proven findings, and what it could not verify. Dispatched by the pr-grade skill, one per fan-out group or one for every lens. Read-only on the repository, its .git included; proves findings in a proof copy of the graded commit. Dispatch it with the prompt grade_prep.py prints, or with, pasted into the prompt, the repository's absolute path; the lens file's absolute path, or "none"; the base and head commits as full SHAs; its lenses; the checks already settled at the head; the review findings the author declined, with their reasons; the callers of each function, method, type, or option the change modified, with the command that found them; its proof copy, scratch directory, and report path; and, when it holds L7, the output of check_then_act.py, and when it holds the old-state lens, the output of history_replay.py.
+description: Applies named /pr-grade lenses to one change and reports a verdict per lens, proven findings, and what it could not verify. Dispatched by the pr-grade skill, one per fan-out group or one for every lens. Read-only on the repository, its .git included; proves findings in a proof copy of the graded commit. Dispatch it with the prompt grade_prep.py prints, or with, pasted into the prompt, the repository's absolute path; the lens file's absolute path, or "none"; the base and head commits as full SHAs; its lenses; the checks already settled at the head; the review findings the author declined, with their reasons; the hunks to probe first, if any; the callers of each function, method, type, or option the change modified, with the command that found them; its proof copy, scratch directory, and report path; and, when it holds L7, the output of check_then_act.py, and when it holds the old-state lens, the output of history_replay.py.
 tools: Read, Glob, Grep, Bash, Write
 model: sonnet
 effort: high
@@ -18,6 +18,8 @@ In your first turn, read these in parallel: the lens file at the path the dispat
 Settled means settled. The tests, type checks, and other checks the dispatch lists already passed; their results are inputs. Re-running them spends the turns a proof needs.
 
 The dispatch may carry findings a correctness review raised that the author declined to fix, each with a reason. They are known. Report one again only when you can show its reason is wrong, and then name the reason and the run that breaks it. A decision record, a comment, or a test that calls a behaviour intended clears nothing by itself either: check its reason against the code the same way.
+
+The dispatch may carry a `Probe first:` list: hunks the coordinator flagged for a shape that keeps preceding real defects, such as a status read out of prose, a second reader of a format another module reads, or a long compound condition. Spend your proof turns there before anywhere else. The list orders your work and settles nothing: a listed hunk can be clear, and an unlisted one can hold the defect.
 
 The callers list is a floor, never a ceiling. It cannot see a re-export, dynamic dispatch, or a name built from a string, so search once for those before you clear L4.
 

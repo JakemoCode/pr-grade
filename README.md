@@ -28,7 +28,7 @@ Run your usual code review first, fix what it proves, and commit. Then run `/pr-
 1. **Prepare.** `grade_prep.py` reads the branch and picks a mode from what it touches: grade in the current thread, in one subagent, or fan out one subagent per lens group. It lists the callers of every function the branch modified, scans for check-then-act windows, replays recorded state through any changed reader, and makes a throwaway clone of the head commit for each grader to run proofs in.
 2. **Grade.** Each `pr-grade:grade` agent applies its lenses to the diff. A finding counts only with a run behind it, usually a test that fails against the unfixed code. Anything a grader believes but cannot demonstrate goes under `Could not verify`.
 3. **Merge and score.** `grade_block.py merge` combines the graders' reports and prints the lowest score the rules allow, plus a draft `## Grade` block for the PR body.
-4. **Fix and re-grade.** Commit the fixes and grade the fix commits alone with `grade_prep.py --base <last graded commit>`. Repeat until a round finds no P1 or P2.
+4. **Fix and re-grade.** Copy each finding's proof test to its repository path and commit it alone, then commit the fixes and grade the fix commits alone with `grade_prep.py --base <last graded commit>`. Repeat until a round finds no P1 or P2.
 5. **Enforce.** `grade_block.py check <pr>` refuses a PR whose grade is missing, below 5/5, missing a lens, in a cheaper mode than its files need, or older than its code.
 
 Hand the graders the review findings you declined, each with its reason. They treat those as known and spend their turns elsewhere. Any review works: Claude Code's `/code-review`, another plugin, a second model, or a person's comments. Without one, pr-grade still runs, but the graders spend turns re-finding what the review would have caught.
@@ -176,10 +176,10 @@ All live in `skills/pr-grade/scripts/`. The skill calls them; you rarely run one
 |---|---|
 | `grade_prep.py` | Prepares a grade in one call: mode, lens groups (minus any `--skip`), callers, the L7 scan, the L9 replay, proof clones, and every grader's prompt. `--surface <path ...>` grades the code under paths with no diff (SKILL.md section 9). |
 | `grade_mode.py` | Picks the mode alone and prints the files that decided it. |
-| `proof_dir.py` | Makes and removes the proof clones outside the repository, with dependencies linked in. Nothing is registered in the repository. |
+| `proof_dir.py` | Makes and removes the proof clones outside the repository, with dependencies linked in, and a `proofs` directory per grader for the tests that proved its findings. `remove` refuses while a kept test is uncopied. Nothing is registered in the repository. |
 | `check_then_act.py` | Lists check-then-act windows (L7) in the functions a branch changed: a check, then an `await`, transaction boundary, or external call, then the write the check guards. A grader clears each one or proves the race. It never gates anything, and an empty list clears nothing. |
 | `history_replay.py` | Runs the replay and transplant for each declared format whose reader changed (L9). |
-| `grade_block.py merge <root>` | Merges the graders' reports, flags two findings at one line and any finding on a line the diff did not change, and drafts the block with the lowest allowed score. |
+| `grade_block.py merge <root>` | Merges the graders' reports, flags two findings at one line and any finding on a line the diff did not change, prints the copy command for each proof test a grader kept, and drafts the block with the lowest allowed score. |
 | `grade_block.py check <pr>` | The enforcement check. |
 
 `check_then_act.py --whole` scans every function in the changed files, and `--json` prints the list as data. `PR_GRADE_TYPESCRIPT` points the scanner at a `typescript` package when the repository has none.

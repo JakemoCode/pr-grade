@@ -214,6 +214,7 @@ class CliTest(unittest.TestCase):
         meta = json.loads((root / 'grade.json').read_text())
         self.assertEqual((meta['mode'], meta['groups']['rest']), ('subagent', ['L3', 'L4', 'L5', 'L6', 'L8', 'L9']))
         self.assertIn(f"- Write your report to: {root / 'timing' / 'grade.md'}", out)
+        self.assertIn(f"- Your proofs directory, for each proof test you keep: {root / 'timing' / 'proofs'}", out)
 
     def test_a_skipped_lens_gets_no_grader_and_no_proof_copy(self) -> None:
         out = self.prep('--groups', 'timing=L1,L7', '--groups', 'rest=L4,L5,L6,L8,L9', '--skip', 'L2,L3')
@@ -255,7 +256,7 @@ class CliTest(unittest.TestCase):
         # The words tests/test_grade_contract.py holds the agent, its Inputs, and the skill to.
         out = self.prep().lower()
         for word in ('repository', 'lens file', 'base', 'head', 'settled', 'declined', 'callers', 'check_then_act.py',
-                     'proof copy', 'report'):
+                     'proof copy', 'proofs directory', 'report'):
             with self.subTest(word=word):
                 self.assertIn(word, out)
 

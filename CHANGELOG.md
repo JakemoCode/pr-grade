@@ -7,6 +7,17 @@
 
 Each entry says what changed, where, and why. Under it, **Before** is the old behavior and **Seen on** is the grade that exposed it.
 
+## 0.15.0
+
+- `agents/grade.md`: added keeping a proof test, so that a grader whose proof is a test writes it to a `proofs` directory beside its report and names it under the finding as `Proof test: <file>, ran at <repository path>`, to give the repair the test that already reached the trigger.
+  - **Before:** the grader proved a finding with a test in its proof copy, reported the command and its output, and `proof_dir.py remove` deleted the copy. The author then wrote a second test for the same defect, and that one could miss the trigger the first one hit.
+  - **Seen on:** EngOS's dispute path, which sends a fresh grader to confirm that an author's scenario test reaches the trigger a grader's own test already reached (issue #42).
+- `proof_dir.py`: added a `proofs` directory per grader to `make`, printed as `proofs <name>:`, and made `remove` refuse while a kept test is still there, naming each file, unless `--drop-proofs` is passed.
+  - **Before:** `remove` deleted the root whatever it held, so a kept test lasted exactly as long as the coordinator remembered to copy it first.
+- `grade_block.py merge`: changed the finding list to read a `Proof test:` line as part of the finding above it, print the kept file and its repository path on the finding's line, and print one `cp` line per kept test for the coordinator to run before the `remove:` line.
+- `grade_prep.py`: added the grader's proofs directory to its prompt block.
+- `SKILL.md`: changed section 7 to start each repair from the kept test, copied to its path, seen red, and committed alone before the fix; a P3 the author fixes ships with its test the same way, and one left listed ships nothing. Section 6's finding shape carries the committed test's path.
+
 ## 0.14.0
 
 - `agents/grade.md`, `SKILL.md`: changed how a lens closes, so that a clearance names the strongest input the grader tried and where that input failed to break the code, to keep a lens from closing on a claim nothing checked.

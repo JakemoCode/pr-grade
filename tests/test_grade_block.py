@@ -354,6 +354,35 @@ class MergeTest(unittest.TestCase):
         self.assertEqual(merged.count('same line as another finding'), 2)
         self.assertEqual(self.block()['Score'], '3/5')
 
+    def test_a_findings_proof_test_is_named_and_a_copy_line_is_printed(self) -> None:
+        meta = json.loads((self.root / 'grade.json').read_text())
+        (self.root / 'grade.json').write_text(json.dumps({**meta, 'repository': '/work/repo'}))
+        self.write('timing', report('4/5', 'L2', findings=(
+            'P1 L1 src/a.py:9 in f - late write lands\nwhat breaks\ncd copy && pytest tests/test_late.py: 1 failed\n'
+            'Proof test: proofs/late_write.py, ran at tests/test_late.py\n')))
+        self.write('reach', report('5/5', 'L3'))
+        merged = self.merged()
+        kept = (self.root / 'timing' / 'proofs' / 'late_write.py').resolve()
+        self.assertIn(f'P1 src/a.py:9 in f - late write lands  [timing L1]  (proof test: {kept}, ran at tests/test_late.py)',
+                      merged)
+        self.assertIn(f'cp {kept} /work/repo/tests/test_late.py', merged)
+        self.assertIn('commit it alone before the remove: line', merged)
+
+    def test_a_proof_test_without_a_repository_path_gets_no_copy_line(self) -> None:
+        self.write('timing', report('4/5', 'L2', findings='P1 L1 src/a.py:9 - late write lands\nProof test: proofs/x.py\n'))
+        self.write('reach', report('5/5', 'L3'))
+        merged = self.merged()
+        self.assertIn('(proof test: ', merged)
+        self.assertIn('no repository path given', merged)
+        self.assertNotIn('\n  cp ', merged)
+
+    def test_a_proof_test_line_above_any_finding_is_ignored(self) -> None:
+        self.write('timing', 'Proof test: proofs/x.py, ran at tests/x.py\n' + report('5/5', 'L1, L2'))
+        self.write('reach', report('5/5', 'L3'))
+        merged = self.merged()
+        self.assertIn('findings (0):', merged)
+        self.assertNotIn('proof test', merged)
+
     def test_a_finding_shaped_line_under_could_not_verify_stays_a_claim(self) -> None:
         self.write('timing', report('5/5', 'L1', unverified='\nP2 L2 src/a.py:10 - maybe a race; runs 1-3 passed'))
         self.write('reach', report('5/5', 'L3'))

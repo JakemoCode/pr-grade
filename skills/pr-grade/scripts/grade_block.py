@@ -90,6 +90,8 @@ REPORT_LINE = re.compile(r'^(Score|Blocking|Verified and clear|Could not verify|
 # so a symbol written with words after it still parses, and a finding without one still reads. A column
 # after the line, as in `<file>:78:5`, is dropped.
 FINDING = re.compile(r'^(P[123])[ \t]+((?:L\d+[ \t,]*)*)(\S+?):(\d+)(?::\d+)?(?:-(\d+))?(?:[ \t]+in[ \t]+(.+?))?[ \t]+-[ \t]+(.+)$')
+# The line under a finding naming the test the grader kept, and the repository path it ran at.
+PROOF_TEST = re.compile(r'^Proof test:[ \t]*(\S+?)(?:,?[ \t]+ran at[ \t]+(\S+?))?\.?$')
 BLOCKING = re.compile(r'\bP[12]\b')
 NEW_ITEM = re.compile(r'([-*+]|\d+[.)])[ \t]|(L\d+|P[123])\b')
 # `L2's pool releases` continues a claim, unless its line names a rank or the claim above is a P3.
@@ -253,10 +255,11 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
     a claim wrapped onto a second line is still one claim. A heading that repeats adds to its field. A line that opens with a bullet, a lens id, or
     a rank starts a new item at any depth, except a possessive under `Could not verify` (`L2's pool`) on a
     line naming no rank, below a claim that blocks. Under `Could not verify` or `Outside my lenses` a line shaped like a finding
-    is still an item of that field: an unproven P2 is a claim. A finding's file written from one of `roots`,
-    the repository or a proof copy, reads as the path inside it."""
+    is still an item of that field: an unproven P2 is a claim. A `Proof test:` line below a finding, before
+    the next field, names the test the grader kept and belongs to that finding. A finding's file written
+    from one of `roots`, the repository or a proof copy, reads as the path inside it."""
     fields: dict[str, list[str]] = {}
-    findings, current, indent = [], None, None
+    findings, current, indent, last_finding = [], None, None, None
     for raw in text.splitlines():
         line = raw.strip()
         if line.startswith('```'):
@@ -273,9 +276,12 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
             findings.append({'rank': finding[1], 'lenses': LENS_ID.findall(finding[2]), 'file': file,
                              'start': start, 'end': end, 'where': f'{file}:{start}' + (f'-{end}' if end != start else ''),
                              'symbol': finding[6], 'title': finding[7].strip()})
-            current = None
+            current, last_finding = None, findings[-1]
+        elif current is None and last_finding is not None and PROOF_TEST.match(line):
+            kept = PROOF_TEST.match(line)
+            last_finding['proof_test'] = {'file': kept[1], 'at': kept[2]}
         elif field:
-            current = field[1]
+            current, last_finding = field[1], None
             inline = field[2].strip()
             fields.setdefault(current, []).extend([inline] if inline else [])
             indent = depth if inline else None
@@ -413,6 +419,10 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
         fields = report['fields']
         scores.append(f"{group} {' '.join(fields.get('Score', ['?']))}")
         for found in report['findings']:
+            if found.get('proof_test'):
+                # The grader names the kept test from its own directory; the coordinator copies it from here.
+                file = Path(found['proof_test']['file'])
+                found['proof_test']['path'] = str(file if file.is_absolute() else (proof_root / group / file).resolve())
             findings.append({**found, 'by': f"{group} {','.join(found['lenses']) or 'no lens named'}"})
             if found['rank'] != 'P3':
                 for lens in found['lenses'] or held:
@@ -457,12 +467,21 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
                      for g in findings)
         out.append(f"  {f['rank']} {f['where']}" + (f" in {f['symbol']}" if f['symbol'] else '')
                    + f" - {f['title']}  [{f['by']}]"
+                   + (f"  (proof test: {f['proof_test']['path']}, "
+                      + (f"ran at {f['proof_test']['at']})" if f['proof_test']['at'] else 'no repository path given)')
+                      if f.get('proof_test') else '')
                    + ('  (same line as another finding: one defect or two?)' if shared else '')
                    + (f'  (anchor: {anchor})' if anchor else ''))
     if not findings:
         out.append('  none')
     if unchecked:
         out.append(f'  anchors: not checked, {unchecked}')
+    kept = [f for f in findings if f.get('proof_test') and f['proof_test']['at']]
+    if kept:
+        repo = meta.get('repository') or '<repository>'
+        out += ['', 'proof tests: copy each to its path, see it red, and commit it alone before the remove: line, '
+                'which refuses while one is still here:']
+        out += [f"  cp {f['proof_test']['path']} {repo}/{f['proof_test']['at']}" for f in kept]
     out += ['', 'could not verify:']
     out += [f"  {group}: {claim}{'' if blocking else '  (P3, does not block)'}"
             for group, claim, blocking in open_claims] or ['  none']

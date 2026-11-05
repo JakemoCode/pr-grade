@@ -13,6 +13,12 @@ Each entry says what changed, where, and why. Under it, **Before** is the old be
   - **Before:** the template pinned v7.0.0. Dependabot reads only `.github/workflows/`, so `tests/test_workflow_pins.py` failed the bump until the template followed.
   - **Seen on** pull request #57, the Dependabot actions group bump.
 
+## 0.13.2
+
+- `grade_prep.py`: fixed the docstring to say a changed type, option, or constant gets no line in the caller list, so that a reader knows to pass its callers with `--callers`.
+  - **Before:** it said such a change "is named as not derived, never left out silently." The list names only other languages, files an adapter could not read, and entry points. A changed constant printed `- none: the branch modified no function that existed before it`.
+  - **Seen on** the README lens table in pull request #62, which repeated the claim until a probe in a proof copy refuted it.
+
 ## 0.13.1
 
 - `grade_prep.py`: changed the caller search to drop a hit in a file `notCode` names, with the matcher the mode uses, so that prose using a function's name is not listed as a caller. A function named `clear`, `apply`, `close` or `confirm` is also a word. A file `countAsCode` names stays in.

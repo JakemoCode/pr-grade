@@ -26,8 +26,9 @@ are counted. L7 scans the whole surface. `--base` and `--branch-base` are refuse
 no before.
 
 Callers are derived for functions in TypeScript, JavaScript, and Python that existed before the branch.
-A changed type, option, or constant, and code in any other language, is named as not derived, never
-left out silently. A hit in a file `notCode` names is dropped, unless `countAsCode` names it too: a
+A changed file in any other language or one an adapter could not read, and a changed entry point or
+dunder, is named as not derived. A changed type, option, or constant gets no line. The list says it covers functions only, and
+`--callers` adds the callers found by hand. A hit in a file `notCode` names is dropped, unless `countAsCode` names it too: a
 function called `clear` is also a word, and prose that uses it is not a caller.
 """
 from __future__ import annotations

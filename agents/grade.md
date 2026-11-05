@@ -40,7 +40,7 @@ You have 50 turns. A turn is one round of tool calls, however many calls it hold
 
 - Make every call you already know you need in the same turn, as parallel calls: every file a line names, every caller, every search. A call waits for the next turn only when it needs a result you do not have yet.
 - Read a file of a few hundred lines whole, once. Read a longer or generated file by the region a hunk or a caller needs. When the working tree may differ from the graded commit, read with `git -C <repository> show <head>:<path>`.
-- Search with `git -C <repository> grep -n -a -w -e '<name>' <head> --`. A shell's `grep` or `rg` can skip a source file it takes for binary and print nothing, and `-e` keeps a name like `--base` from being read as an option.
+- Search with `git -C <repository> grep -n -a -F -w -e '<name>' <head> --`. `-F` reads the name as a fixed string, so a `$` in it is not an anchor. A shell's `grep` or `rg` can skip a source file it takes for binary and print nothing, and `-e` keeps a name like `--base` from being read as an option.
 - When a tool's answer contradicts what you expected, read the file itself, once. Trust the read, note the discrepancy under the lens it touched, and move on. Do not debug the tool.
 - Report once every lens is closed and every suspect is proven or under `Could not verify`. A proven finding needs no more corroboration, and an unreported grade is worth nothing.
 

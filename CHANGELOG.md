@@ -7,6 +7,15 @@
 
 Each entry says what changed, where, and why. Under it, **Before** is the old behavior and **Seen on** is the grade that exposed it.
 
+## 0.13.1
+
+- `grade_prep.py`: changed the caller search to drop a hit in a file `notCode` names, with the matcher the mode uses, so that prose using a function's name is not listed as a caller. A function named `clear`, `apply`, `close` or `confirm` is also a word. A file `countAsCode` names stays in.
+  - **Before:** the search covered every file but vendored directories, so on a surface grade of baby-day-planner's hooks seven of twenty functions showed thirty documentation hits and no code caller, with the real callers hidden behind "and 105 more". A branch grade had the same search, and only rarely touched a function with a common-word name.
+  - **Seen on** the first `--surface` run against baby-day-planner at 54bf3d1, the day 0.13.0 shipped.
+- `grade_prep.py`: fixed the caller search to match the name as a fixed string with `-F`, so a JavaScript name with a `$` in it finds its callers.
+  - **Before:** the name ran as a regex, so `items$` matched every line that ends in `items` and missed `items$()`.
+  - **Seen on** the code review of 0.13.1.
+
 ## 0.13.0
 
 - `grade_prep.py`: added `--surface <path ...>` to grade the code under some paths as committed at HEAD, with the empty tree as the base, to reach code that no branch is changing.

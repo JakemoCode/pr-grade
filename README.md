@@ -206,3 +206,7 @@ PR_GRADE_TYPESCRIPT=<path>/node_modules/typescript python3 -m unittest discover 
 ```
 
 Without `PR_GRADE_TYPESCRIPT` the TypeScript tests are skipped. CI installs TypeScript and sets `PR_GRADE_REQUIRE_TS=1`, so a missing compiler fails the run.
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) lists what a pull request carries: a branch cut from fresh `origin/main`, the unit suite green on Python 3.9 and 3.12, a version bump and changelog entry for anything that ships, and a `## Grade` block at 5/5 from `/pr-grade`.

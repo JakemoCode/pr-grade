@@ -1,8 +1,9 @@
 # pr-grade grading itself: templates/pr-grade-check.yml, with PR_GRADE_REF left at main. Here main is
 # the base branch, so a pull request is judged by the checker as it stood before the change, and a
-# change to grade_block.py is first enforced on the pull request after it merges. The check is not
-# required by the ruleset yet. If a merged change breaks it, the pull request fixing it would be
-# judged by the broken version, so it stays advisory until it has run clean on a few pull requests.
+# change to grade_block.py is first enforced on the pull request after it merges. The ruleset has
+# required this check since 2026-11-05, after it ran clean on pull requests #62, #65, and #66. If a
+# merged change breaks it, the pull request fixing it is judged by the broken version: drop the check
+# from the ruleset for that one merge and put it back.
 name: PR grade
 
 on:

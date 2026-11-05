@@ -84,7 +84,7 @@ Every key in `.claude/pr-grade.json` is optional. A key you set replaces its def
 | `silentCommand` | none | A command that prints more silent paths, one per line, for a repository that already keeps that list. |
 | `ordinary` | empty | Code a test would catch a defect in. `silent` wins over it. |
 | `tests` | common test paths | Files that never count toward size and are never unclassified. |
-| `notCode` | docs, Markdown, lockfiles, `LICENSE` | Files that never count toward size. |
+| `notCode` | docs, Markdown, lockfiles, `LICENSE` | Files that never count toward size, and whose hits are dropped from the caller list, since prose that uses a function's name is not a caller. A script listed here loses its callers; list it under `countAsCode` instead. |
 | `countAsCode` | empty | Paths that count toward size even under `tests` or `notCode`, such as a data file in `docs/` that the code reads. |
 | `checkThenAct` | built-in name lists | Overrides for the L7 scanner: `writes`, `secondReads`, `transactions`, `locks`, `ignore`. |
 | `formats` | empty | Records the code reads, for the L9 replay. |

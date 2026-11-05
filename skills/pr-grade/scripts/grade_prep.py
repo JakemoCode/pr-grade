@@ -27,7 +27,8 @@ no before.
 
 Callers are derived for functions in TypeScript, JavaScript, and Python that existed before the branch.
 A changed type, option, or constant, and code in any other language, is named as not derived, never
-left out silently.
+left out silently. A hit in a file `notCode` names is dropped, unless `countAsCode` names it too: a
+function called `clear` is also a word, and prose that uses it is not a caller.
 """
 from __future__ import annotations
 
@@ -177,20 +178,29 @@ def modified_functions(root: Path, fork: str, lines: dict, config: dict,
                                  'calls implicitly')
                 continue
             # A function new on the branch has no caller the branch did not write.
-            if surface or git(root, 'grep', '-q', '-w', '-e', name, fork, '--', file, check=False).returncode == 0:
+            if surface or git(root, 'grep', '-q', '-F', '-w', '-e', name, fork, '--', file, check=False).returncode == 0:
                 found.setdefault(name, []).append(f'{file}:{first}')
     return found, notes
 
 
-def callers(root: Path, head: str, names: dict[str, list[str]], inside: Callable[[str], bool] | None = None) -> list[str]:
-    """`inside` marks a path a surface grader already reads, or a test: its hits are counted, not listed."""
+def callers(root: Path, head: str, names: dict[str, list[str]], config: dict,
+            inside: Callable[[str], bool] | None = None) -> list[str]:
+    """`inside` marks a path a surface grader already reads, or a test: its hits are counted, not listed.
+    A hit in a file the config's `notCode` names, and `countAsCode` does not, is dropped: a function named
+    `clear` or `apply` is also a word, and prose that uses it is not a caller. The mode's own matcher
+    decides, so the search and the size count agree on what is code."""
     out = []
+
+    def code_or_test(path: str) -> bool:
+        return check_then_act.is_code(path, config) or bool(grade_mode.matches(path, config['tests']))
+
     for name, defined in sorted(names.items()):
-        run = git(root, '-c', 'core.quotePath=false', 'grep', '-n', '-a', '-w', '-e', name, head, '--', '.', *VENDORED,
-                  check=False)
+        # -F: a name is a fixed string. As a regex, `items$` matches a line that ends in `items`.
+        run = git(root, '-c', 'core.quotePath=false', 'grep', '-n', '-a', '-F', '-w', '-e', name, head, '--', '.',
+                  *VENDORED, check=False)
         # `<sha>:<path>:<line>:<text>`, and only the location is kept.
         hits = [':'.join(line.split(':', 3)[1:3]) for line in run.stdout.splitlines()]
-        hits = [hit for hit in hits if hit not in defined]
+        hits = [hit for hit in hits if hit not in defined and code_or_test(hit.rsplit(':', 1)[0])]
         near = [hit for hit in hits if inside and inside(hit.rsplit(':', 1)[0])]
         hits = [hit for hit in hits if hit not in near]
         shown = ', '.join(hits[:CALLERS_SHOWN]) or ('none found outside the surface' if inside else 'none found')
@@ -351,9 +361,9 @@ def main() -> None:
     if surface:
         def inside(path: str) -> bool:
             return path in under or bool(grade_mode.matches(path, config['tests']))
-        caller_lines = callers(root, head, modified, inside) or ['- none: the surface defines no function a caller can name']
+        caller_lines = callers(root, head, modified, config, inside) or ['- none: the surface defines no function a caller can name']
     else:
-        caller_lines = callers(root, head, modified) or ['- none: the branch modified no function that existed before it']
+        caller_lines = callers(root, head, modified, config) or ['- none: the branch modified no function that existed before it']
     caller_lines += [f'- not derived for {note}; search by hand' for note in notes]
     caller_lines += [f'- {line.strip()}' for line in args.callers.splitlines() if line.strip()]
 
@@ -386,8 +396,9 @@ def main() -> None:
         ('Callers of the functions the surface defines, outside the surface. Hits inside it, and in tests, are counted '
          'rather than listed: you read the surface already. ' if surface else 'Callers of what the branch modified. ')
         + 'The list is a floor, never a ceiling: it was found with '
-        f"`git -C {root} grep -n -a -w -e '<name>' {head} -- .` outside vendored directories, covers functions only, "
-        'and cannot see a re-export, dynamic dispatch, or a name built from a string.',
+        f"`git -C {root} grep -n -a -F -w -e '<name>' {head} -- .` outside vendored directories, with hits in the "
+        'paths `notCode` names dropped (documentation is not a caller), covers functions only, and cannot see a '
+        're-export, dynamic dispatch, or a name built from a string.',
         *caller_lines,
         *(['', 'Proof copies:', *[f'- {line}' for line in copy_notes]] if copy_notes else []),
         *(['', f'No grader holds {old_state}, so every grader reads what history_replay.py found:', *replayed]

@@ -129,6 +129,7 @@ class CliTest(unittest.TestCase):
         (self.repo / '.claude/pr-grade.json').write_text('{"silent": ["store.py"]}\n')
         (self.repo / 'store.py').write_text('def claim(x):\n    return x\n\n\ndef other():\n    return 1\n')
         (self.repo / 'app.py').write_text('from store import claim\n\nprint(claim(1))\n')
+        (self.repo / 'NOTES.md').write_text('Always claim before you release.\n')
         git(self.repo, 'add', '-A')
         git(self.repo, 'commit', '-q', '-m', 'base')
         git(self.repo, 'checkout', '-q', '-b', 'topic')
@@ -161,6 +162,31 @@ class CliTest(unittest.TestCase):
         # `fresh` is new on the branch and `other` is untouched: neither has a caller worth walking.
         self.assertNotIn('`fresh`', out)
         self.assertNotIn('`other`', out)
+
+    def test_prose_that_uses_a_function_name_is_not_a_caller(self) -> None:
+        # NOTES.md writes "claim" as a word; a hit under `notCode` is dropped, as the change command leaves it out.
+        self.assertNotIn('NOTES.md', self.prep())
+
+    def test_a_file_countascode_names_is_searched_though_notcode_covers_it(self) -> None:
+        (self.repo / 'docs/tools').mkdir(parents=True)
+        (self.repo / 'docs/tools/run.py').write_text('from store import claim\n\nclaim(3)\n')
+        (self.repo / 'docs/tools/run.md').write_text('claim\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'docs tool')
+        config = {**grade_prep.grade_mode.DEFAULTS, 'countAsCode': ['docs/tools/*.py']}
+        head = git(self.repo, 'rev-parse', 'HEAD').strip()
+        [line] = grade_prep.callers(self.repo, head, {'claim': ['store.py:1']}, config)
+        self.assertIn('docs/tools/run.py:3', line)
+        self.assertNotIn('run.md', line)
+
+    def test_a_name_with_a_dollar_sign_is_matched_as_a_fixed_string(self) -> None:
+        (self.repo / 'app.js').write_text('const items$ = load();\nitems$();\n')
+        (self.repo / 'lib.js').write_text('const items = [];\nreturn items\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'js')
+        head = git(self.repo, 'rev-parse', 'HEAD').strip()
+        [line] = grade_prep.callers(self.repo, head, {'items$': ['app.js:1']}, grade_prep.grade_mode.DEFAULTS)
+        self.assertEqual(line, '- `items$`, defined app.js:1: app.js:2')
 
     def test_code_it_cannot_parse_is_named_not_dropped(self) -> None:
         self.assertIn('- not derived for deploy.sh: no adapter reads this language; search by hand', self.prep())
@@ -354,8 +380,10 @@ class SurfaceTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name).resolve()
         self.repo, self.proofs = base / 'repo', base / 'proofs'
-        for folder in (self.repo / '.claude', self.repo / 'src', self.repo / 'tests', self.repo / 'lib', self.proofs):
+        for folder in (self.repo / '.claude', self.repo / 'src', self.repo / 'tests', self.repo / 'lib', self.repo / 'docs',
+                       self.proofs):
             folder.mkdir(parents=True)
+        (self.repo / 'docs/plan.md').write_text('Callers claim a row, then release it; peek never writes.\n')
         git(self.repo, 'init', '-q', '-b', 'main')
         (self.repo / '.claude/pr-grade.json').write_text('{"silent": ["src/store.py"], "ordinary": ["src/*", "lib/*"]}\n')
         (self.repo / 'src/store.py').write_text(
@@ -423,6 +451,11 @@ class SurfaceTest(unittest.TestCase):
     def test_a_function_with_no_outside_caller_says_so(self) -> None:
         line = next(l for l in self.surface('src').splitlines() if l.startswith('- `peek`'))
         self.assertEqual(line, '- `peek`, defined src/store.py:9: none found outside the surface')
+
+    def test_documentation_under_notcode_is_not_searched_for_callers(self) -> None:
+        out = self.surface('src')
+        self.assertNotIn('docs/plan.md', out)
+        self.assertIn('- `release`, defined src/store.py:5: none found outside the surface', out)
 
     def test_a_base_is_refused(self) -> None:
         for flag in ('--base', '--branch-base'):

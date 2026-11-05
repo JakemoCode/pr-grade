@@ -7,6 +7,12 @@
 
 Each entry says what changed, where, and why. Under it, **Before** is the old behavior and **Seen on** is the grade that exposed it.
 
+## 0.13.3
+
+- `templates/pr-grade-check.yml`: changed the `actions/setup-python` pin from v7.0.0 to v7.1.0 to match this repository's own workflows, which Dependabot bumped.
+  - **Before:** the template pinned v7.0.0. Dependabot reads only `.github/workflows/`, so `tests/test_workflow_pins.py` failed the bump until the template followed.
+  - **Seen on** pull request #57, the Dependabot actions group bump.
+
 ## 0.13.2
 
 - `grade_prep.py`: fixed the docstring to say a changed type, option, or constant gets no line in the caller list, so that a reader knows to pass its callers with `--callers`.

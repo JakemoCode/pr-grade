@@ -23,9 +23,9 @@
   "notCode": ["*.md", "docs/*", "LICENSE", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "*.lock", "go.sum"],
   "countAsCode": ["docs/manifest.yaml"],
   "checkThenAct": {},
-  "oldStateLens": "L9",
+  "oldStateLens": "L14",
   "formats": [],
-  "ambientLens": "L10",
+  "ambientLens": "L16",
   "exitCodes": {},
   "envSweep": null,
   "proofDir": [

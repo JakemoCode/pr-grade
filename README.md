@@ -4,7 +4,7 @@ A Claude Code plugin that grades a change the way an external reviewer will, bef
 
 A correctness review asks whether the code does the right thing. The defects that get past one are usually somewhere else: in the operation a timeout stopped waiting for, which still holds its connection; in the second caller nobody had in mind; in the records an older version wrote that the new reader now rejects. One pull request went through two design proposals, an adversarial breaker, two rounds of high-effort review, and six acceptance verifiers, and a bot reviewer still found a P1 in about a minute. Every pass had looked at the connection pool. None asked what happened to the read the timeout abandoned.
 
-pr-grade asks those questions on purpose. It applies ten lenses aimed at that class of defect, requires every finding to be proven by running something, and writes a score into the PR body that a CI check can enforce.
+pr-grade asks those questions on purpose. It applies fourteen lenses aimed at that class of defect, requires every finding to be proven by running something, and writes a score into the PR body that a CI check can enforce.
 
 ## Install
 
@@ -45,7 +45,7 @@ Hand the graders the review findings you declined, each with its reason. They tr
 
 **The grade is bound to a commit.** The block records the SHA it graded, and the check compares it with the PR head through GitHub. A commit pushed after the grade fails the check until it is graded. The check reads its config from the base branch, so a PR cannot loosen the rules it is checked against.
 
-## The ten lenses
+## The fourteen lenses
 
 | Lens | What it asks |
 |---|---|
@@ -57,20 +57,24 @@ Hand the graders the review findings you declined, each with its reason. They tr
 | L6. Contract drift | The behaviour moved. Did the docs, types, tests, error messages, tool descriptions, and registries that describe it move too? |
 | L7. Check then act | When does a guard's state change, relative to the work it guards? An `await` or a second read between the check and the write lets every caller in that window through. `check_then_act.py` lists candidate windows in TypeScript, JavaScript, and Python for the grader to clear or prove. |
 | L8. Failure direction | For every new fallback, default, and failure path: which way does it fail, and why is that the cheap direction? |
-| L9. Old state meets new code | What did earlier versions write that the new code will read? A changed reader must still read it, and a new kind of record must refuse the old values its rules exclude. When the branch touches a reader of a format the repository declares under `formats`, `history_replay.py` runs recorded instances through the base and head readers, and old values through each new kind of record. |
-| L10. Ambient assumptions | What does the change assume about the world outside the process: a tool's exit codes, the clock and timezone, the locale, the filesystem, the other sessions on the machine? `ambient.py` lists every process call the change adds with what the call site does with its exit code and what the registry says the command's codes mean, and, when the repository declares an `envSweep`, runs the tests the change touches under a shifted clock, locale, umask, and filesystem. |
+| L9. Correctness | For each changed line, what input, state, timing, or platform makes it wrong? Run the nearest input on each side of every check the diff adds or changes, test what a check names against what it tests, and run an unknown key through a validator and the writer behind it. |
+| L10. Removed behavior | For each deleted or replaced line, what invariant did it enforce, and where does the new code re-establish it? A file moved out of a path-scoped rule, or a check moved to a tool whose matcher sees less, counts too. |
+| L11. Cleanup | Reuse, simplification, efficiency, and altitude, each with the helper to call or the cheaper alternative and the concrete cost. Always a P3; never moves the score. |
+| L14. Old state meets new code | What did earlier versions write that the new code will read? A changed reader must still read it, and a new kind of record must refuse the old values its rules exclude. When the branch touches a reader of a format the repository declares under `formats`, `history_replay.py` runs recorded instances through the base and head readers, and old values through each new kind of record. |
+| L15. Promised coverage | Which inputs that the change says it covers does no line handle? List what its docstring, issue, and PR body name, trace each to the line that reads it, and run the repository's own instances through the head. |
+| L16. Ambient assumptions | What does the change assume about the world outside the process: a tool's exit codes, the clock and timezone, the locale, the filesystem, the other sessions on the machine? `ambient.py` lists every process call the change adds with what the call site does with its exit code and what the registry says the command's codes mean, and, when the repository declares an `envSweep`, runs the tests the change touches under a shifted clock, locale, umask, and filesystem. |
 
-The grader makes the call on every lens. The scripts behind L4, L7, L9, and L10 hand it a starting list, and no script output clears a lens on its own. `proof_dir.py` gives every grader a clone of the graded commit to prove findings in, whatever its lenses.
+The grader makes the call on every lens. The scripts behind L4, L7, L14, and L16 hand it a starting list, and no script output clears a lens on its own. `proof_dir.py` gives every grader a clone of the graded commit to prove findings in, whatever its lenses.
 
-The full definitions, with an example each, are in [the skill](skills/pr-grade/SKILL.md#3-the-ten-lenses).
+The full definitions, with an example each, are in [the skill](skills/pr-grade/SKILL.md#3-the-fourteen-lenses).
 
 ## Set up a repository
 
 Every step is optional. With no setup, the generic lenses and default paths apply, and every change to code grades in at least one subagent.
 
 1. **Classify your code.** Copy [`templates/pr-grade.json`](skills/pr-grade/templates/pr-grade.json) to `.claude/pr-grade.json`. Under `silent`, list paths where a defect would pass every test. Under `ordinary`, list code a test would catch a defect in. Code that neither list names grades as silent.
-2. **Restate the lenses.** Copy [`templates/pr-grade-lenses.md`](skills/pr-grade/templates/pr-grade-lenses.md) to `.claude/pr-grade-lenses.md` and rewrite each lens for your code: its real bounded resources, the callers people forget, how a finding is proven, and the fan-out groups. Where it differs from the skill, it wins. A lens heading you add becomes one the check requires, and a lens without a heading is neither graded nor required. So a lens file copied before 0.12.0 skips L9 until you add a `### L9.` heading, and one copied before 0.16.0 skips L10 until you add a `### L10.` heading.
-3. **Declare your formats**, if the code reads records an earlier version wrote: ledgers, structured PR bodies, JSONL logs, config files. See [Declaring a format](#declaring-a-format). This is what gives L9 a replay to work from. Declare an `envSweep` the same way, so L10 runs the tests a change touches under a shifted clock, locale, umask, and filesystem: see [Declaring an env sweep](#declaring-an-env-sweep).
+2. **Restate the lenses.** Copy [`templates/pr-grade-lenses.md`](skills/pr-grade/templates/pr-grade-lenses.md) to `.claude/pr-grade-lenses.md` and rewrite each lens for your code: its real bounded resources, the callers people forget, how a finding is proven, and the fan-out groups. Where it differs from the skill, it wins. A lens heading you add becomes one the check requires, and a lens without a heading is neither graded nor required. The ids are forgesmith-os's, so a lens file copied before 0.16.0 numbers L9 differently: add headings for L9 to L11 and L14 to L16 as this release defines them, or keep your numbers and set `oldStateLens` and `ambientLens` to the ids your file uses.
+3. **Declare your formats**, if the code reads records an earlier version wrote: ledgers, structured PR bodies, JSONL logs, config files. See [Declaring a format](#declaring-a-format). This is what gives L14 a replay to work from. Declare an `envSweep` the same way, so L16 runs the tests a change touches under a shifted clock, locale, umask, and filesystem: see [Declaring an env sweep](#declaring-an-env-sweep).
 4. **Enforce the grade.** Copy [`templates/pr-grade-check.yml`](skills/pr-grade/templates/pr-grade-check.yml) to `.github/workflows/pr-grade.yml` and make its check required. It fetches the checker from a pinned pr-grade ref, so a PR cannot edit the check that judges it.
 
 This repository grades itself the same way: see [`.claude/pr-grade.json`](.claude/pr-grade.json) and [`.github/workflows/pr-grade.yml`](.github/workflows/pr-grade.yml).
@@ -90,11 +94,11 @@ Every key in `.claude/pr-grade.json` is optional. A key you set replaces its def
 | `notCode` | docs, Markdown, lockfiles, `LICENSE` | Files that never count toward size, and whose hits are dropped from the caller list, since prose that uses a function's name is not a caller. A script listed here loses its callers; list it under `countAsCode` instead. |
 | `countAsCode` | empty | Paths that count toward size even under `tests` or `notCode`, such as a data file in `docs/` that the code reads. |
 | `checkThenAct` | built-in name lists | Overrides for the L7 scanner: `writes`, `secondReads`, `transactions`, `locks`, `ignore`. |
-| `formats` | empty | Records the code reads, for the L9 replay. |
-| `oldStateLens` | `L9` | The lens whose grader gets the replay's output, for a lens file that numbers its lenses differently. |
-| `exitCodes` | empty | Commands to add to the registry L10's scan reads, command to a note on its exit codes. |
-| `envSweep` | none | The command that runs the test files a change touches, for the L10 env sweep. See [Declaring an env sweep](#declaring-an-env-sweep). |
-| `ambientLens` | `L10` | The lens whose grader gets `ambient.py`'s output. |
+| `formats` | empty | Records the code reads, for the L14 replay. |
+| `oldStateLens` | `L14` | The lens whose grader gets the replay's output, for a lens file that numbers its lenses differently. |
+| `exitCodes` | empty | Commands to add to the registry L16's scan reads, command to a note on its exit codes. |
+| `envSweep` | none | The command that runs the test files a change touches, for the L16 env sweep. See [Declaring an env sweep](#declaring-an-env-sweep). |
+| `ambientLens` | `L16` | The lens whose grader gets `ambient.py`'s output. |
 | `proofDir` | `node_modules`, `.venv` | Installed dependencies to link into each proof clone, each with the files that pin it and the command that installs it. |
 | `requireGrade.branches` | every branch | A regex; the check only requires a grade on matching branches. |
 
@@ -105,7 +109,7 @@ Every key in `.claude/pr-grade.json` is optional. A key you set replaces its def
 | no silent or unclassified file | in-thread | one subagent |
 | a silent or unclassified file | one subagent | fan-out |
 
-Uncommitted and untracked work counts. Both sides of a rename count, so a rename can raise the mode but never lower it. Fan-out groups come from the lens file, or default to timing (L1, L2, L7), reach (L3, L4, L10), and lifetime and contract (L5, L6, L8, L9).
+Uncommitted and untracked work counts. Both sides of a rename count, so a rename can raise the mode but never lower it. Fan-out groups come from the lens file, or default to correctness (L9, L10, L4, L11, L15), timing (L1, L2, L7, L16), and lifetime and contract (L3, L5, L6, L8, L14).
 
 ### Declaring a format
 
@@ -160,7 +164,7 @@ Mode: subagent
 Graded: <full SHA of the last commit graded>
 Score: 5/5
 Blocking: nothing
-Verified and clear: L1, L2, L3, L4, L5, L6, L7, L8, L9, L10
+Verified and clear: L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L14, L15, L16
 Could not verify: none
 
 P3 src/cache.ts:78 in Cache.evict - eviction log omits the key
@@ -194,12 +198,12 @@ All live in `skills/pr-grade/scripts/`. The skill calls them; you rarely run one
 
 | Script | What it does |
 |---|---|
-| `grade_prep.py` | Prepares a grade in one call: mode, lens groups (minus any `--skip`), callers, the L7 scan, the L9 replay, the L10 exit codes and env sweep, proof clones, and every grader's prompt. `--surface <path ...>` grades the code under paths with no diff (SKILL.md section 9). |
+| `grade_prep.py` | Prepares a grade in one call: mode, lens groups (minus any `--skip`), callers, the L7 scan, the L14 replay, the L16 exit codes and env sweep, proof clones, and every grader's prompt. `--surface <path ...>` grades the code under paths with no diff (SKILL.md section 9). |
 | `grade_mode.py` | Picks the mode alone and prints the files that decided it. |
 | `proof_dir.py` | Makes and removes the proof clones outside the repository, with dependencies linked in, and a `proofs` directory per grader for the tests that proved its findings. `remove` refuses while a kept test is still there. Nothing is registered in the repository. |
 | `check_then_act.py` | Lists check-then-act windows (L7) in the functions a branch changed: a check, then an `await`, transaction boundary, or external call, then the write the check guards. A grader clears each one or proves the race. It never gates anything, and an empty list clears nothing. |
-| `history_replay.py` | Runs the replay and transplant for each declared format whose reader changed (L9). |
-| `ambient.py` | Lists every process call a change adds or modifies with how its exit code is handled and the registry's note on the command, and runs the changed tests under each perturbation of a declared `envSweep` (L10). |
+| `history_replay.py` | Runs the replay and transplant for each declared format whose reader changed (L14). |
+| `ambient.py` | Lists every process call a change adds or modifies with how its exit code is handled and the registry's note on the command, and runs the changed tests under each perturbation of a declared `envSweep` (L16). |
 | `grade_block.py merge <root>` | Merges the graders' reports, flags two findings at one line and any finding on a line the diff did not change, prints the move command for each proof test a grader kept, and drafts the block with the lowest allowed score. |
 | `grade_block.py check <pr>` | The enforcement check. |
 

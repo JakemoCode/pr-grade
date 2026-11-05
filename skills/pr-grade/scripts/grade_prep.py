@@ -6,9 +6,9 @@
     python3 grade_prep.py --surface PATH [PATH ...] [the options above except --base]
 
 Run it from inside the repository once the change is committed. It picks the mode as grade_mode.py
-does, splits the lenses among graders (the lens file's `## Fan-out groups` table, or timing, reach, and
+does, splits the lenses among graders (the lens file's `## Fan-out groups` table, or correctness, timing, and
 lifetime and contract), lists the callers of each function the branch modified, runs check_then_act.py
-for whoever holds L7, history_replay.py for whoever holds L9, ambient.py for whoever holds L10, and makes
+for whoever holds L7, history_replay.py for whoever holds L14, ambient.py for whoever holds L16, and makes
 one proof copy per grader with proof_dir.py, plus one for the env sweep when the repository declares one. It prints a shared block
 and one block per grader: a grader's prompt is the shared block followed by its own, pasted unchanged.
 It ends with the command that merges the graders' reports and the one that removes the proof copies.
@@ -61,12 +61,13 @@ def _load(name: str):
 grade_mode, grade_block, proof_dir, check_then_act, history_replay, ambient = (
     _load(n) for n in ('grade_mode', 'grade_block', 'proof_dir', 'check_then_act', 'history_replay', 'ambient'))
 
-DEFAULT_GROUPS = {'timing': ['L1', 'L2', 'L7'], 'reach': ['L3', 'L4', 'L10'],
-                  'lifetime-and-contract': ['L5', 'L6', 'L8', 'L9']}
+# forgesmith-os's groups, which its lens file keeps; L16 joins timing, since it asks about the world around a run.
+DEFAULT_GROUPS = {'correctness': ['L9', 'L10', 'L4', 'L11', 'L15'], 'timing': ['L1', 'L2', 'L7', 'L16'],
+                  'lifetime-and-contract': ['L3', 'L5', 'L6', 'L8', 'L14']}
 # The lens that reads history_replay.py's output, unless the config's `oldStateLens` names another.
-OLD_STATE_LENS = 'L9'
+OLD_STATE_LENS = 'L14'
 # The lens that reads ambient.py's output, unless the config's `ambientLens` names another.
-AMBIENT_LENS = 'L10'
+AMBIENT_LENS = 'L16'
 # The proof copy the env sweep perturbs, beside the graders' own.
 SWEEP_COPY = 'env-sweep'
 GROUP_ROW = re.compile(r'(?m)^\|\s*([^|]*?[A-Za-z][^|]*?)\s*\|\s*(L\d+(?:\s*,\s*L\d+)*)\s*\|')

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for ambient.py: the exit-code list and the env sweep behind L10.
+"""Unit tests for ambient.py: the exit-code list and the env sweep behind L16.
 
     python3 -m unittest discover -s tests -v
 """

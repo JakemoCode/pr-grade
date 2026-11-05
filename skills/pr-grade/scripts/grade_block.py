@@ -15,14 +15,14 @@ The block is a `## Grade` section in the PR body, outside any code block, one fi
     Graded: <the full SHA of the last commit graded>
     Score: 5/5
     Blocking: nothing
-    Verified and clear: L1, L2, L3, L4, L5, L6, L7, L8, L9, L10
+    Verified and clear: L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L14, L15, L16
     Could not verify: none
 
 A grade of paths instead of a change (`grade_prep.py --surface`) adds a `Surface:` line after `Mode`.
 `check` refuses any block that carries one: it graded code no pull request changed.
 
 `check` refuses the PR when the block is missing or below 5/5; when a lens the lens file defines (or
-L1 to L10, without one) is missing from `Verified and clear`; when `Mode` is cheaper than grade_mode.py
+L1 to L11 and L14 to L16, without one) is missing from `Verified and clear`; when `Mode` is cheaper than grade_mode.py
 requires for the PR's files; when the graded commit is not in the PR's history or a file the grade
 must cover changed after it; when GitHub's lists are cut off; or when the PR moved during the check.
 
@@ -74,7 +74,8 @@ CONFIG, MODES, load_config, repo_root = grade_mode.CONFIG, grade_mode.MODES, gra
 TS_ADAPTER = HERE / 'check_then_act_ts.cjs'
 TS_SUFFIXES = ('.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs')
 
-DEFAULT_LENSES = [f'L{n}' for n in range(1, 11)]
+# The skill's lenses, numbered as forgesmith-os's lens file numbers them; L12 and L13 are unassigned.
+DEFAULT_LENSES = [f'L{n}' for n in range(1, 12)] + ['L14', 'L15', 'L16']
 # GitHub lists at most this many files, and says nothing when it stops.
 COMPARE_CAP = 300
 PR_FILE_CAP = 3000
@@ -112,7 +113,7 @@ def without_code(markdown: str) -> str:
 
 def lens_ids(text: str | None) -> list[str]:
     """Every lens the lens file text defines as a `### L<n>.` heading. A lens added there is required
-    with no code change. The skill's ten apply without a file, or when no heading matches, so a
+    with no code change. The skill's fourteen apply without a file, or when no heading matches, so a
     reworded heading can never leave nothing required."""
     return (LENS_HEADING.findall(text) if text else []) or DEFAULT_LENSES
 

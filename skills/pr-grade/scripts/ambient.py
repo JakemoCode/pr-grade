@@ -4,7 +4,7 @@
     python3 ambient.py [--base origin/main] [--copy <proof copy>]
 
 Run it from inside the repository, at the committed head. It prints two lists for the grader holding
-L10, each a floor and never a ceiling:
+L16, each a floor and never a ceiling:
 
 - exit codes: every process call the change adds or modifies, in Python, JavaScript, TypeScript, and
   shell scripts, with the command it starts, what the call site does with the exit code, and the

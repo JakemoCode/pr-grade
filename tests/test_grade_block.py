@@ -202,12 +202,12 @@ class LensIdsTest(Fixture):
         text = '# lenses\n\n### L1. Abandoned work\n\ntext L9.\n\n### L10. New lens\n'
         self.assertEqual(grade_block.lens_ids(text), ['L1', 'L10'])
 
-    def test_without_a_lens_file_the_skills_ten_are_required(self) -> None:
-        self.assertEqual(grade_block.lens_ids(None), [f'L{n}' for n in range(1, 11)])
+    def test_without_a_lens_file_the_skills_fourteen_are_required(self) -> None:
+        self.assertEqual(grade_block.lens_ids(None), grade_block.DEFAULT_LENSES)
 
-    def test_a_lens_file_with_no_matching_heading_still_requires_the_ten(self) -> None:
+    def test_a_lens_file_with_no_matching_heading_still_requires_the_fourteen(self) -> None:
         # `### L1 Abandoned work`, with no period, must not leave nothing required.
-        self.assertEqual(grade_block.lens_ids('### L1 Abandoned work\n### L2: Shared\n'), [f'L{n}' for n in range(1, 11)])
+        self.assertEqual(grade_block.lens_ids('### L1 Abandoned work\n### L2: Shared\n'), grade_block.DEFAULT_LENSES)
 
 
 class CheckTest(Fixture):
@@ -216,7 +216,7 @@ class CheckTest(Fixture):
     def run_check(self, *, text: str | None = None, files: tuple[str, ...] = ('.github/workflows/ci.yml',),
                   draft: bool = False, branch: str = 'feat/x', moved: bool = False,
                   after: dict | None = None, base: dict | None = None) -> tuple[bool, list[str]]:
-        text = body(**{'Verified and clear': ', '.join(f'L{n}' for n in range(1, 11))}) if text is None else text
+        text = body(**{'Verified and clear': ', '.join(grade_block.DEFAULT_LENSES)}) if text is None else text
         after = after or CLEAR
         views = []
 
@@ -247,7 +247,7 @@ class CheckTest(Fixture):
         self.assertTrue(any('## Grade' in p for p in self.run_check(text='Summary\n')[1]))
 
     def test_a_surface_grade_pasted_into_a_pull_request_is_refused(self) -> None:
-        verified = ', '.join(f'L{n}' for n in range(1, 11))
+        verified = ', '.join(grade_block.DEFAULT_LENSES)
         self.assertEqual(self.run_check(text=body(Surface='src', **{'Verified and clear': verified})),
                          (True, ['a surface grade is not a pull request grade']))
 
@@ -265,17 +265,17 @@ class CheckTest(Fixture):
         self.assertTrue(any('## Grade' in p for p in self.run_check(text='Summary\n')[1]))
 
     def test_lenses_come_from_the_base_branch(self) -> None:
-        refused = self.run_check(base={'.claude/pr-grade-lenses.md': '### L1. A\n### L11. New\n'})[1]
-        self.assertTrue(any('L11' in p for p in refused))
+        refused = self.run_check(base={'.claude/pr-grade-lenses.md': '### L1. A\n### L12. New\n'})[1]
+        self.assertTrue(any('L12' in p for p in refused))
 
     def test_a_rename_out_of_silent_code_keeps_the_mode(self) -> None:
         # GitHub lists src/x.py, previously .github/workflows/x.yml; the old side still requires subagent.
-        refused = self.run_check(text=body(Mode='in-thread', **{'Verified and clear': ', '.join(f'L{n}' for n in range(1, 11))}),
+        refused = self.run_check(text=body(Mode='in-thread', **{'Verified and clear': ', '.join(grade_block.DEFAULT_LENSES)}),
                                  files=('src/x.py\t.github/workflows/x.yml',))[1]
         self.assertTrue(any('requires subagent' in p for p in refused))
 
     def test_unclassified_code_needs_a_subagent_under_a_base_config_without_ordinary(self) -> None:
-        refused = self.run_check(text=body(Mode='in-thread', **{'Verified and clear': ', '.join(f'L{n}' for n in range(1, 11))}),
+        refused = self.run_check(text=body(Mode='in-thread', **{'Verified and clear': ', '.join(grade_block.DEFAULT_LENSES)}),
                                  files=('src/x.py',), base={grade_mode.CONFIG: json.dumps({'silent': []})})[1]
         self.assertTrue(any('requires subagent' in p and 'unclassified' in p for p in refused))
 

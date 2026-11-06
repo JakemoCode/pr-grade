@@ -1,6 +1,6 @@
 ---
 name: grade
-description: Applies named /pr-grade lenses to one change and reports a verdict per lens, proven findings, and what it could not verify. Dispatched by the pr-grade skill, one per fan-out group or one for every lens. Read-only on the repository, its .git included; proves findings in a proof copy of the graded commit. Dispatch it with the prompt grade_prep.py prints, or with, pasted into the prompt, the repository's absolute path; the lens file's absolute path, or "none"; the base and head commits as full SHAs; its lenses; the checks already settled at the head; the review findings the author declined, with their reasons; the hunks to probe first, if any; the callers of each function, method, type, or option the change modified, with the command that found them; its proof copy, scratch directory, proofs directory, and report path; and, when it holds L7, the output of check_then_act.py, and when it holds the old-state lens, the output of history_replay.py.
+description: Applies named /pr-grade lenses to one change and reports a verdict per lens, proven findings, and what it could not verify. Dispatched by the pr-grade skill, one per fan-out group or one for every lens. Read-only on the repository, its .git included; proves findings in a proof copy of the graded commit. Dispatch it with the prompt grade_prep.py prints, or with, pasted into the prompt, the repository's absolute path; the lens file's absolute path, or "none"; the base and head commits as full SHAs; its lenses; the checks already settled at the head; the review findings the author declined, with their reasons; the hunks to probe first, if any; the callers of each function, method, type, or option the change modified, with the command that found them; its proof copy, scratch directory, proofs directory, and report path; and, when it holds L7, the output of check_then_act.py, and when it holds the old-state lens, the output of history_replay.py, and when it holds the ambient lens, the output of ambient.py.
 tools: Read, Glob, Grep, Bash, Write
 model: sonnet
 effort: high
@@ -25,7 +25,9 @@ The callers list is a floor, never a ceiling. It cannot see a re-export, dynamic
 
 When you hold L7, the dispatch may carry the output of `check_then_act.py`. Answer every candidate on it: clear it with the reason the window is harmless, or prove the race. The list is a floor, never a ceiling; look for windows it cannot see as well.
 
-When you hold L9, or the lens the repository names for old state, the dispatch may carry the output of `history_replay.py`: the instances the base and head readers disagree on, and the recorded values each new kind of record accepts. Settle every new kind it lists: find what the change says that kind takes, and prove each accepted value it must refuse, or say why the kind takes it. The output is a floor, never a ceiling.
+When you hold L14, or the lens the repository names for old state, the dispatch may carry the output of `history_replay.py`: the instances the base and head readers disagree on, and the recorded values each new kind of record accepts. Settle every new kind it lists: find what the change says that kind takes, and prove each accepted value it must refuse, or say why the kind takes it. The output is a floor, never a ceiling.
+
+When you hold L16, or the lens the repository names for ambient assumptions, the dispatch carries the output of `ambient.py`: the process calls the change adds or modifies, with what each call site does with the exit code and what the registry says the command's codes mean, and, when the repository declares an env sweep, the tests the change touches run once per perturbation with a pass or fail each. Settle every call with a registry note: show the code the call misreads, with a shim of that name first on your copy's `PATH`, or say why the call site handles it. A failing sweep row is a suspect until the same run in your copy names the defect. Both lists are floors, never ceilings.
 
 ## Work
 
@@ -67,7 +69,7 @@ The copy links the repository's installed dependencies. Never install, upgrade, 
 
 Assert the defect instead of printing it and reading the output. The proof is done at the first run whose assertion names the defect and fails; do not add logging to learn more. A setup error, such as a missing module or a clone that cannot check out the graded commit, is not a red: it goes under `Could not verify` with the error.
 
-A finding gets three runs. When the third has not shown the defect, stop: it goes under `Could not verify` with the rank it would have and what each run returned.
+A finding gets three runs. When the third has not shown the defect, stop: it goes under `Could not verify` with the rank it would have and what each run returned. An L11 finding, a cleanup, needs no run: name the helper or the cheaper alternative and the concrete cost, rank it P3, and move on.
 
 ## Report
 

@@ -42,9 +42,29 @@ Replace every `<...>`. Delete a section that adds nothing over the skill; keep i
 
 <The defaults and fallbacks worth a sentence: optional dependencies, `??` values, catches that return something neutral.>
 
-### L9. Old state meets new code
+### L9. Correctness
+
+<The checks here worth a boundary probe: the regexes, validators, and range bounds a change touches most, and the tool that lists their near-misses if the repository has one.>
+
+### L10. Removed behavior
+
+<The enforcement that goes without a deleted line here: path-scoped lint rules, owner maps, required checks, normative documents whose clauses carry obligations.>
+
+### L11. Cleanup
+
+<The helpers worth knowing before writing a new one, and the threshold under which a cleanup finding is not worth a line.>
+
+### L14. Old state meets new code
 
 <What earlier versions wrote that new code reads: ledgers, PR bodies, rows, config files. Declare each format whose reader a change may touch under `formats` in `.claude/pr-grade.json`, so `history_replay.py` replays it.>
+
+### L15. Promised coverage
+
+<Where a change states what it covers here: docstrings, the issue it closes, the PR body, a skill or rule text. Where the repository's own instances live, so a grader runs them and not only the fixtures.>
+
+### L16. Ambient assumptions
+
+<What the code here assumes about the world around it: the tools it starts and their exit codes, the clock and timezone its records use, the locale, the filesystem, other sessions sharing a ref or a port. Declare the test command under `envSweep` in `.claude/pr-grade.json`, so `ambient.py` sweeps the tests a change touches, and add this codebase's own tools under `exitCodes`.>
 
 ## Already settled
 
@@ -58,9 +78,9 @@ Replace every `<...>`. Delete a section that adds nothing over the skill; keep i
 
 | Group | Lenses | Shared reading |
 |---|---|---|
-| Timing | L1, L2, L7 | <every transaction, await, and status read in the diff> |
-| Reach | L3, L4 | <the caller list and any ownership registry> |
-| Lifetime and contract | L5, L6, L8, L9 | <the specs cited and every fallback> |
+| Correctness | L9, L10, L4, L11, L15 | <every hunk with its enclosing function, every deleted line, the caller list, and what the change says it covers> |
+| Timing | L1, L2, L7, L16 | <every unit of work, await, and status read in the diff, and every process it starts> |
+| Lifetime and contract | L3, L5, L6, L8, L14 | <any ownership registry, the specs cited, and every write and fallback> |
 
 ## Growing this list
 

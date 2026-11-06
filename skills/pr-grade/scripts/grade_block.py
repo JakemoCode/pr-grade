@@ -15,14 +15,14 @@ The block is a `## Grade` section in the PR body, outside any code block, one fi
     Graded: <the full SHA of the last commit graded>
     Score: 5/5
     Blocking: nothing
-    Verified and clear: L1, L2, L3, L4, L5, L6, L7, L8, L9
+    Verified and clear: L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L14, L15, L16
     Could not verify: none
 
 A grade of paths instead of a change (`grade_prep.py --surface`) adds a `Surface:` line after `Mode`.
 `check` refuses any block that carries one: it graded code no pull request changed.
 
 `check` refuses the PR when the block is missing or below 5/5; when a lens the lens file defines (or
-L1 to L9, without one) is missing from `Verified and clear`; when `Mode` is cheaper than grade_mode.py
+L1 to L11 and L14 to L16, without one) is missing from `Verified and clear`; when `Mode` is cheaper than grade_mode.py
 requires for the PR's files; when the graded commit is not in the PR's history or a file the grade
 must cover changed after it; when GitHub's lists are cut off; or when the PR moved during the check.
 
@@ -74,7 +74,8 @@ CONFIG, MODES, load_config, repo_root = grade_mode.CONFIG, grade_mode.MODES, gra
 TS_ADAPTER = HERE / 'check_then_act_ts.cjs'
 TS_SUFFIXES = ('.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs')
 
-DEFAULT_LENSES = [f'L{n}' for n in range(1, 10)]
+# The skill's lenses, numbered as forgesmith-os's lens file numbers them; L12 and L13 are unassigned.
+DEFAULT_LENSES = [f'L{n}' for n in range(1, 12)] + ['L14', 'L15', 'L16']
 # GitHub lists at most this many files, and says nothing when it stops.
 COMPARE_CAP = 300
 PR_FILE_CAP = 3000
@@ -92,10 +93,10 @@ REPORT_LINE = re.compile(r'^(Score|Blocking|Verified and clear|Could not verify|
 # after the line, as in `<file>:78:5`, is dropped.
 FINDING = re.compile(r'^(P[123])[ \t]+((?:L\d+[ \t,]*)*)(\S+?):(\d+)(?::\d+)?(?:-(\d+))?(?:[ \t]+in[ \t]+(.+?))?[ \t]+-[ \t]+(.+)$')
 # The line under a finding naming the test the grader kept, and the repository path it ran at. Each path
-# may be written as inline code, which keeps a space or comma inside it; words after the second path are
-# not part of it.
-PROOF_TEST = re.compile(r'^Proof test:[ \t]*(?:`([^`]+)`|([^`\s,]+))'
-                        r'(?:,?[ \t]+ran at[ \t]+(?:`([^`]+)`|([^`\s,]+)))?')
+# may be written as inline code, which keeps a space or comma inside it; a parenthetical may sit between the
+# file and `ran at`; words after the second path are not part of it.
+PROOF_TEST = re.compile(r'^Proof test:[ \t]*(?:`([^`]+)`|([^`\s,;]+))'
+                        r'(?:[ \t]*(?:\([^)]*\))?[ \t]*,?[ \t]*ran at[ \t]+(?:`([^`]+)`|([^`\s,;]+)))?')
 BLOCKING = re.compile(r'\bP[12]\b')
 NEW_ITEM = re.compile(r'([-*+]|\d+[.)])[ \t]|(L\d+|P[123])\b')
 # `L2's pool releases` continues a claim, unless its line names a rank or the claim above is a P3.
@@ -112,7 +113,7 @@ def without_code(markdown: str) -> str:
 
 def lens_ids(text: str | None) -> list[str]:
     """Every lens the lens file text defines as a `### L<n>.` heading. A lens added there is required
-    with no code change. The skill's nine apply without a file, or when no heading matches, so a
+    with no code change. The skill's fourteen apply without a file, or when no heading matches, so a
     reworded heading can never leave nothing required."""
     return (LENS_HEADING.findall(text) if text else []) or DEFAULT_LENSES
 
@@ -206,7 +207,9 @@ def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[
     verified = verified_lenses(block.get('Verified and clear', ''))
     missing = [lens for lens in lenses if lens not in verified]
     if missing:
-        found.append(f"`Verified and clear` leaves out {', '.join(missing)}. Apply every lens.")
+        # 0.16.0 renumbered the lenses, so a block from before it lacks L14 and lists an L9 that meant old state.
+        renumbered = ' The ids changed in 0.16.0 (L9 is Correctness, old state is L14): re-grade rather than add ids.' if 'L14' in missing else ''
+        found.append(f"`Verified and clear` leaves out {', '.join(missing)}. Apply every lens.{renumbered}")
     graded = block.get('Graded', '')
     if not SHA.fullmatch(graded):
         found.append(f'`Graded` must be the full 40-character SHA of the graded commit, not {graded or "nothing"}.')

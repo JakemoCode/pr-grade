@@ -3,7 +3,7 @@
 - Claude Code uses `version` in `.claude-plugin/plugin.json` to decide if an update exists, so each release increases it.
 - After you update, run `/reload-plugins`.
 - CI refuses a pull request that changes `skills/`, `agents/`, or `plugin.json` if it does not increase the version and add its heading here.
-- When a change lands over several pull requests, label one `hold-release` to merge it without a release.
+- When a change lands over several pull requests, label each but the last `hold-release` to merge it without a release.
 
 Each entry says what changed, where, and why. Under it, **Before** is the old behavior and **Seen on** is the grade that exposed it.
 

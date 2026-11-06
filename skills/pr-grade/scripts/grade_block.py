@@ -93,10 +93,10 @@ REPORT_LINE = re.compile(r'^(Score|Blocking|Verified and clear|Could not verify|
 # after the line, as in `<file>:78:5`, is dropped.
 FINDING = re.compile(r'^(P[123])[ \t]+((?:L\d+[ \t,]*)*)(\S+?):(\d+)(?::\d+)?(?:-(\d+))?(?:[ \t]+in[ \t]+(.+?))?[ \t]+-[ \t]+(.+)$')
 # The line under a finding naming the test the grader kept, and the repository path it ran at. Each path
-# may be written as inline code, which keeps a space or comma inside it; words after the second path are
-# not part of it.
-PROOF_TEST = re.compile(r'^Proof test:[ \t]*(?:`([^`]+)`|([^`\s,]+))'
-                        r'(?:,?[ \t]+ran at[ \t]+(?:`([^`]+)`|([^`\s,]+)))?')
+# may be written as inline code, which keeps a space or comma inside it; a parenthetical may sit between the
+# file and `ran at`; words after the second path are not part of it.
+PROOF_TEST = re.compile(r'^Proof test:[ \t]*(?:`([^`]+)`|([^`\s,;]+))'
+                        r'(?:[ \t]*(?:\([^)]*\))?[ \t]*,?[ \t]*ran at[ \t]+(?:`([^`]+)`|([^`\s,;]+)))?')
 BLOCKING = re.compile(r'\bP[12]\b')
 NEW_ITEM = re.compile(r'([-*+]|\d+[.)])[ \t]|(L\d+|P[123])\b')
 # `L2's pool releases` continues a claim, unless its line names a rank or the claim above is a P3.
@@ -207,7 +207,9 @@ def problems(block: dict[str, str] | None, *, pr_files: list[str], lenses: list[
     verified = verified_lenses(block.get('Verified and clear', ''))
     missing = [lens for lens in lenses if lens not in verified]
     if missing:
-        found.append(f"`Verified and clear` leaves out {', '.join(missing)}. Apply every lens.")
+        # 0.16.0 renumbered the lenses, so a block from before it lacks L14 and lists an L9 that meant old state.
+        renumbered = ' The ids changed in 0.16.0 (L9 is Correctness, old state is L14): re-grade rather than add ids.' if 'L14' in missing else ''
+        found.append(f"`Verified and clear` leaves out {', '.join(missing)}. Apply every lens.{renumbered}")
     graded = block.get('Graded', '')
     if not SHA.fullmatch(graded):
         found.append(f'`Graded` must be the full 40-character SHA of the graded commit, not {graded or "nothing"}.')

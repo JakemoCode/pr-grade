@@ -114,6 +114,10 @@ Take the caller list from step 1. Walk each one. Not the one you were thinking a
 
 A default that was right when written can turn wrong when a later change binds what it stood in for. The diff that binds it is the one that grades the default.
 
+Walk the callees too. A function this change calls may have changed in the same change, and a call that was safe before can now meet a new precondition, return shape, or exception.
+
+A changed default (a config value, a setup file, an option's default, a constant callers read) reaches only the sites that leave the value unset. Search for every site that sets it explicitly under any spelling: the config key, the option a call site passes for the same setting, and a named constant holding either. Name the value each keeps. An explicit setting wins, so each one the change meant to reach still runs on the old value. EngOS PR #1420 raised the integration test timeout in a setup file while ten tests kept their own lower `timeout` option.
+
 ### L5. State that outlives its reason
 
 Anything written and not deleted. Cache entries, map keys, listeners, pending rows, leases, timers, subscriptions, temporary files.
@@ -152,13 +156,15 @@ For every new failure path, fallback value, and default, say which way it fails 
 
 Fail-open and fail-closed are both defensible. Choosing without noticing is not. An optional dependency that means "nothing blocking" when absent has chosen fail-open for everyone who forgets to pass it.
 
+A wait with no bound inside a hook, gate, or guard (a lock taken with no timeout, a subprocess or a read with none) leaves the failure direction to whatever kills the wait. Name that caller and what it does on a timeout. A hook that times out and lets the call run fails open however carefully its own errors fail closed. EngOS PR #975 took a shared `flock` on a ledger with no timeout inside a removal guard.
+
 ### L9. Correctness
 
 Read every hunk with its whole enclosing function. For each line, ask what input, state, timing, or platform makes it wrong. Report a defect only when the change caused it: it introduced the defect, made it newly reachable, or made it consequential. Every candidate with a nameable failure scenario goes through the proof rule, and one you cannot make red goes under `Could not verify`.
 
 - **Boundaries.** For each check the diff adds or changes (a regex, a match or dedupe key, a validator, a refusal, a section or range boundary), state what it should accept and what it should refuse. Then run the nearest input on each side of that line: the refused input most like an accepted one, and the accepted input most like a refused one. The case the check was built for proves neither edge.
-- **Stand-ins.** A check often tests a stand-in for the property it names. Write two sentences: what it exists to refuse, and what the code tests. Take the first from the harm it guards against, as its error message, its name, or its calling step says it, never from a docstring alone, which may describe the stand-in. Where the two differ, build the input that has the tested property and lacks the named one, and the reverse, and run both. The condition that decides whether a check runs at all is a check too.
-- **Validator and writer.** Where input passes a validator and then a canonicalizer, serializer, or mapper that keeps only the keys it knows, run an unknown key and a misspelled one through both. One the validator accepts and the writer drops disappears with no error.
+- **Stand-ins.** A check often tests a stand-in for the property it names. Write two sentences: what it exists to refuse, and what the code tests. Take the first from the harm it guards against, as its error message, its name, or its calling step says it, never from a docstring alone, which may describe the stand-in. A record existing stands in for a record belonging to this caller, a path inside this repository for a place another reader can see, a heuristic for a fact the input states outright. Where the two differ, build the input that has the tested property and lacks the named one, and the reverse, and run both. The condition that decides whether a check runs at all is a check too: when it keys on what the diff touched, find the change that owes the check and touches none of those paths.
+- **Validator and writer.** Where input passes a validator and then a canonicalizer, serializer, or mapper that keeps only the keys it knows, run an unknown key and a misspelled one through both. One the validator accepts and the writer drops disappears with no error: the validator must refuse what the writer will not keep.
 - In a normative document or a review packet, check each count, each line or section reference, and each "X does Y" claim against its source at the graded commit.
 
 *Examples, from EngOS:* PR #900, a marker regex settling a row headed `**Withdrawn rows**`; PR #990, a hand-split section missing on CRLF and swallowing the footer; PR #905, a version bound passing a prerelease of itself; PR #825, a validator letting a field take any disposition; PR #975, a removal guard accepting any session a ledger names, not only this session's child; PR #1280, a stage name the validator accepts and canonicalization drops.
@@ -209,7 +215,7 @@ What does the change assume about the world outside the process, and which of th
 
 ## 4. What a finding must carry
 
-A finding without a run is a suspicion.
+A finding without a run is a suspicion. The one exception is an L11 finding, a cleanup: it names the helper to call or the cheaper alternative and the concrete cost, needs no run, and is a P3 that never moves the score.
 
 Each one needs a concrete failure: real inputs or real state, and the wrong output or wrong resource state that follows. Prove it by running something. The strongest proof is a test that fails on an assertion naming the defect, run against the unfixed code; the repository's lens file may name its own recipe. A grader keeps that test under its proofs directory and names it in the finding, so the repair starts from the test that already reached the trigger instead of a second one written from the finding's description.
 

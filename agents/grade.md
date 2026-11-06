@@ -69,7 +69,7 @@ The copy links the repository's installed dependencies. Never install, upgrade, 
 
 Assert the defect instead of printing it and reading the output. The proof is done at the first run whose assertion names the defect and fails; do not add logging to learn more. A setup error, such as a missing module or a clone that cannot check out the graded commit, is not a red: it goes under `Could not verify` with the error.
 
-A finding gets three runs. When the third has not shown the defect, stop: it goes under `Could not verify` with the rank it would have and what each run returned.
+A finding gets three runs. When the third has not shown the defect, stop: it goes under `Could not verify` with the rank it would have and what each run returned. An L11 finding, a cleanup, needs no run: name the helper or the cheaper alternative and the concrete cost, rank it P3, and move on.
 
 ## Report
 

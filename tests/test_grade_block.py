@@ -264,6 +264,10 @@ class CheckTest(Fixture):
         (self.root / grade_mode.CONFIG).write_text(json.dumps({'requireGrade': {'branches': '^$'}}))
         self.assertTrue(any('## Grade' in p for p in self.run_check(text='Summary\n')[1]))
 
+    def test_a_block_from_before_the_renumbering_is_told_to_re_grade(self) -> None:
+        refused = self.run_check(text=body(**{'Verified and clear': ', '.join(f'L{n}' for n in range(1, 10))}))[1]
+        self.assertTrue(any('leaves out L10, L11, L14, L15, L16' in p and 'ids changed in 0.16.0' in p for p in refused), refused)
+
     def test_lenses_come_from_the_base_branch(self) -> None:
         refused = self.run_check(base={'.claude/pr-grade-lenses.md': '### L1. A\n### L12. New\n'})[1]
         self.assertTrue(any('L12' in p for p in refused))
@@ -411,6 +415,15 @@ class MergeTest(unittest.TestCase):
         found = grade_block.read_report('P1 L1 src/a.py:9 - x\n'
                                         'Proof test: `proofs/my test.py`, ran at `tests/a,b test.py`.\n')
         self.assertEqual(found['findings'][0]['proof_test'], {'file': 'proofs/my test.py', 'at': 'tests/a,b test.py'})
+
+    def test_a_parenthetical_between_the_file_and_ran_at_is_skipped(self) -> None:
+        found = grade_block.read_report('P1 L1 src/a.py:9 - x\n'
+                                        'Proof test: test_x.py (in /tmp/root/reach/proofs), ran at tests/test_x.py\n')
+        self.assertEqual(found['findings'][0]['proof_test'], {'file': 'test_x.py', 'at': 'tests/test_x.py'})
+
+    def test_prose_after_the_file_does_not_supply_a_repository_path(self) -> None:
+        found = grade_block.read_report('P1 L1 src/a.py:9 - x\nProof test: proofs/t.py; the hook ran at startup, see f.py\n')
+        self.assertEqual(found['findings'][0]['proof_test'], {'file': 'proofs/t.py', 'at': None})
 
     def test_words_after_the_repository_path_are_not_part_of_it(self) -> None:
         found = grade_block.read_report('P1 L1 src/a.py:9 - x\nProof test: proofs/t.py, ran at tests/t.py (new file).\n')

@@ -29,6 +29,7 @@ Nothing here stops a grade: a scan or a run that fails is printed as a note.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import os
 import re
@@ -286,7 +287,8 @@ def _run(copy: Path, argv: list[str], env: dict, timeout: float, umask: int | No
     except OSError as failed:
         return 'could not run', failed.strerror or str(failed)
     try:
-        stdout, stderr = proc.communicate(timeout=timeout)
+        with _terminating_raises():
+            stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
         _kill_group(proc)
         return 'timed out', f'after {timeout:g}s; the run and its children were killed'
@@ -301,6 +303,28 @@ def _run(copy: Path, argv: list[str], env: dict, timeout: float, umask: int | No
             if line.strip() and not re.fullmatch(r'[-=]{5,}', line.strip())][-OUTPUT_LINES:]
     detail = ' | '.join(tail)
     return f'FAIL (exit {proc.returncode})', detail[:OUTPUT_CHARS] + ('...' if len(detail) > OUTPUT_CHARS else '')
+
+
+@contextlib.contextmanager
+def _terminating_raises():
+    """While a run is waited on, SIGTERM and SIGHUP raise SystemExit instead of ending the prep at once, so
+    the handler below kills the run's group: in its own session, nothing else would reach it. A handler the
+    caller installed is left alone, and a thread that cannot set signals gets the default behaviour."""
+    def raise_exit(signum, _frame):
+        raise SystemExit(128 + signum)
+    installed = {}
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            if signal.getsignal(sig) in (signal.SIG_DFL, None):
+                signal.signal(sig, raise_exit)
+                installed[sig] = signal.SIG_DFL
+        except (ValueError, OSError, AttributeError):
+            pass
+    try:
+        yield
+    finally:
+        for sig, previous in installed.items():
+            signal.signal(sig, previous)
 
 
 def _kill_group(proc: subprocess.Popen) -> None:
@@ -375,12 +399,15 @@ def env_sweep(copy: Path, tests: list[str], changed: list[str], config: dict) ->
         # A row that cannot be set up or cleaned up costs that row, never the rows already run.
         made: list[Path] = []
         try:
-            if stray:
-                _write_strays(copy, dirs, *stray, made)
-            verdict, detail = _run(copy, argv, {**base_env, **extra}, timeout, umask)
-        except Exception as failed:  # noqa: BLE001
-            verdict, detail = 'could not run', f'{type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}'
-        left = [path for path in made if not _unlink(path)]
+            try:
+                if stray:
+                    _write_strays(copy, dirs, *stray, made)
+                verdict, detail = _run(copy, argv, {**base_env, **extra}, timeout, umask)
+            except Exception as failed:  # noqa: BLE001
+                verdict, detail = 'could not run', f'{type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}'
+        finally:
+            # An interrupt leaves this loop too, with the strays gone from the copy.
+            left = [path for path in made if not _unlink(path)]
         if left:
             detail += f"; could not remove {', '.join(str(p.relative_to(copy)) for p in left)}"
         out.append(f'- {label}: {verdict} ({detail})')

@@ -354,91 +354,100 @@ def main() -> None:
                  f"{(failed.stderr or '').strip()}")
     fields = dict(line.split(': ', 1) for line in made if ': ' in line)
     proof_root = Path(fields['root'])
-    ambient_lines = (ambient.report(root, lines, changed, config, Path(fields[f'copy {SWEEP_COPY}']) if sweep_tests else None)
-                     if ambient_graded else [])
-    ambient_holder = next((name for name, ids in groups.items() if ambient_lens in ids), None)
-    (proof_root / 'grade.json').write_text(json.dumps(
-        {'repository': str(root), 'mode': branch_mode, 'roundMode': mode, 'base': fork, 'head': head, 'lenses': lenses,
-         'groups': groups, 'skipped': skipped, **({'surface': paths} if surface else {})},
-        indent=1) + '\n')
+    # Until the remove: line prints, nothing else names the copies, so an interrupted prep removes them itself.
+    try:
+        ambient_lines = (ambient.report(root, lines, changed, config, Path(fields[f'copy {SWEEP_COPY}']) if sweep_tests else None)
+                         if ambient_graded else [])
+        ambient_holder = next((name for name, ids in groups.items() if ambient_lens in ids), None)
+        (proof_root / 'grade.json').write_text(json.dumps(
+            {'repository': str(root), 'mode': branch_mode, 'roundMode': mode, 'base': fork, 'head': head, 'lenses': lenses,
+             'groups': groups, 'skipped': skipped, **({'surface': paths} if surface else {})},
+            indent=1) + '\n')
 
-    locks = sorted({path for path in (under if surface else changed) if path.rsplit('/', 1)[-1] in LOCKS})
-    excludes = ''.join(f" ':!{path}'" for path in locks)
-    left_out = f"; lock files left out: {', '.join(locks)}" if locks else ''
-    if surface:
-        excludes += pathspec_excludes(config['tests'] + config['notCode']) + ''.join(f" '{v}'" for v in VENDORED)
-        change = f"git -C {root} diff {fork} {head} -- {' '.join(map(shlex.quote, paths))}{excludes}"
-        left_out += '; tests, documentation, and vendored directories left out'
-    else:
-        change = f'git -C {root} diff {fork} {head} -- .{excludes}'
-    why = '; '.join(f'{path} ({reason})' for path, reason in sorted(reasons.items())) or 'no silent-failure or unclassified files'
-    copy_notes = [line for line in made if line.startswith(('not linked', 'missing', 'warning', 'note', 'linked'))]
-    if surface:
-        def inside(path: str) -> bool:
-            return path in under or bool(grade_mode.matches(path, config['tests']))
-        caller_lines = callers(root, head, modified, config, inside) or ['- none: the surface defines no function a caller can name']
-    else:
-        caller_lines = callers(root, head, modified, config) or ['- none: the branch modified no function that existed before it']
-    caller_lines += [f'- not derived for {note}; search by hand' for note in notes]
-    caller_lines += [f'- {line.strip()}' for line in args.callers.splitlines() if line.strip()]
+        locks = sorted({path for path in (under if surface else changed) if path.rsplit('/', 1)[-1] in LOCKS})
+        excludes = ''.join(f" ':!{path}'" for path in locks)
+        left_out = f"; lock files left out: {', '.join(locks)}" if locks else ''
+        if surface:
+            excludes += pathspec_excludes(config['tests'] + config['notCode']) + ''.join(f" '{v}'" for v in VENDORED)
+            change = f"git -C {root} diff {fork} {head} -- {' '.join(map(shlex.quote, paths))}{excludes}"
+            left_out += '; tests, documentation, and vendored directories left out'
+        else:
+            change = f'git -C {root} diff {fork} {head} -- .{excludes}'
+        why = '; '.join(f'{path} ({reason})' for path, reason in sorted(reasons.items())) or 'no silent-failure or unclassified files'
+        copy_notes = [line for line in made if line.startswith(('not linked', 'missing', 'warning', 'note', 'linked'))]
+        if surface:
+            def inside(path: str) -> bool:
+                return path in under or bool(grade_mode.matches(path, config['tests']))
+            caller_lines = callers(root, head, modified, config, inside) or ['- none: the surface defines no function a caller can name']
+        else:
+            caller_lines = callers(root, head, modified, config) or ['- none: the branch modified no function that existed before it']
+        caller_lines += [f'- not derived for {note}; search by hand' for note in notes]
+        caller_lines += [f'- {line.strip()}' for line in args.callers.splitlines() if line.strip()]
 
-    print(f'mode: {mode} ({why})' + (f'; the grade block keeps {branch_mode}, the whole branch' if branch_mode != mode else ''))
-    if notice:
-        print(notice)
-    print('graders: ' + ', '.join(f"{name} ({', '.join(ids)})" for name, ids in groups.items()))
-    if skipped:
-        print(f"skipped: {', '.join(skipped)}, which no grader holds; the block clears each as "
-              f'`{skipped[0]} (not applicable)`')
-    if mode == 'in-thread':
-        print('In-thread: grade it yourself from the shared block, proving in the copy below.')
-    print('\n===== shared block =====\n')
-    print('\n'.join([
-        f'- Repository: {root}',
-        f"- Lens file: {lens_path if lens_text is not None else 'none; the skill lenses apply as written'}",
-        f'- Base: {fork}' + (' (the empty tree: a surface has no before)' if surface else ''),
-        f'- Head: {head}',
-        *([f"- Surface: {' '.join(paths)}"] if surface else []),
-        f'- Change: `{change}` ({len(changed)} files{left_out})',
-        *(['', 'This is a surface grade. Treat every function in the change as if the diff introduced it. Tests under '
-               'the surface are left out of the change but are in your proof copy: read them as evidence.']
-          if surface else []),
-        '',
-        'Settled at the head, do not re-run: ' + (args.settled or 'nothing was given, so run only what a proof needs, '
-                                                  'never the whole suite.'),
-        '',
-        'Declined review findings, with reasons: ' + (args.declined or 'none.'),
-        '',
-        ('Callers of the functions the surface defines, outside the surface. Hits inside it, and in tests, are counted '
-         'rather than listed: you read the surface already. ' if surface else 'Callers of what the branch modified. ')
-        + 'The list is a floor, never a ceiling: it was found with '
-        f"`git -C {root} grep -n -a -F -w -e '<name>' {head} -- .` outside vendored directories, with hits in the "
-        'paths `notCode` names dropped (documentation is not a caller), covers functions only, and cannot see a '
-        're-export, dynamic dispatch, or a name built from a string.',
-        *caller_lines,
-        *(['', 'Proof copies:', *[f'- {line}' for line in copy_notes]] if copy_notes else []),
-        *(['', f'No grader holds {old_state}, so every grader reads what history_replay.py found:', *replayed]
-          if replayed and holder is None else []),
-        *(['', f'No grader holds {ambient_lens}, so every grader reads what ambient.py found:', *ambient_lines]
-          if ambient_lines and ambient_holder is None else []),
-    ]))
-    for name, ids in groups.items():
-        print(f'\n===== {name} =====\n')
-        block = [f"Apply pr-grade lenses {', '.join(ids)} to the change in the shared block.",
-                 f"- Your proof copy: {fields[f'copy {name}']} (a clone of the head commit, yours alone; not the repository)",
-                 f"- Your scratch directory: {fields[f'scratch {name}']}",
-                 f"- Your proofs directory, for each proof test you keep: {fields[f'proofs {name}']}",
-                 # Claude Code refuses a subagent's Write to a file named report*.md, summary*.md, and the like.
-                 f'- Write your report to: {proof_root / name / "grade.md"}']
-        if 'L7' in ids:
-            block += ['', 'check_then_act.py at the head:', l7]
-        if replayed and name == holder:
-            block += ['', f'history_replay.py at the head, for {old_state}:', *replayed]
-        if ambient_lines and name == ambient_holder:
-            block += ['', f'ambient.py at the head, for {ambient_lens}:', *ambient_lines]
-        print('\n'.join(block))
-    if mode != 'in-thread':
-        print(f"\nmerge: python3 {HERE / 'grade_block.py'} merge {proof_root}")
-    print(f"remove: {fields['remove']}")
+        print(f'mode: {mode} ({why})' + (f'; the grade block keeps {branch_mode}, the whole branch' if branch_mode != mode else ''))
+        if notice:
+            print(notice)
+        print('graders: ' + ', '.join(f"{name} ({', '.join(ids)})" for name, ids in groups.items()))
+        if skipped:
+            print(f"skipped: {', '.join(skipped)}, which no grader holds; the block clears each as "
+                  f'`{skipped[0]} (not applicable)`')
+        if mode == 'in-thread':
+            print('In-thread: grade it yourself from the shared block, proving in the copy below.')
+        print('\n===== shared block =====\n')
+        print('\n'.join([
+            f'- Repository: {root}',
+            f"- Lens file: {lens_path if lens_text is not None else 'none; the skill lenses apply as written'}",
+            f'- Base: {fork}' + (' (the empty tree: a surface has no before)' if surface else ''),
+            f'- Head: {head}',
+            *([f"- Surface: {' '.join(paths)}"] if surface else []),
+            f'- Change: `{change}` ({len(changed)} files{left_out})',
+            *(['', 'This is a surface grade. Treat every function in the change as if the diff introduced it. Tests under '
+                   'the surface are left out of the change but are in your proof copy: read them as evidence.']
+              if surface else []),
+            '',
+            'Settled at the head, do not re-run: ' + (args.settled or 'nothing was given, so run only what a proof needs, '
+                                                      'never the whole suite.'),
+            '',
+            'Declined review findings, with reasons: ' + (args.declined or 'none.'),
+            '',
+            ('Callers of the functions the surface defines, outside the surface. Hits inside it, and in tests, are counted '
+             'rather than listed: you read the surface already. ' if surface else 'Callers of what the branch modified. ')
+            + 'The list is a floor, never a ceiling: it was found with '
+            f"`git -C {root} grep -n -a -F -w -e '<name>' {head} -- .` outside vendored directories, with hits in the "
+            'paths `notCode` names dropped (documentation is not a caller), covers functions only, and cannot see a '
+            're-export, dynamic dispatch, or a name built from a string.',
+            *caller_lines,
+            *(['', 'Proof copies:', *[f'- {line}' for line in copy_notes]] if copy_notes else []),
+            *(['', f'No grader holds {old_state}, so every grader reads what history_replay.py found:', *replayed]
+              if replayed and holder is None else []),
+            *(['', f'No grader holds {ambient_lens}, so every grader reads what ambient.py found:', *ambient_lines]
+              if ambient_lines and ambient_holder is None else []),
+        ]))
+        for name, ids in groups.items():
+            print(f'\n===== {name} =====\n')
+            block = [f"Apply pr-grade lenses {', '.join(ids)} to the change in the shared block.",
+                     f"- Your proof copy: {fields[f'copy {name}']} (a clone of the head commit, yours alone; not the repository)",
+                     f"- Your scratch directory: {fields[f'scratch {name}']}",
+                     f"- Your proofs directory, for each proof test you keep: {fields[f'proofs {name}']}",
+                     # Claude Code refuses a subagent's Write to a file named report*.md, summary*.md, and the like.
+                     f'- Write your report to: {proof_root / name / "grade.md"}']
+            if 'L7' in ids:
+                block += ['', 'check_then_act.py at the head:', l7]
+            if replayed and name == holder:
+                block += ['', f'history_replay.py at the head, for {old_state}:', *replayed]
+            if ambient_lines and name == ambient_holder:
+                block += ['', f'ambient.py at the head, for {ambient_lens}:', *ambient_lines]
+            print('\n'.join(block))
+        if mode != 'in-thread':
+            print(f"\nmerge: python3 {HERE / 'grade_block.py'} merge {proof_root}")
+        print(f"remove: {fields['remove']}")
+    except BaseException:
+        try:
+            proof_dir.remove(proof_root, drop_proofs=True)
+        except Exception as failed:  # noqa: BLE001
+            # The interrupt or fault that stopped the prep is the error to show, not a cleanup that could not run.
+            print(f'grade_prep: could not remove {proof_root}: {failed}', file=sys.stderr)
+        raise
 
 
 if __name__ == '__main__':

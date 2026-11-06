@@ -236,6 +236,12 @@ class World(unittest.TestCase):
         out = self.sweep(self.LOOSE)
         self.assertIn('- baseline, no perturbation: timed out (after 0.5s; the run and its children were killed)', out[1])
 
+    def test_a_run_leaves_the_signal_handlers_as_it_found_them(self) -> None:
+        import signal
+        before = (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGHUP))
+        ambient._run(self.copy, [sys.executable, '-c', 'pass'], dict(os.environ), 30)
+        self.assertEqual((signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGHUP)), before)
+
     def test_a_malformed_declaration_is_a_note(self) -> None:
         for sweep, word in (({'command': 'pytest {tests}'}, 'list of strings'), ({'command': ['pytest']}, '{tests}'),
                             ({'command': ['x', '{tests}'], 'timeout': 0}, 'positive'), ([], 'object')):

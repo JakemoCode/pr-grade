@@ -378,6 +378,12 @@ class CliTest(unittest.TestCase):
         diffed = subprocess.run(command, capture_output=True, text=True, check=True).stdout.split()
         self.assertEqual(diffed, ['app.py'])
 
+    def test_an_excluded_path_still_decides_the_mode(self) -> None:
+        # grade_block.py check sizes the mode from every file the pull request touches, so the block must too.
+        out = self.prep('--exclude-path', 'store.py', '--exclude-path', 'deploy.sh')
+        self.assertIn('mode: subagent', out)
+        self.assertRegex(out, r'- Change: `[^`]*` \(1 files')
+
     def declare_format(self, **config) -> None:
         # A reader that accepts everything, over one recorded instance, so only where its output lands is tested.
         check = [sys.executable, '-c', 'import json, sys; print(json.dumps([[] for _ in json.load(open(sys.argv[2]))]))',

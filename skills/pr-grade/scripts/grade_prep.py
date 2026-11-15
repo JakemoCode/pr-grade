@@ -18,7 +18,10 @@ checks that already passed at the head, with their results, and `--declined` the
 author declined, with reasons; each is pasted into every prompt as given. `--groups` replaces the
 groups, one `NAME=L1,L2` per grader. `--skip` names lenses that do not apply to this change: no grader
 holds them, no proof copy is made for them, and `grade.json` records them, so the merge clears each as
-`L2 (not applicable)`. `--callers` adds callers found by hand to the derived list.
+`L2 (not applicable)`. `--callers` adds callers found by hand to the derived list. `--exclude-path
+PREFIX`, repeatable, leaves every path starting with PREFIX out of the change and its file count, as lock
+files are left out of the diff: a repository's kept grade reports, say, which a re-grade's diff would
+otherwise grade as code. A branch's mode still counts them, as `grade_block.py check` does.
 
 `--surface` grades the code under the given paths as committed at HEAD, with the empty tree as the base,
 so every function counts as new. One surface per command. Tests under the paths are left out of the
@@ -277,6 +280,8 @@ def main() -> None:
     ap.add_argument('--settled', default='')
     ap.add_argument('--declined', default='')
     ap.add_argument('--callers', default='', help='callers found by hand, for a type, option, or other language')
+    ap.add_argument('--exclude-path', action='append', default=[], metavar='PREFIX',
+                    help='leave paths starting with PREFIX out of the change and its file count; repeats')
     args = ap.parse_args()
     surface = args.surface is not None
     if surface and (args.base is not None or args.branch_base is not None):
@@ -293,8 +298,14 @@ def main() -> None:
     config = grade_mode.load_config(root)
     notice = grade_mode.ordinary_notice(root)
     head = git(root, 'rev-parse', 'HEAD').stdout.strip()
+    kept = tuple(args.exclude_path)
+
+    def included(found: list[str] | set[str]) -> list[str]:
+        return [path for path in found if not path.startswith(kept)]
+
     if surface:
         paths, changed, under = surface_files(root, head, args.surface, config)
+        changed, under = included(changed), set(included(under))
         fork, committed = EMPTY_TREE, set(changed)
         if not changed:
             sys.exit(f"grade_prep: no code to grade under {', '.join(args.surface)}: every committed file there is a "
@@ -322,6 +333,12 @@ def main() -> None:
                      head).stdout.split('\n')
         branch = [path for path in branch if path]
         branch_mode = max(mode, grade_mode.assess(branch, root, config)[0], key=grade_mode.MODES.index)
+    if not surface:
+        # The mode counted the excluded paths, since grade_block.py check sizes it from every file the pull request
+        # touches; the graders see the rest.
+        changed, committed = included(changed), set(included(committed))
+        if not changed:
+            sys.exit(f"grade_prep: every committed change since {args.base} is under {', '.join(kept)}; nothing to grade")
     lens_path = root / config['lenses']
     lens_text = lens_path.read_text() if lens_path.is_file() else None
     lenses = grade_block.lens_ids(lens_text)
@@ -365,8 +382,9 @@ def main() -> None:
             indent=1) + '\n')
 
         locks = sorted({path for path in (under if surface else changed) if path.rsplit('/', 1)[-1] in LOCKS})
-        excludes = ''.join(f" ':!{path}'" for path in locks)
+        excludes = ''.join(f" ':!{path}'" for path in locks) + ''.join(' ' + shlex.quote(f':(exclude){p}*') for p in kept)
         left_out = f"; lock files left out: {', '.join(locks)}" if locks else ''
+        left_out += '; --exclude-path prefixes left out' if kept else ''
         if surface:
             excludes += pathspec_excludes(config['tests'] + config['notCode']) + ''.join(f" '{v}'" for v in VENDORED)
             change = f"git -C {root} diff {fork} {head} -- {' '.join(map(shlex.quote, paths))}{excludes}"

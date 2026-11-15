@@ -362,6 +362,22 @@ class CliTest(unittest.TestCase):
         root = Path(re.search(r'^remove: .* remove (\S+)$', out, re.M).group(1))
         self.assertEqual(json.loads((root / 'grade.json').read_text())['mode'], 'subagent')
 
+    def test_a_regrade_leaves_an_excluded_prefix_out_of_the_change_and_its_count(self) -> None:
+        graded = git(self.repo, 'rev-parse', 'HEAD').strip()
+        (self.repo / 'docs/reviews/grades/abc').mkdir(parents=True)
+        (self.repo / 'docs/reviews/grades/abc/grade.md').write_text('kept report\n')
+        (self.repo / 'app.py').write_text('from store import claim\n\nprint(claim(2))\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'keep and fix')
+        out = self.prep_with('--base', graded, '--exclude-path', 'docs/reviews/grades/')
+        self.assertNotIn('docs/reviews/grades/abc', out)
+        change = re.search(r'^- Change: `([^`]*)` \((\d+) files', out, re.M)
+        self.assertEqual(change.group(2), '1')
+        command = shlex.split(change.group(1))
+        command.insert(command.index('diff') + 1, '--name-only')
+        diffed = subprocess.run(command, capture_output=True, text=True, check=True).stdout.split()
+        self.assertEqual(diffed, ['app.py'])
+
     def declare_format(self, **config) -> None:
         # A reader that accepts everything, over one recorded instance, so only where its output lands is tested.
         check = [sys.executable, '-c', 'import json, sys; print(json.dumps([[] for _ in json.load(open(sys.argv[2]))]))',

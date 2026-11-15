@@ -9,7 +9,7 @@ Each entry says what changed, where, and why. Under it, **Before** is the old be
 
 ## 0.16.1
 
-- `grade_prep.py`: added `--exclude-path PREFIX`, repeatable, to leave every path starting with PREFIX out of the `Change:` diff, its file count, and the mode, as lock files are left out of the diff. A repository that commits its kept grade reports passes their directory so a re-grade does not grade them as code.
+- `grade_prep.py`: added `--exclude-path PREFIX`, repeatable, to leave every path starting with PREFIX out of the `Change:` diff and its file count, as lock files are left out of the diff. A branch's mode still counts them, since `grade_block.py check` sizes the mode from every file the pull request touches. A repository that commits its kept grade reports passes their directory so a re-grade does not grade them as code.
   - **Before:** a `--base <last graded>` re-grade diffed every path the fix commits touched, lock files aside, so the reports a `keep` commit filed for the earlier round landed in the change. `notCode` leaves documentation out of a surface's change only, never a branch's.
   - **Seen on:** forgesmith-os PR #1790 grade round 3, where a grader raised a P3 against the round 2 report it was reading as code (forgesmith-os issue #1793).
 

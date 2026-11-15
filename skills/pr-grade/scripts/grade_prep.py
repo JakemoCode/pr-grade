@@ -19,9 +19,9 @@ author declined, with reasons; each is pasted into every prompt as given. `--gro
 groups, one `NAME=L1,L2` per grader. `--skip` names lenses that do not apply to this change: no grader
 holds them, no proof copy is made for them, and `grade.json` records them, so the merge clears each as
 `L2 (not applicable)`. `--callers` adds callers found by hand to the derived list. `--exclude-path
-PREFIX`, repeatable, leaves every path starting with PREFIX out of the change, its file count, and the
-mode, as lock files are left out of the diff: a repository's kept grade reports, say, which a re-grade's
-diff would otherwise grade as code.
+PREFIX`, repeatable, leaves every path starting with PREFIX out of the change and its file count, as lock
+files are left out of the diff: a repository's kept grade reports, say, which a re-grade's diff would
+otherwise grade as code. A branch's mode still counts them, as `grade_block.py check` does.
 
 `--surface` grades the code under the given paths as committed at HEAD, with the empty tree as the base,
 so every function counts as new. One surface per command. Tests under the paths are left out of the
@@ -316,8 +316,7 @@ def main() -> None:
         except subprocess.CalledProcessError as failed:
             sys.exit(f'grade_prep: cannot find where HEAD left {args.base}: {failed.stderr.strip()}')
         # Graders see commits only, so a file the author never added is left out of everything here.
-        committed = set(included(git(root, '-c', 'core.quotePath=false', 'diff', '--name-only', '--no-renames', fork,
-                                     head).stdout.split('\n'))) - {''}
+        committed = set(git(root, '-c', 'core.quotePath=false', 'diff', '--name-only', '--no-renames', fork, head).stdout.split('\n')) - {''}
         changed = [path for path in grade_mode.changed_files(args.base, root) if path in committed]
         if not changed:
             sys.exit(f'grade_prep: no committed changes since {args.base}; nothing to grade')
@@ -332,8 +331,14 @@ def main() -> None:
                      'Pass --branch-base.')
         branch = git(root, '-c', 'core.quotePath=false', 'diff', '--name-only', '--no-renames', branch_fork,
                      head).stdout.split('\n')
-        branch = [path for path in included(branch) if path]
+        branch = [path for path in branch if path]
         branch_mode = max(mode, grade_mode.assess(branch, root, config)[0], key=grade_mode.MODES.index)
+    if not surface:
+        # The mode counted the excluded paths, since grade_block.py check sizes it from every file the pull request
+        # touches; the graders see the rest.
+        changed, committed = included(changed), set(included(committed))
+        if not changed:
+            sys.exit(f"grade_prep: every committed change since {args.base} is under {', '.join(kept)}; nothing to grade")
     lens_path = root / config['lenses']
     lens_text = lens_path.read_text() if lens_path.is_file() else None
     lenses = grade_block.lens_ids(lens_text)

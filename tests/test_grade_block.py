@@ -472,6 +472,33 @@ class MergeTest(unittest.TestCase):
         self.assertIn('L2  unaccounted: ask timing which', merged)
         self.assertEqual(self.block()['Score'], '2/5')
 
+    def test_a_report_with_no_clear_lens_lines_accounts_for_every_lens(self) -> None:
+        # A grader names a cleared lens only in `Verified and clear`, with the input it tried as the note, and
+        # writes an `L<n>:` line only for a lens with a finding, a suspect, or a claim it could not verify.
+        self.write('timing', 'Score: 5/5\nBlocking: nothing\nP3 L2 src/a.py:9 in f - log line reads oddly\n'
+                             'the message names the old flag\n'
+                             'Verified and clear: L1 (two writers racing at line 40), L2\n'
+                             'Could not verify: none\nOutside my lenses: none\nL7 candidates: none given\n')
+        self.write('reach', 'Score: 4/5\nBlocking: L3 would be P2\nL3: Suspect: a caller in src/c.py passes None\n'
+                            'Verified and clear: none\n'
+                            'Could not verify:\n- L3 would be P2: src/c.py:12 passes None, three runs never reached it\n'
+                            'Outside my lenses: none\nL7 candidates: none given\n')
+        merged = self.merged()
+        self.assertIn('L1  clear', merged)
+        self.assertIn('L2  clear', merged)
+        self.assertIn('L3  open claim from reach', merged)
+        self.assertNotIn('unaccounted', merged)
+        block = self.block()
+        self.assertEqual((block['Score'], block['Verified and clear']), ('4/5', 'L1 (two writers racing at line 40), L2'))
+
+    def test_a_report_from_an_older_grader_with_clear_lens_lines_still_merges(self) -> None:
+        self.write('timing', 'Score: 5/5\nBlocking: nothing\nL1: Clear: two writers racing at line 40 both lost.\n'
+                             'L2: Clear: walked every caller.\nVerified and clear: L1, L2\n'
+                             'Could not verify: none\nOutside my lenses: none\nL7 candidates: none given\n')
+        self.write('reach', report('5/5', 'L3'))
+        block = self.block()
+        self.assertEqual((block['Score'], block['Verified and clear']), ('5/5', 'L1, L2, L3'))
+
     def test_a_missing_report_leaves_its_lenses_unapplied(self) -> None:
         self.write('timing', report('5/5', 'L1, L2'))
         self.assertIn('L3  no report from reach', self.merged())

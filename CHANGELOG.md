@@ -7,6 +7,13 @@
 
 Each entry says what changed, where, and why. Under it, **Before** is the old behavior and **Seen on** is the grade that exposed it.
 
+## 0.16.2
+
+- `agents/grade.md`: changed the report so a grader names a cleared lens only in `Verified and clear`, with the strongest input it tried as the lens's note, such as `L4 (walked 6 callers)`, and writes an `L<n>:` line only for a lens with a finding, a suspect, or a `Could not verify` item, so that a report records findings and not their absence. Every lens the grader holds is still accounted for, in `Verified and clear` or kept out of it by a finding or a claim. `grade_block.py merge` already built the lens table from `Verified and clear`, findings, and claims, and never read a lens line, so it needs no change: a report from an older grader, lens lines and all, merges as before, and a 0.16.1 merge reads a 0.16.2 report.
+  - **Before:** the grader wrote an `L<n>: Clear: ...` line for every lens it held and listed `Verified and clear` as bare ids. About 20% of a three-group round's report text was those lines, which no reader used.
+  - **Seen on:** forgesmith-os rounds `fe091b1b` (14,269 characters, 11,402 with the lines trimmed) and `8dc5c1ab` (8,278 to 6,036), where PR #2124 began trimming the lines from the reports it keeps (forgesmith-os issue #2128).
+- `SKILL.md`: changed section 3 to say where a clearance's input is written, as the lens's note in `Verified and clear`. The merge's draft block keeps each note, so the PR body's `Verified and clear` line now carries them.
+
 ## 0.16.1
 
 - `grade_prep.py`: added `--exclude-path PREFIX`, repeatable, to leave every path starting with PREFIX out of the `Change:` diff and its file count, as lock files are left out of the diff. A branch's mode still counts them, since `grade_block.py check` sizes the mode from every file the pull request touches. A repository that commits its kept grade reports passes their directory so a re-grade does not grade them as code.

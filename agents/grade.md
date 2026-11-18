@@ -32,7 +32,7 @@ When you hold L16, or the lens the repository names for ambient assumptions, the
 ## Work
 
 1. Read every changed hunk. Grade the change, not a summary of it.
-2. Apply each of your lenses by name, and close each with one sentence: clear, naming the strongest input you tried against it and the line where that input failed to break the code; or suspect, naming the inputs and the wrong state they reach. A clearance that names a fact about the code and no input is an assertion nothing checked: write `Clear: 0.4.0-beta.1 and >=0.4.0-0 both refused at line 73`, never `Clear: the range is compared with semver.gte`. For a lens whose check is a walk, name what you walked and found whole. L4 always walks every caller, and L6 always checks the docs, types, tests, and registries the change touches, whatever the hunks show. Read nothing more for a lens once it is closed.
+2. Apply each of your lenses by name, and close each: clear, with the strongest input you tried against it and the line where that input failed to break the code, as that lens's note in `Verified and clear`; or suspect, with an `L<k>:` line naming the inputs and the wrong state they reach. A clearance that names a fact about the code and no input is an assertion nothing checked: write `L9 (0.4.0-beta.1 and >=0.4.0-0 both refused at line 73)`, never `L9 (the range is compared with semver.gte)`. For a lens whose check is a walk, the note names what you walked and found whole, such as `L4 (walked 6 callers)`. L4 always walks every caller, and L6 always checks the docs, types, tests, and registries the change touches, whatever the hunks show. Read nothing more for a lens once it is closed.
 3. Prove each suspect, highest rank first, as `Proof` below says, and try to refute it before you report it.
 4. A defect in a lens you do not hold is not yours to prove, and not yours to drop. Put it under `Outside my lenses` with what you saw.
 
@@ -82,8 +82,8 @@ P<n> L<k> <file>:<line> in <symbol> - <title>
 <what breaks, with the inputs and the resulting state>
 <the command you ran, and its trimmed output>
 Proof test: <the file under your proofs directory>, ran at <the path inside the repository it ran at>; only when the proof was a test
-L<k>: <for each lens you hold, the sentence that closed it, with the input it tried>
-Verified and clear: <each lens you hold with no P1 or P2 and no open claim that would be one, as bare ids: L1, L2>
+L<k>: <only for a lens with a finding, a suspect, or a `Could not verify` item: the sentence that closed it, with the input it tried>
+Verified and clear: <each lens you hold with no P1 or P2 and no open claim that would be one, each with the strongest input you tried against it as a note: L1 (two writers racing at line 40 both lost), L4 (walked 6 callers)>
 Could not verify: <"none", or on the lines below, each unproven claim as a `- ` bullet, with its lens, the rank it would have, and what each run returned>
 Outside my lenses: <each defect in a lens you do not hold, with that lens, its file:line, and what you saw; or "none">
 L7 candidates: <each file:line cleared with its reason, or proven as P<n>; or "none given">
@@ -93,6 +93,6 @@ A finding's `<file>:<line>` is the line the defect lives on in the head commit: 
 
 Take every line number from the head file, with `git -C <repository> grep -n -e '<text on the line>' <head> -- <file>` or a Read of the file, never by counting from a hunk header: counting is how a finding lands one line off. Anchor each file:line under `Could not verify`, `Outside my lenses`, and `L7 candidates` the same way. The merge flags a finding whose line the diff did not change, and the coordinator settles each flag. A `Proof test:` line belongs to the finding above it; the merge prints the command that moves the kept test into the repository, and the coordinator commits it before the fix.
 
-Every lens you hold appears in `Verified and clear`, or is kept out of it by a finding or a `Could not verify` item. A lens whose only finding is a P3 is verified and clear. A lens with an unproven claim that would be a P1 or P2 is not.
+Every lens you hold appears in `Verified and clear`, or is kept out of it by a finding or a `Could not verify` item. A lens whose only finding is a P3 is verified and clear. A lens with an unproven claim that would be a P1 or P2 is not. The report records findings, never their absence: a lens that found nothing gets its note in `Verified and clear` and no `L<k>:` line. Keep a note to the input and the line, with no parenthesis inside it: the merge reads a note up to the parenthesis that closes it and copies it into the grade block, and a stray one leaves the lens unaccounted.
 
 Score by the table in SKILL.md section 5, reading each row literally, since severity belongs in the P rank and never in the score. An open claim that would be a P1 or P2 scores as that finding would. A 2 means a lens you hold could not be applied at all. Your score covers your own lenses, and the coordinator scores the change. A P3 is a note and leaves the score at 5. Rank a defect in a check by what the check exists to refuse, never by whether today's callers write the input it lets through. When a run fails either way, in the same direction, and the only defect is how the failure reads (a traceback where a message belongs), the finding is a P3, even when the change you grade was itself fixing messages.

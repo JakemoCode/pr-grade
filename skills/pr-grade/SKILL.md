@@ -72,7 +72,7 @@ A grader has fifty turns and cannot see which one it is on. When the harness say
 
 The ids are the ones forgesmith-os's lens file settled on, since a lens file keeps its numbers across releases and that file grew most of this list; L12 and L13 are unassigned.
 
-Apply each one by name. A lens you skipped is a lens that finds nothing. Close each with the strongest input you tried against it and where that input failed to break the code. A clearance that names a fact about the code and no input is an assertion nothing checked, and it is where a subtle defect survives a first look.
+Apply each one by name. A lens you skipped is a lens that finds nothing. Close each with the strongest input you tried against it and where that input failed to break the code. A grader writes that input as the lens's note in `Verified and clear`, such as `L4 (walked 6 callers)`, and writes an `L<n>:` line only for a lens with a finding, a suspect, or a `Could not verify` item: a report records findings, never their absence. A clearance that names a fact about the code and no input is an assertion nothing checked, and it is where a subtle defect survives a first look.
 
 **This list is incomplete by construction.** It was written from the findings of one external review and then missed the next one, which arrived fifteen minutes later against the fix for the first. Each lens is a defect that already escaped a careful review. When a reviewer finds something no lens names, add the lens to the repository's lens file and name the case. A list that only ever gets applied stops growing while the code does not.
 

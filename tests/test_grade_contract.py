@@ -123,6 +123,17 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(found['findings'][0]['proof_test'],
                          {'file': 'proofs/stale_row.test.ts', 'at': 'tests/stale_row.test.ts'})
 
+    def test_a_cleared_lens_is_named_only_in_verified_and_clear(self) -> None:
+        # A report records findings, not their absence: no `L<n>:` line for a lens that found nothing.
+        block = re.search(r'(?s)```\n(Score:.*?)```', section(AGENT, 'Report')).group(1)
+        lens_line = re.search(r'(?m)^L<k>: (.*)$', block).group(1)
+        self.assertIn('only for a lens with a finding, a suspect, or a `Could not verify` item', lens_line)
+        self.assertNotIn('for each lens you hold', lens_line)
+        verified = re.search(r'(?m)^Verified and clear: (.*)$', block).group(1)
+        self.assertIn('the strongest input you tried', verified)
+        self.assertIn('the strongest input you tried', section(AGENT, 'Work'))
+        self.assertIn('`Verified and clear`', section(SKILL, '3. The fourteen lenses'))
+
     def test_the_fields_the_merge_names_are_in_the_report(self) -> None:
         merge = section(SKILL, '5. Score it')
         for field in ('Outside my lenses', 'Could not verify', 'Verified and clear', 'Blocking'):

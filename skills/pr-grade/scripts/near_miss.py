@@ -710,7 +710,7 @@ def second_readers(root: Path, head: str, lines: dict, config: dict, scanned: tu
             # -z ends the path with a NUL, since a path may hold a colon.
             run = subprocess.run(['git', '-c', 'core.quotePath=false', 'grep', '-z', '-n', '-a', '-F',
                                   *(['-i'] if anchor['ignore'] else []), '-e', anchor['term'], head, '--', '.', *VENDORED],
-                                 cwd=root, capture_output=True, text=True, errors='replace', timeout=GREP_TIMEOUT)
+                                 cwd=root, capture_output=True, encoding='utf-8', errors='replace', timeout=GREP_TIMEOUT)
         except subprocess.TimeoutExpired:
             out.append(f'{label}: the search timed out after {GREP_TIMEOUT}s')
             continue

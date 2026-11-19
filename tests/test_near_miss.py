@@ -174,6 +174,39 @@ class TableTest(unittest.TestCase):
         self.assertEqual(len(rows), near_miss.MAX_ROWS + 1)
         self.assertRegex(rows[-1], r'^and \d+ more rows, cut by the cap of \d+$')
 
+    def test_a_python_file_with_a_byte_order_mark_is_scanned(self) -> None:
+        out = self.table({'a.py': "﻿def f(s):\n    return s.startswith('## Loose ends')\n"})
+        self.assertTrue(any(line.startswith('- a.py:2') for line in out), out)
+
+    def test_a_javascript_literal_on_the_left_keeps_the_transform_on_the_right(self) -> None:
+        out = self.table({'a.ts': "export const f = (l: string) => '## Loose ends' === l.trim();\n"})
+        header = next(line for line in out if line.startswith('- a.ts:1'))
+        self.assertIn('.strip()', header)
+
+    def test_a_javascript_regexp_built_at_runtime_is_listed_as_not_run(self) -> None:
+        out = self.table({'a.ts': "export const f = (l: string) => new RegExp('^## ' + l);\n"})
+        line = next(line for line in out if line.startswith('- a.ts:1'))
+        self.assertIn('found, not run: the pattern is built at runtime', line)
+
+    def test_slashes_in_a_javascript_comment_or_string_are_no_regex(self) -> None:
+        out = self.table({'a.js': "// see (/foo/bar/) and path = /usr/bin/\nconst s = 'q=/a/';\n"})
+        self.assertFalse(any('regex' in line for line in out if line.startswith('- a.js')), out)
+
+    def test_a_name_extended_with_plus_equals_is_not_folded_to_its_first_value(self) -> None:
+        out = self.table({'a.py': "H = '## Loose'\nH += ' ends'\n\n\ndef f(s):\n    return s.startswith(H)\n"})
+        self.assertFalse(any("'## Loose'" in line for line in out), out)
+
+    def test_a_compiled_pattern_used_only_with_match_runs_with_match(self) -> None:
+        out = self.table({'a.py': "import re\nPAT = re.compile(r'## Loose ends')\nHEAD = '## Loose ends'\n\n\n"
+                                  "def f(s):\n    return PAT.match(s)\n"})
+        header = next(line for line in out if line.startswith('- a.py:2'))
+        self.assertIn('run with re.match', header)
+        self.assertIn("refused: 'x ## Loose ends', with a prefix", self.block(out, 'a.py:2'))
+
+    def test_an_in_test_against_a_module_list_is_no_substring_predicate(self) -> None:
+        out = self.table({'a.py': "COMMANDS = ['git status', 'git diff']\n\n\ndef f(c):\n    return 'git status' in COMMANDS\n"})
+        self.assertFalse(any(line.startswith('- a.py:5') for line in out), out)
+
     def test_a_changed_file_in_another_language_is_named(self) -> None:
         out = self.table({'scan.rb': "puts 'x' if line.start_with?('## Loose ends')\n"})
         self.assertIn('- not scanned scan.rb: no scanner reads this language', out)
@@ -222,6 +255,37 @@ class SecondReaderTest(unittest.TestCase):
         self.assertIn("'withdrawn'", line)
         self.assertIn('ledger.py:1', line)
 
+    def commit(self, files: dict[str, str]) -> None:
+        for path, text in files.items():
+            (self.root / path).write_text(text)
+        git(self.root, 'add', '-A')
+        git(self.root, 'commit', '-q', '-m', 'more')
+        self.head = git(self.root, 'rev-parse', 'HEAD').strip()
+
+    def test_a_reader_whose_path_holds_a_colon_is_listed_by_its_whole_path(self) -> None:
+        self.commit({'we:ird.py': "LOOSE = '## Loose ends'\n"})
+        line = next(line for line in self.readers({'wave_report.py': [(2, 4)]}) if "'## Loose ends'" in line)
+        self.assertIn('we:ird.py:1', line)
+
+    def test_an_inline_ignorecase_flag_searches_ignoring_case(self) -> None:
+        self.commit({'status.py': "import re\nW = re.compile(r'(?i)withdrawn rows')\n",
+                     'writer.py': "HEAD = '## Withdrawn Rows'\n"})
+        line = next(line for line in self.readers({'status.py': [(2, 2)]}) if 'status.py:2' in line)
+        self.assertIn('searched ignoring case', line)
+        self.assertIn('writer.py:1', line)
+
+    def test_a_lowercased_input_searches_ignoring_case(self) -> None:
+        self.commit({'low.py': "def f(b):\n    return '## loose ends' in b.lower()\n"})
+        line = next(line for line in self.readers({'low.py': [(2, 2)]}) if 'low.py:2' in line)
+        self.assertIn('searched ignoring case', line)
+        self.assertIn('check_pr.py:3', line)
+
+    def test_a_search_that_times_out_says_so_and_the_list_goes_on(self) -> None:
+        with mock.patch.object(near_miss.subprocess, 'run', side_effect=subprocess.TimeoutExpired('git', 1)):
+            out = self.readers({'wave_report.py': [(2, 4)]})
+        line = next(line for line in out if "'## Loose ends'" in line)
+        self.assertIn('the search timed out', line)
+
     def test_an_anchor_with_no_other_reader_says_none_found(self) -> None:
         (self.root / 'solo.py').write_text("def f(s):\n    return s.startswith('Unique-marker:')\n")
         git(self.root, 'add', '-A')
@@ -238,6 +302,15 @@ class ReportTest(unittest.TestCase):
         self.assertIn('### Near misses', out)
         self.assertTrue(any('boom' in line and 'stopped' in line for line in out))
         self.assertIn('### Second readers', out)
+
+    def test_the_report_scans_the_change_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / 'a.py').write_text("def f(s):\n    return s.startswith('Unique-marker:')\n")
+            with mock.patch.object(near_miss, 'scan', wraps=near_miss.scan) as scan, \
+                    mock.patch.object(near_miss.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', '')):
+                near_miss.report(root, 'HEAD', {'a.py': None}, ['a.py'], CONFIG)
+        self.assertEqual(scan.call_count, 1)
 
 
 if __name__ == '__main__':

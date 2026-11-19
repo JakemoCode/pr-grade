@@ -8,7 +8,8 @@
 Run it from inside the repository once the change is committed. It picks the mode as grade_mode.py
 does, splits the lenses among graders (the lens file's `## Fan-out groups` table, or correctness, timing, and
 lifetime and contract), lists the callers of each function the branch modified, runs check_then_act.py
-for whoever holds L7, history_replay.py for whoever holds L14, ambient.py for whoever holds L16, and makes
+for whoever holds L7, near_miss.py for whoever holds L9, history_replay.py for whoever holds L14, ambient.py
+for whoever holds L16, and makes
 one proof copy per grader with proof_dir.py, plus one for the env sweep when the repository declares one. It prints a shared block
 and one block per grader: a grader's prompt is the shared block followed by its own, pasted unchanged.
 It ends with the command that merges the graders' reports and the one that removes the proof copies.
@@ -61,8 +62,9 @@ def _load(name: str):
     return module
 
 
-grade_mode, grade_block, proof_dir, check_then_act, history_replay, ambient = (
-    _load(n) for n in ('grade_mode', 'grade_block', 'proof_dir', 'check_then_act', 'history_replay', 'ambient'))
+grade_mode, grade_block, proof_dir, check_then_act, history_replay, ambient, near_miss = (
+    _load(n) for n in ('grade_mode', 'grade_block', 'proof_dir', 'check_then_act', 'history_replay', 'ambient',
+                       'near_miss'))
 
 # forgesmith-os's groups, which its lens file keeps; L16 joins timing, since it asks about the world around a run.
 DEFAULT_GROUPS = {'correctness': ['L9', 'L10', 'L4', 'L11', 'L15'], 'timing': ['L1', 'L2', 'L7', 'L16'],
@@ -71,6 +73,8 @@ DEFAULT_GROUPS = {'correctness': ['L9', 'L10', 'L4', 'L11', 'L15'], 'timing': ['
 OLD_STATE_LENS = 'L14'
 # The lens that reads ambient.py's output, unless the config's `ambientLens` names another.
 AMBIENT_LENS = 'L16'
+# The lens that reads near_miss.py's output, unless the config's `nearMissLens` names another: its Boundaries probe.
+NEAR_MISS_LENS = 'L9'
 # The proof copy the env sweep perturbs, beside the graders' own.
 SWEEP_COPY = 'env-sweep'
 GROUP_ROW = re.compile(r'(?m)^\|\s*([^|]*?[A-Za-z][^|]*?)\s*\|\s*(L\d+(?:\s*,\s*L\d+)*)\s*\|')
@@ -358,6 +362,10 @@ def main() -> None:
     replayed = ([] if old_state in skipped
                 else history_replay.report(root, head if surface else fork, head, config, changed))
     holder = next((name for name, ids in groups.items() if old_state in ids), None)
+    near_miss_lens = config.get('nearMissLens', NEAR_MISS_LENS)
+    near_miss_lines = (near_miss.report(root, head, lines, changed, config)
+                       if near_miss_lens in lenses and near_miss_lens not in skipped else [])
+    near_miss_holder = next((name for name, ids in groups.items() if near_miss_lens in ids), None)
     ambient_lens = config.get('ambientLens', AMBIENT_LENS)
     # The sweep writes stray files into its copy and puts them back, so it gets a copy of its own.
     # A lens file without the ambient lens grades nothing with it, so nothing is scanned or swept for it.
@@ -438,6 +446,8 @@ def main() -> None:
             *(['', 'Proof copies:', *[f'- {line}' for line in copy_notes]] if copy_notes else []),
             *(['', f'No grader holds {old_state}, so every grader reads what history_replay.py found:', *replayed]
               if replayed and holder is None else []),
+            *(['', f'No grader holds {near_miss_lens}, so every grader reads what near_miss.py found:', *near_miss_lines]
+              if near_miss_lines and near_miss_holder is None else []),
             *(['', f'No grader holds {ambient_lens}, so every grader reads what ambient.py found:', *ambient_lines]
               if ambient_lines and ambient_holder is None else []),
         ]))
@@ -453,6 +463,8 @@ def main() -> None:
                 block += ['', 'check_then_act.py at the head:', l7]
             if replayed and name == holder:
                 block += ['', f'history_replay.py at the head, for {old_state}:', *replayed]
+            if near_miss_lines and name == near_miss_holder:
+                block += ['', f'near_miss.py at the head, for {near_miss_lens}:', *near_miss_lines]
             if ambient_lines and name == ambient_holder:
                 block += ['', f'ambient.py at the head, for {ambient_lens}:', *ambient_lines]
             print('\n'.join(block))

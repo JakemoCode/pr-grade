@@ -23,6 +23,7 @@
   "notCode": ["*.md", "docs/*", "LICENSE", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "*.lock", "go.sum"],
   "countAsCode": ["docs/manifest.yaml"],
   "checkThenAct": {},
+  "nearMissLens": "L9",
   "oldStateLens": "L14",
   "formats": [],
   "ambientLens": "L16",

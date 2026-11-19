@@ -257,7 +257,7 @@ class CliTest(unittest.TestCase):
         # The words tests/test_grade_contract.py holds the agent, its Inputs, and the skill to.
         out = self.prep().lower()
         for word in ('repository', 'lens file', 'base', 'head', 'settled', 'declined', 'callers', 'check_then_act.py',
-                     'proof copy', 'proofs directory', 'ambient.py', 'report'):
+                     'proof copy', 'proofs directory', 'ambient.py', 'near_miss.py', 'report'):
             with self.subTest(word=word):
                 self.assertIn(word, out)
 
@@ -291,6 +291,32 @@ class CliTest(unittest.TestCase):
         self.assertNotIn('ambient.py', out)
         root = Path(re.search(r'^merge: .* merge (\S+)$', out, re.M).group(1))
         self.assertFalse((root / 'env-sweep').exists())
+
+    def test_the_near_miss_table_and_second_readers_reach_the_l9_holder_only(self) -> None:
+        (self.repo / 'store.py').write_text('def claim(x):\n    return x + 1\n\n\ndef other():\n    return 1\n\n\n'
+                                            "def fresh(line):\n    return line.startswith('## Loose ends')\n")
+        (self.repo / 'app.py').write_text("from store import claim\n\nprint(claim(1))\nLOOSE = '## Loose ends'\n")
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'a heading reader')
+        out = self.prep('--groups', f"correctness=L9,L10", '--groups',
+                        f"rest={','.join(lens for lens in LENSES if lens not in ('L9', 'L10'))}")
+        shared, correctness = out.split('===== correctness =====')
+        correctness, rest = correctness.split('===== rest =====')
+        self.assertIn('near_miss.py at the head, for L9:', correctness)
+        self.assertIn("- store.py:10 startswith '## Loose ends'", correctness)
+        self.assertIn('app.py:4', correctness)
+        self.assertNotIn('near_miss.py', shared + rest)
+
+    def test_a_skipped_l9_gets_no_near_miss_table(self) -> None:
+        out = self.prep('--skip', 'L9')
+        self.assertNotIn('near_miss.py', out)
+        self.assertNotIn('### Near misses', out)
+
+    def test_nearmisslens_routes_the_table_to_another_lens(self) -> None:
+        (self.repo / '.claude/pr-grade.json').write_text('{"silent": ["store.py"], "nearMissLens": "L4"}\n')
+        git(self.repo, 'commit', '-q', '-am', 'route near misses to L4')
+        out = self.prep()
+        self.assertIn('near_miss.py at the head, for L4:', out)
 
     def test_without_a_sweep_the_exit_code_list_still_reaches_the_l10_holder(self) -> None:
         out = self.prep()

@@ -19,13 +19,13 @@ To update later, run this in the shell, then `/reload-plugins` in the session:
 claude plugin marketplace update jakemocode && claude plugin update pr-grade@jakemocode
 ```
 
-The scripts need Python 3.9 or later and nothing outside the standard library. The CI check and pull-request-body history also need an authenticated `gh`. The check-then-act scanner needs Node and the repository's own `typescript` package to read TypeScript and JavaScript; it reads Python with no extra setup.
+The scripts need Python 3.9 or later and nothing outside the standard library. The CI check and pull-request-body history also need an authenticated `gh`. The check-then-act scanner needs Node and the repository's own `typescript` package to read TypeScript and JavaScript; it reads Python with no extra setup. The near-miss table runs a JavaScript or TypeScript regex through `node` when it is on `PATH`, and lists it as found and not run otherwise.
 
 ## What it does
 
 Run your usual code review first, fix what it proves, and commit. Then run `/pr-grade`.
 
-1. **Prepare.** `grade_prep.py` reads the branch and picks a mode from what it touches: grade in the current thread, in one subagent, or fan out one subagent per lens group. It lists the callers of every function the branch modified, scans for check-then-act windows, replays recorded state through any changed reader, and makes a throwaway clone of the head commit for each grader to run proofs in.
+1. **Prepare.** `grade_prep.py` reads the branch and picks a mode from what it touches: grade in the current thread, in one subagent, or fan out one subagent per lens group. It lists the callers of every function the branch modified, scans for check-then-act windows, runs each changed predicate against near misses, replays recorded state through any changed reader, and makes a throwaway clone of the head commit for each grader to run proofs in.
 2. **Grade.** Each `pr-grade:grade` agent applies its lenses to the diff. A finding counts only with a run behind it, usually a test that fails against the unfixed code. Anything a grader believes but cannot demonstrate goes under `Could not verify`.
 3. **Merge and score.** `grade_block.py merge` combines the graders' reports and prints the lowest score the rules allow, plus a draft `## Grade` block for the PR body.
 4. **Fix and re-grade.** Move each finding's proof test to its repository path and commit it alone, then commit the fixes and grade the fix commits alone with `grade_prep.py --base <last graded commit>`. Repeat until a round finds no P1 or P2.
@@ -57,14 +57,14 @@ Hand the graders the review findings you declined, each with its reason. They tr
 | L6. Contract drift | The behaviour moved. Did the docs, types, tests, error messages, tool descriptions, and registries that describe it move too? |
 | L7. Check then act | When does a guard's state change, relative to the work it guards? An `await` or a second read between the check and the write lets every caller in that window through. `check_then_act.py` lists candidate windows in TypeScript, JavaScript, and Python for the grader to clear or prove. |
 | L8. Failure direction | For every new fallback, default, and failure path: which way does it fail, and why is that the cheap direction? |
-| L9. Correctness | For each changed line, what input, state, timing, or platform makes it wrong? Run the nearest input on each side of every check the diff adds or changes, test what a check names against what it tests, and run an unknown key through a validator and the writer behind it. |
+| L9. Correctness | For each changed line, what input, state, timing, or platform makes it wrong? Run the nearest input on each side of every check the diff adds or changes, test what a check names against what it tests, and run an unknown key through a validator and the writer behind it. `near_miss.py` runs each regex, `startswith`, and marker test the change adds against near misses of a string it accepts, and lists the other files that read the same parse anchor. |
 | L10. Removed behavior | For each deleted or replaced line, what invariant did it enforce, and where does the new code re-establish it? A file moved out of a path-scoped rule, or a check moved to a tool whose matcher sees less, counts too. |
 | L11. Cleanup | Reuse, simplification, efficiency, and altitude, each with the helper to call or the cheaper alternative and the concrete cost. Always a P3; never moves the score. |
 | L14. Old state meets new code | What did earlier versions write that the new code will read? A changed reader must still read it, and a new kind of record must refuse the old values its rules exclude. When the branch touches a reader of a format the repository declares under `formats`, `history_replay.py` runs recorded instances through the base and head readers, and old values through each new kind of record. |
 | L15. Promised coverage | Which inputs that the change says it covers does no line handle? List what its docstring, issue, and PR body name, trace each to the line that reads it, and run the repository's own instances through the head. |
 | L16. Ambient assumptions | What does the change assume about the world outside the process: a tool's exit codes, the clock and timezone, the locale, the filesystem, the other sessions on the machine? `ambient.py` lists every process call the change adds with what the call site does with its exit code and what the registry says the command's codes mean, and, when the repository declares an `envSweep`, runs the tests the change touches under a shifted clock, locale, umask, and filesystem. |
 
-The grader makes the call on every lens. The scripts behind L4, L7, L14, and L16 hand it a starting list, and no script output clears a lens on its own. `proof_dir.py` gives every grader a clone of the graded commit to prove findings in, whatever its lenses.
+The grader makes the call on every lens. The scripts behind L4, L7, L9, L14, and L16 hand it a starting list, and no script output clears a lens on its own. `proof_dir.py` gives every grader a clone of the graded commit to prove findings in, whatever its lenses.
 
 The full definitions, with an example each, are in [the skill](skills/pr-grade/SKILL.md#3-the-fourteen-lenses).
 
@@ -95,6 +95,7 @@ Every key in `.claude/pr-grade.json` is optional. A key you set replaces its def
 | `countAsCode` | empty | Paths that count toward size even under `tests` or `notCode`, such as a data file in `docs/` that the code reads. |
 | `checkThenAct` | built-in name lists | Overrides for the L7 scanner: `writes`, `secondReads`, `transactions`, `locks`, `ignore`. |
 | `formats` | empty | Records the code reads, for the L14 replay. |
+| `nearMissLens` | `L9` | The lens whose grader gets `near_miss.py`'s near-miss table and second-reader list. |
 | `oldStateLens` | `L14` | The lens whose grader gets the replay's output, for a lens file that numbers its lenses differently. |
 | `exitCodes` | empty | Commands to add to the registry L16's scan reads, command to a note on its exit codes. |
 | `envSweep` | none | The command that runs the test files a change touches, for the L16 env sweep. See [Declaring an env sweep](#declaring-an-env-sweep). |
@@ -198,10 +199,11 @@ All live in `skills/pr-grade/scripts/`. The skill calls them; you rarely run one
 
 | Script | What it does |
 |---|---|
-| `grade_prep.py` | Prepares a grade in one call: mode, lens groups (minus any `--skip`), callers, the L7 scan, the L14 replay, the L16 exit codes and env sweep, proof clones, and every grader's prompt. `--surface <path ...>` grades the code under paths with no diff (SKILL.md section 9). |
+| `grade_prep.py` | Prepares a grade in one call: mode, lens groups (minus any `--skip`), callers, the L7 scan, the L9 near misses, the L14 replay, the L16 exit codes and env sweep, proof clones, and every grader's prompt. `--surface <path ...>` grades the code under paths with no diff (SKILL.md section 9). |
 | `grade_mode.py` | Picks the mode alone and prints the files that decided it. |
 | `proof_dir.py` | Makes and removes the proof clones outside the repository, with dependencies linked in, and a `proofs` directory per grader for the tests that proved its findings. `remove` refuses while a kept test is still there. Nothing is registered in the repository. |
 | `check_then_act.py` | Lists check-then-act windows (L7) in the functions a branch changed: a check, then an `await`, transaction boundary, or external call, then the write the check guards. A grader clears each one or proves the race. It never gates anything, and an empty list clears nothing. |
+| `near_miss.py` | Runs every predicate a change adds or modifies, in Python, JavaScript, or TypeScript, against near misses of a string it accepts, and lists every other file that holds a parse anchor the change touches (L9). `near_misses()` is the generator, importable alone. |
 | `history_replay.py` | Runs the replay and transplant for each declared format whose reader changed (L14). |
 | `ambient.py` | Lists every process call a change adds or modifies with how its exit code is handled and the registry's note on the command, and runs the changed tests under each perturbation of a declared `envSweep` (L16). |
 | `grade_block.py merge <root>` | Merges the graders' reports, flags two findings at one line and any finding on a line the diff did not change, prints the move command for each proof test a grader kept, and drafts the block with the lowest allowed score. |

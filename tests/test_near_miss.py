@@ -79,9 +79,9 @@ class TableTest(unittest.TestCase):
         start = next(i for i, line in enumerate(out) if line.startswith('- ') and header in line)
         rows = []
         for line in out[start + 1:]:
-            if not line.startswith('  '):
+            if not line.startswith('  - '):
                 break
-            rows.append(line.strip())
+            rows.append(line[len('  - '):])
         return rows
 
     def test_the_withdrawn_marker_regex_accepts_the_withdrawn_rows_heading(self) -> None:
@@ -118,6 +118,16 @@ class TableTest(unittest.TestCase):
                                   "    return s.endswith(':new')\n"}, lines={'a.py': [(4, 4)]})
         self.assertFalse(any("'old:'" in line for line in out))
         self.assertTrue(any(line.startswith('- a.py:4') and "':new'" in line for line in out))
+
+    def test_a_regex_built_from_module_strings_is_folded_and_run(self) -> None:
+        out = self.table({'a.py': "import re\nHEAD = '## Loose ends'\nPAT = re.compile('^' + HEAD + '$')\n"})
+        header = next(line for line in out if line.startswith('- a.py:3'))
+        self.assertIn('regex `^## Loose ends$`', header)
+        self.assertIn("refused: '## Loose ends\\r\\n', with CRLF line endings", self.block(out, 'a.py:3'))
+
+    def test_a_dunder_comparison_is_no_marker(self) -> None:
+        out = self.table({'a.py': "if __name__ == '__main__':\n    pass\n"})
+        self.assertFalse(any('__main__' in line for line in out))
 
     def test_a_regex_no_literal_matches_is_printed_with_no_seed_found(self) -> None:
         out = self.table({'a.py': "import re\nPAT = re.compile(r'^zz\\d{4}$')\n"})

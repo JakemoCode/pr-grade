@@ -7,6 +7,19 @@
 
 Each entry says what changed, where, and why. Under it, **Before** is the old behavior and **Seen on** is the grade that exposed it.
 
+## 0.17.0
+
+- `near_miss.py`: added a near-miss table with two kinds of row to give L9's Boundaries probe a floor. Every predicate the change adds or modifies, a regex or a `startswith`, `endswith`, `in`, `includes`, or `==` test against a marker string in Python, JavaScript, or TypeScript, runs against near misses of a string it accepts: the seed with a prefix, a suffix, other casing, surrounding whitespace, CRLF, a Unicode lookalike, empty, and embedded in a longer word, then every other literal of its file and the touched tests that it accepts. A string predicate is seeded with its own literal, a regex with the first literal it matches there, or printed with "no seed found". Python's `re` runs a Python regex and `node` a JavaScript one, each in a child process with a timeout and a CPU limit; a regex found and not run says why. `near_misses()` is importable alone, for issue #43.
+  - **Before:** a grader picked the near misses for a changed check by hand, and the case the check was built for passed while its edges went untried.
+  - **Seen on:** EngOS PR #900, where `\*\*\s*withdrawn\b` settled a row headed `**Withdrawn rows**`, and PR #855, where a whole-line anchor and a substring anchor disagreed (issue #47).
+- `near_miss.py`: added a second-reader list to name, for each parse anchor the change touches (the string a predicate tests, a regex's longest literal run, a separator), every other file at the head whose code holds the same text, so that two readers of one format get the same inputs. Documentation is dropped as the callers search drops it, and tests are counted, not listed.
+  - **Before:** nothing found a second reader, and a grade flagged one only when a grader happened to read both files, then ranked the drift as an L11 cleanup.
+  - **Seen on:** EngOS PR #990, where `wave_report.py` split `## Loose ends` by hand beside check-pr's own reader, missed CRLF, and ran into the footer, graded P3 when it was a P2; PR #840, where a builder and CI disagreed on a heading; and PR #975, a second ledger parser (issue #47).
+- `grade_prep.py`: added `near_miss.py`'s output to the block of the grader holding `nearMissLens` (default L9), or to the shared block when none does; a skipped L9 skips it.
+- `SKILL.md`: changed section 2 and L9's Boundaries to say what the table and the list give the grader holding L9, that both are floors, and that neither moves the score.
+- `agents/grade.md`: added how to read `near_miss.py`'s output: settle every row that accepts what the check exists to refuse, seed a regex the script could not, and run the near misses through each second reader.
+- `templates/pr-grade.json`: added `nearMissLens`.
+
 ## 0.16.2
 
 - `agents/grade.md`: changed the report so a grader names a cleared lens only in `Verified and clear`, with the strongest input it tried as the lens's note, such as `L4 (walked 6 callers)`, and writes an `L<n>:` line only for a lens with a finding, a suspect, or a `Could not verify` item, so that a report records findings and not their absence. Every lens the grader holds is still accounted for, in `Verified and clear` or kept out of it by a finding or a claim. `grade_block.py merge` already built the lens table from `Verified and clear`, findings, and claims, and never read a lens line, so it needs no change: a report from an older grader, lens lines and all, merges as before, and a 0.16.1 merge reads a 0.16.2 report.

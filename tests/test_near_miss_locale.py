@@ -17,7 +17,7 @@ import sys
 sys.path.insert(0, sys.argv[1])
 import near_miss
 predicate = {'lang': 'js', 'pattern': '(\U0001F600+', 'flags': ''}
-print(near_miss._evaluate(predicate, ['x']))
+print(ascii(near_miss._evaluate(predicate, ['x'])))
 '''
 
 

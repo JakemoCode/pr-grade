@@ -18,12 +18,15 @@ each a floor and never a ceiling:
   other casing, with surrounding whitespace, with CRLF, with a Unicode lookalike, empty, and embedded in
   a longer word. After them come the other literals of those files that the predicate accepts, since a
   heading the same module writes is the nearest miss there is. A `.strip()` or `.lower()` on the input
-  in the same expression is applied first. Python's `re` runs a Python regex and `node` a JavaScript one,
+  in the same expression is applied first, and a compiled pattern runs with the one method the file calls
+  it with, or with `search` when it uses more than one. Python's `re` runs a Python regex and `node` a JavaScript one,
   each in a child process with a timeout; a regex found and not run gets a row that says why.
 - second readers: every parse anchor the change touches (the string a predicate tests, the longest
   literal run of a regex, the separator of a `split`, `partition`, or `find`), with every other file at
   the head whose code holds the same text, found with `git grep -F` and with documentation dropped as
-  the callers search drops it. Two readers of one format drift.
+  the callers search drops it. The search ignores case when the regex does or the input is case-folded
+  first. A regex with no literal run Python's parser can read is named as left out. Two readers of one
+  format drift.
 
 Nothing here stops a grade: a scan or a run that fails is printed as a note.
 """
@@ -66,6 +69,7 @@ MAX_READERS = 10
 MAX_POOL = 5000
 # Seconds per child process. A regex that backtracks without end on one input costs its predicate, never the prep.
 RUN_TIMEOUT = 10
+GREP_TIMEOUT = 60
 MIN_ANCHOR = 4
 TEXT_CHARS = 120
 OUTPUT_CHARS = 400
@@ -77,6 +81,7 @@ HOMOGLYPHS = {'a': '\u0430', 'c': '\u0441', 'e': '\u0435', 'i': '\u0456', 'o': '
               'X': '\u0425'}
 RE_FUNCS = {'compile': 'search', 'search': 'search', 'match': 'match', 'fullmatch': 'fullmatch',
             'findall': 'search', 'finditer': 'search', 'sub': 'search', 'subn': 'search', 'split': 'search'}
+CASELESS = {'lower', 'upper', 'casefold'}
 RE_INPUT = {'search': 1, 'match': 1, 'fullmatch': 1, 'findall': 1, 'finditer': 1, 'split': 1, 'sub': 2, 'subn': 2}
 RE_FLAGS = {'compile': 1, 'search': 2, 'match': 2, 'fullmatch': 2, 'findall': 2, 'finditer': 2, 'split': 3,
             'sub': 4, 'subn': 4}
@@ -94,9 +99,14 @@ VENDORED = (':(exclude)vendor/*', ':(exclude)third_party/*', ':(exclude)node_mod
 _QUOTED = r'''("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\$])*`)'''
 _JS_CHAIN = r'((?:\.(?:' + '|'.join(JS_TRANSFORMS) + r')\(\s*\))*)'
 JS_METHOD = re.compile(_JS_CHAIN + r'\.(startsWith|endsWith|includes)\(\s*' + _QUOTED + r'\s*[,)]')
-JS_EQUALS = re.compile(_JS_CHAIN + r'\s*([!=]==?)\s*' + _QUOTED + r'|' + _QUOTED + r'\s*([!=]==?)')
-JS_REGEX = re.compile(r'(?:^|(?<=[=(,:\[!&|?{};])|(?<==>)|(?<=\breturn))[ \t]*'
-                      r'/((?![*/])(?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\\\n\[])+)/([dgimsuyv]*)', re.M)
+JS_EQUALS = re.compile(_JS_CHAIN + r'\s*([!=]==?)\s*' + _QUOTED + r'|' + _QUOTED
+                       + r'\s*([!=]==?)(?:\s*[\w$]+(?:\.[\w$]+)*?' + _JS_CHAIN + r'(?![\w$.(\[]))?')
+# One token at a time, leftmost first, so slashes inside a comment or a string never read as a regex literal.
+JS_TOKEN = re.compile(r'(?P<comment>//[^\n]*|/\*.*?\*/)'
+                      r'|(?:^|(?<=[=(,:\[!&|?{};])|(?<==>)|(?<=\breturn))[ \t]*'
+                      r'/(?P<regex>(?![*/])(?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\\\n\[])+)/(?P<flags>[dgimsuyv]*)'
+                      r'|(?P<string>"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|`(?:\\.|[^`\\])*`)', re.M | re.S)
+JS_ANY_REGEXP = re.compile(r'\bnew\s+RegExp\(([^)\n]*)')
 JS_NEW_REGEXP = re.compile(r'\bnew\s+RegExp\(\s*' + _QUOTED + r'(?:\s*,\s*' + _QUOTED + r')?\s*\)')
 JS_SPLITTER = re.compile(r'\.(split|indexOf|lastIndexOf)\(\s*' + _QUOTED + r'\s*[,)]')
 JS_ESCAPE = re.compile(r'\\(u\{[0-9a-fA-F]+\}|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|\n|.)', re.S)
@@ -214,9 +224,28 @@ def _fold(node, names: dict[str, str]) -> str | None:
     return None
 
 
-def _module_strings(tree: ast.Module) -> dict[str, str]:
+COLLECTIONS = (ast.List, ast.Tuple, ast.Set, ast.Dict, ast.ListComp, ast.SetComp, ast.DictComp)
+
+
+def _module_names(tree: ast.Module) -> tuple[dict[str, str], set[str]]:
+    """Module-level names bound to a string, folded, and names bound to a list, tuple, set, or dict."""
     names: dict[str, str] = {}
+    collections: set[str] = set()
     for statement in tree.body:
+        if isinstance(statement, ast.AugAssign) and isinstance(statement.target, ast.Name):
+            name = statement.target.id
+            extra = _fold(statement.value, names) if isinstance(statement.op, ast.Add) else None
+            if name in names and extra is not None:
+                names[name] += extra
+            else:
+                names.pop(name, None)
+            continue
+        value = getattr(statement, 'value', None)
+        if isinstance(statement, (ast.Assign, ast.AnnAssign)) and (
+                isinstance(value, COLLECTIONS) or isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+                and value.func.id in ('set', 'frozenset', 'dict', 'list', 'tuple')):
+            collections.update(t.id for t in getattr(statement, 'targets', [getattr(statement, 'target', None)])
+                               if isinstance(t, ast.Name))
         targets = (statement.targets if isinstance(statement, ast.Assign)
                    else [statement.target] if isinstance(statement, ast.AnnAssign) and statement.value else [])
         if len(targets) == 1 and isinstance(targets[0], ast.Name):
@@ -226,12 +255,29 @@ def _module_strings(tree: ast.Module) -> dict[str, str]:
             else:
                 # A rebinding to something else makes the earlier value wrong for later reads.
                 names.pop(targets[0].id, None)
-    return names
+    return names, collections
 
 
-def _python_regex(path: str, node: ast.Call, func: str, names: dict[str, str]) -> dict:
+def _compiled_uses(tree: ast.Module) -> dict[int, str]:
+    """For each `NAME = re.compile(...)` whose NAME the file calls with one method only, that method's run."""
+    bound = {}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute)
+                and node.value.func.attr == 'compile'):
+            bound[node.targets[0].id] = id(node.value)
+    used: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in bound and node.func.attr in RE_INPUT):
+            used.setdefault(node.func.value.id, set()).add(RE_FUNCS[node.func.attr])
+    return {bound[name]: methods.pop() for name, methods in used.items() if len(methods) == 1}
+
+
+def _python_regex(path: str, node: ast.Call, func: str, names: dict[str, str], uses: dict[int, str]) -> dict:
+    # A compiled pattern runs the way the file uses it, and with search when it is used more than one way.
     found = {'file': path, 'line': node.lineno, 'col': node.col_offset, 'kind': 'regex', 'lang': 'python',
-             'method': RE_FUNCS[func]}
+             'method': uses.get(id(node), RE_FUNCS[func])}
     pattern = _arg(node, 0, 'pattern')
     flags_node = _arg(node, RE_FLAGS[func], 'flags')
     flags = _flags(flags_node)
@@ -255,7 +301,8 @@ def python_scan(path: str, text: str, ranges) -> tuple[list[dict], list[dict], l
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
         tree = ast.parse(text)
-    names = _module_strings(tree)
+    names, collections = _module_names(tree)
+    uses = _compiled_uses(tree)
     predicates, anchors, literals = [], [], []
     for node in ast.walk(tree):
         if _str(node) is not None:
@@ -266,7 +313,7 @@ def python_scan(path: str, text: str, ranges) -> tuple[list[dict], list[dict], l
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             func = node.func
             if isinstance(func.value, ast.Name) and func.value.id == 're' and func.attr in RE_FUNCS:
-                predicates.append(_python_regex(path, node, func.attr, names))
+                predicates.append(_python_regex(path, node, func.attr, names, uses))
             elif func.attr in ('startswith', 'endswith') and node.args:
                 first = node.args[0]
                 items = [_fold(e, names) for e in first.elts] if isinstance(first, ast.Tuple) else [_fold(first, names)]
@@ -277,7 +324,8 @@ def python_scan(path: str, text: str, ranges) -> tuple[list[dict], list[dict], l
         elif isinstance(node, ast.Compare) and len(node.ops) == 1:
             op, left, right = node.ops[0], node.left, node.comparators[0]
             if (isinstance(op, (ast.In, ast.NotIn)) and _str(left) is not None and _is_marker(left.value)
-                    and not isinstance(right, (ast.Tuple, ast.List, ast.Set, ast.Dict, ast.Constant))):
+                    and not isinstance(right, (*COLLECTIONS, ast.Constant))
+                    and not (isinstance(right, ast.Name) and right.id in collections)):
                 predicates.append({**base, 'kind': 'contains', 'literals': [left.value], 'transforms': _chain(right),
                                    'negated': isinstance(op, ast.NotIn)})
             elif isinstance(op, (ast.Eq, ast.NotEq)):
@@ -321,23 +369,36 @@ def js_scan(path: str, text: str, ranges) -> tuple[list[dict], list[dict], list[
     def transforms(chain: str) -> list[tuple[str, tuple]]:
         return [(JS_TRANSFORMS[name], ()) for name in re.findall(r'\.(\w+)\(', chain or '')]
 
-    for m in JS_REGEX.finditer(text):
-        add(m.start(1), {'kind': 'regex', 'pattern': m.group(1), 'flags': m.group(2), 'transforms': []})
-    for m in JS_NEW_REGEXP.finditer(text):
+    code = list(text)
+    for m in JS_TOKEN.finditer(text):
+        if m.group('regex') is not None:
+            add(m.start('regex'), {'kind': 'regex', 'pattern': m.group('regex'), 'flags': m.group('flags'),
+                                   'transforms': []})
+        elif m.group('comment') is not None:
+            code[m.start():m.end()] = [c if c == '\n' else ' ' for c in m.group(0)]
+    code = ''.join(code)
+    literal_regexps = set()
+    for m in JS_NEW_REGEXP.finditer(code):
+        literal_regexps.add(m.start())
         add(m.start(), {'kind': 'regex', 'pattern': _js_literal(m.group(1)),
                         'flags': _js_literal(m.group(2)) if m.group(2) else '', 'transforms': []})
-    for m in JS_METHOD.finditer(text):
+    for m in JS_ANY_REGEXP.finditer(code):
+        if m.start() not in literal_regexps:
+            add(m.start(), {'kind': 'regex', 'pattern': m.group(1).strip(), 'flags': '', 'transforms': [],
+                            'source': f'new RegExp({m.group(1).strip()[:TEXT_CHARS]})',
+                            'why': 'the pattern is built at runtime'})
+    for m in JS_METHOD.finditer(code):
         literal = _js_literal(m.group(3))
         kind = {'startsWith': 'startswith', 'endsWith': 'endswith', 'includes': 'contains'}[m.group(2)]
         if kind != 'contains' or _is_marker(literal):
             add(m.start(), {'kind': kind, 'literals': [literal], 'transforms': transforms(m.group(1))})
-    for m in JS_EQUALS.finditer(text):
-        quoted, operator = (m.group(3), m.group(2)) if m.group(3) else (m.group(4), m.group(5))
+    for m in JS_EQUALS.finditer(code):
+        quoted, operator, chain = (m.group(3), m.group(2), m.group(1)) if m.group(3) else (m.group(4), m.group(5), m.group(6))
         literal = _js_literal(quoted)
         if _is_marker(literal):
-            add(m.start(), {'kind': 'equals', 'literals': [literal], 'transforms': transforms(m.group(1)),
+            add(m.start(), {'kind': 'equals', 'literals': [literal], 'transforms': transforms(chain),
                             'negated': operator.startswith('!')})
-    for m in JS_SPLITTER.finditer(text):
+    for m in JS_SPLITTER.finditer(code):
         number = line(m.start())
         if _overlaps(number, number, ranges):
             anchors.append({'file': path, 'line': number, 'col': m.start(), 'lang': 'js', 'kind': f'.{m.group(1)}',
@@ -346,7 +407,7 @@ def js_scan(path: str, text: str, ranges) -> tuple[list[dict], list[dict], list[
 
 
 def _read(root: Path, path: str) -> str:
-    return (root / path).read_text(encoding='utf-8', errors='replace')
+    return (root / path).read_text(encoding='utf-8-sig', errors='replace')
 
 
 def _scanner(path: str):
@@ -398,7 +459,8 @@ def _evaluate(predicate: dict, inputs: list[str]) -> tuple[list[bool] | None, st
            'inputs': inputs}
     try:
         with ambient._terminating_raises():
-            run = subprocess.run(argv, input=json.dumps(job), capture_output=True, text=True, timeout=RUN_TIMEOUT,
+            run = subprocess.run(argv, input=json.dumps(job), capture_output=True, encoding='utf-8', errors='replace',
+                                 timeout=RUN_TIMEOUT,
                                  preexec_fn=_limit_cpu if resource is not None else None)
     except subprocess.TimeoutExpired:
         return None, f'timed out after {RUN_TIMEOUT}s, so the pattern may backtrack without end on one of its inputs'
@@ -444,7 +506,9 @@ def _show(text: str) -> str:
 
 def _describe(predicate: dict) -> str:
     where = f"{predicate['file']}:{predicate['line']}"
-    if predicate['kind'] == 'regex':
+    if predicate.get('source'):
+        what = f"regex `{predicate['source']}`"
+    elif predicate['kind'] == 'regex':
         if predicate['lang'] == 'js':
             what = f"regex `/{predicate['pattern']}/{predicate['flags']}`, run with RegExp.test under node"
         else:
@@ -508,10 +572,12 @@ def _rows(predicate: dict, pool: list[tuple[str, str]]) -> list[str]:
     return out
 
 
-def near_miss_table(root: Path, lines: dict, changed: list[str], config: dict) -> list[str]:
+def near_miss_table(root: Path, lines: dict, changed: list[str], config: dict, scanned: tuple | None = None) -> list[str]:
     """The near-miss table for every predicate on a changed line. `lines` maps a changed path to its new-side
-    ranges, or None for a whole new file; `changed` names the tests whose literals can seed a regex."""
-    predicates, _, notes, literals = scan(root, lines, config)
+    ranges, or None for a whole new file; `changed` names the tests whose literals can seed a regex. `scanned`
+    is what `scan()` returned for these lines, when the caller already has it."""
+    predicates, _, notes, literals = scanned or scan(root, lines, config)
+    literals = dict(literals)
     tests = [path for path in changed if grade_mode.matches(path, config['tests']) and (root / path).is_file()
              and _scanner(path) is not None]
     for test in tests:
@@ -538,8 +604,16 @@ def near_miss_table(root: Path, lines: dict, changed: list[str], config: dict) -
 # ---- second readers
 
 
-def _literal_runs(pattern: str, flags: int) -> list[str]:
-    """The runs of literal characters a regex requires, read with the parser Python's `re` uses."""
+def _python_syntax(pattern: str) -> str:
+    """A JavaScript pattern in the syntax Python's parser reads, for its literal runs only."""
+    pattern = re.sub(r'\(\?<(?![=!])', '(?P<', pattern)
+    pattern = re.sub(r'\\k<(\w+)>', r'(?P=\1)', pattern)
+    return re.sub(r'\\[pP]\{[^}]*\}|\\u\{[0-9a-fA-F]+\}', '.', pattern)
+
+
+def _literal_runs(pattern: str, flags: int) -> tuple[list[str], int] | None:
+    """The runs of literal characters a regex requires and its flags with any inline ones, read with the
+    parser Python's `re` uses, or None when that parser refuses it."""
     try:
         with warnings.catch_warnings():
             warnings.simplefilter('ignore')
@@ -549,7 +623,7 @@ def _literal_runs(pattern: str, flags: int) -> list[str]:
                 import sre_parse as parser
             parsed = parser.parse(pattern, flags)
     except Exception:  # noqa: BLE001
-        return []
+        return None
     runs, current = [], []
 
     def flush() -> None:
@@ -574,37 +648,46 @@ def _literal_runs(pattern: str, flags: int) -> list[str]:
 
     walk(parsed)
     flush()
-    return runs
+    return runs, getattr(getattr(parsed, 'state', None), 'flags', flags)
 
 
-def _anchors(predicates: list[dict], anchors: list[dict]) -> list[dict]:
-    """One search term per anchor: a string predicate's literal, a regex's longest literal run, a separator."""
-    out = []
+def _anchors(predicates: list[dict], anchors: list[dict]) -> tuple[list[dict], list[str]]:
+    """One search term per anchor: a string predicate's literal, a regex's longest literal run, a separator;
+    and each changed regex with no run to search."""
+    out, unread = [], []
     for p in predicates:
         if p['kind'] == 'regex':
             if p.get('why'):
                 continue
-            ignore = 'i' in p['flags'] if p['lang'] == 'js' else bool(p['flags'] & re.IGNORECASE)
-            runs = _literal_runs(p['pattern'], 0 if p['lang'] == 'js' else p['flags'])
-            if runs:
-                out.append({**p, 'term': max(runs, key=len), 'ignore': ignore, 'from': 'the longest literal run of the regex'})
+            js = p['lang'] == 'js'
+            read = _literal_runs(_python_syntax(p['pattern']) if js else p['pattern'], 0 if js else p['flags'])
+            if not read or not read[0]:
+                unread.append(f"{p['file']}:{p['line']}")
+                continue
+            runs, flags = read
+            ignore = 'i' in p['flags'] or bool(flags & re.IGNORECASE) if js else bool(flags & re.IGNORECASE)
+            out.append({**p, 'term': max(runs, key=len), 'ignore': ignore, 'from': 'the longest literal run of the regex'})
         else:
-            out += [{**p, 'term': literal, 'ignore': False, 'from': f"the {p['kind']}"} for literal in p['literals']]
+            # The input is folded first, so the format may spell the literal in any case.
+            ignore = any(name in CASELESS for name, _ in p['transforms'])
+            out += [{**p, 'term': literal, 'ignore': ignore, 'from': f"the {p['kind']}"} for literal in p['literals']]
     out += [{**a, 'ignore': False, 'from': f"the {a['kind']}"} for a in anchors]
     for a in out:
         a['term'] = max(a['term'].splitlines() or [''], key=len).strip()
-    return out
+    return out, unread
 
 
 def _searchable(term: str) -> bool:
     return len(term) >= MIN_ANCHOR and sum(char.isalnum() for char in term) >= 3
 
 
-def second_readers(root: Path, head: str, lines: dict, config: dict) -> list[str]:
-    """Each parse anchor on a changed line, with every other file at `head` whose code holds the same text."""
-    predicates, anchors, _, _ = scan(root, lines, config)
+def second_readers(root: Path, head: str, lines: dict, config: dict, scanned: tuple | None = None) -> list[str]:
+    """Each parse anchor on a changed line, with every other file at `head` whose code holds the same text.
+    `scanned` is what `scan()` returned for these lines, when the caller already has it."""
+    predicates, anchors, _, _ = scanned or scan(root, lines, config)
     found, seen, short = [], set(), 0
-    for anchor in _anchors(predicates, anchors):
+    terms, unread = _anchors(predicates, anchors)
+    for anchor in terms:
         key = (anchor['term'].lower() if anchor['ignore'] else anchor['term'], anchor['ignore'])
         if key in seen:
             continue
@@ -620,22 +703,30 @@ def second_readers(root: Path, head: str, lines: dict, config: dict) -> list[str
            'dropped and tests counted, not listed. A floor, never a ceiling: a reader that builds the text at runtime, '
            'or spells it as another regex, is not found.']
     for anchor in found[:MAX_ANCHORS]:
-        run = subprocess.run(['git', '-c', 'core.quotePath=false', 'grep', '-n', '-a', '-F',
-                              *(['-i'] if anchor['ignore'] else []), '-e', anchor['term'], head, '--', '.', *VENDORED],
-                             cwd=root, capture_output=True, text=True, errors='replace')
         where = f"{anchor['file']}:{anchor['line']}"
         label = (f"- {_show(anchor['term'])}, from {anchor['from']} at {where}"
                  + (', searched ignoring case' if anchor['ignore'] else ''))
+        try:
+            # -z ends the path with a NUL, since a path may hold a colon.
+            run = subprocess.run(['git', '-c', 'core.quotePath=false', 'grep', '-z', '-n', '-a', '-F',
+                                  *(['-i'] if anchor['ignore'] else []), '-e', anchor['term'], head, '--', '.', *VENDORED],
+                                 cwd=root, capture_output=True, text=True, errors='replace', timeout=GREP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            out.append(f'{label}: the search timed out after {GREP_TIMEOUT}s')
+            continue
         if run.returncode not in (0, 1):
             out.append(f"{label}: the search failed: {' '.join(run.stderr.split())[:OUTPUT_CHARS]}")
             continue
         files: dict[str, list[str]] = {}
         tests = set()
-        for hit in run.stdout.splitlines():
-            parts = hit.split(':', 3)
-            if len(parts) < 3 or parts[1] == anchor['file']:
+        for hit in run.stdout.split('\n'):
+            # `<sha>:<path>\0<line>\0<text>`; the sha holds no colon.
+            parts = hit.split('\0', 2)
+            if len(parts) < 3 or ':' not in parts[0]:
                 continue
-            path, number = parts[1], parts[2]
+            path, number = parts[0].split(':', 1)[1], parts[1]
+            if path == anchor['file']:
+                continue
             if grade_mode.code_files([path], config):
                 files.setdefault(path, []).append(number)
             elif grade_mode.matches(path, config['tests']):
@@ -648,6 +739,9 @@ def second_readers(root: Path, head: str, lines: dict, config: dict) -> list[str
         out.append(f'- and {len(found) - MAX_ANCHORS} more anchors, cut by the cap of {MAX_ANCHORS}')
     if not found:
         out.append(f'- none: the change touches no parse anchor of {MIN_ANCHOR} or more characters')
+    if unread:
+        out.append(f"- left out {len(unread)} regex{'es' if len(unread) != 1 else ''} with no literal run Python's parser "
+                   f"could read, at {', '.join(unread)}: search for its readers by hand")
     if short:
         out.append(f'- left out {short} anchor{"s" if short != 1 else ""} shorter than {MIN_ANCHOR} characters or with '
                    'fewer than 3 letters or digits, too common to search')
@@ -658,13 +752,18 @@ def report(root: Path, head: str, lines: dict, changed: list[str], config: dict)
     """The lines a grader holding the near-miss lens reads."""
     out = ['### Near misses']
     try:
-        out += near_miss_table(root, lines, changed, config)
+        scanned = scan(root, lines, config)
+    except Exception as failed:  # noqa: BLE001
+        return [*out, f'The scan stopped, so nothing is listed: {type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}',
+                '### Second readers', '- not searched: the scan above stopped']
+    try:
+        out += near_miss_table(root, lines, changed, config, scanned)
     except Exception as failed:  # noqa: BLE001
         # Fails open: the table is a floor for one lens, and a prep that stops here grades nothing.
         out.append(f'The scan stopped, so no predicate is listed: {type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}')
     out.append('### Second readers')
     try:
-        out += second_readers(root, head, lines, config)
+        out += second_readers(root, head, lines, config, scanned)
     except Exception as failed:  # noqa: BLE001
         out.append(f'The search stopped, so no second reader is listed: {type(failed).__name__}: '
                    f'{str(failed)[:OUTPUT_CHARS]}')

@@ -14,6 +14,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 AGENT = (ROOT / 'agents/grade.md').read_text()
 SKILL = (ROOT / 'skills/pr-grade/SKILL.md').read_text()
+LENSES = (ROOT / 'skills/pr-grade/lenses.md').read_text()
+SCORING = (ROOT / 'skills/pr-grade/scoring.md').read_text()
 sys.path.insert(0, str(ROOT / 'skills/pr-grade/scripts'))
 import grade_block  # noqa: E402
 # What a grader needs from the coordinator. A coordinator that never loads the skill sees only the
@@ -171,10 +173,10 @@ class ReportTest(unittest.TestCase):
         verified = re.search(r'(?m)^Verified and clear: (.*)$', block).group(1)
         self.assertIn('the strongest input you tried', verified)
         self.assertIn('the strongest input you tried', section(AGENT, 'Work'))
-        self.assertIn('`Verified and clear`', section(SKILL, '3. The fourteen lenses'))
+        self.assertIn('`Verified and clear`', section(LENSES, '3. The fourteen lenses'))
 
     def test_the_fields_the_merge_names_are_in_the_report(self) -> None:
-        merge = section(SKILL, '5. Score it')
+        merge = section(SCORING, '5. Score it')
         for field in ('Outside my lenses', 'Could not verify', 'Verified and clear', 'Blocking'):
             with self.subTest(field=field):
                 self.assertIn(f'`{field}`', merge)

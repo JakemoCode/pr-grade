@@ -575,7 +575,7 @@ class LensSliceTest(unittest.TestCase):
     def test_a_fenced_heading_ends_no_section_of_the_skill(self) -> None:
         text = ('## 3. Lenses\n\nopen\n\n### L1. A\n\na\n\n```md\n## 9. fenced\n```\n\na tail\n\n## 4. Finding\n\nb\n\n'
                 '## 5. Score\n\n```md\n## Grade\n## 6. fenced\n```\n\nscore tail\n\n## 6. Report\n\nc\n')
-        lenses, rules = grade_prep.skill_lens_text(text)
+        lenses, rules = grade_prep.skill_lens_text([text])
         self.assertEqual(lenses, '## 3. Lenses\n\nopen\n\n### L1. A\n\na\n\n```md\n## 9. fenced\n```\n\na tail\n\n')
         self.assertEqual(rules, '## 4. Finding\n\nb\n\n## 5. Score\n\n```md\n## Grade\n## 6. fenced\n```\n\nscore tail\n\n')
 
@@ -587,10 +587,10 @@ class LensSliceTest(unittest.TestCase):
     def test_a_skill_lens_heading_inside_a_fence_gives_none(self) -> None:
         # The lens-id regex reads the fenced heading as a lens; the slicer cannot say where its text is.
         text = '## 3. Lenses\n\n### L1. A\n\n```md\n### L2. B\n```\n\nb\n\n## 4. F\n\nf\n\n## 5. S\n\ns\n'
-        self.assertIsNone(grade_prep.skill_lens_text(text))
+        self.assertIsNone(grade_prep.skill_lens_text([text]))
 
     def test_a_skill_text_missing_a_section_gives_none(self) -> None:
-        self.assertIsNone(grade_prep.skill_lens_text('## 3. Lenses\n\n### L1. A\n\na\n\n## 4. Finding\n\nb\n'))
+        self.assertIsNone(grade_prep.skill_lens_text(['## 3. Lenses\n\n### L1. A\n\na\n\n## 4. Finding\n\nb\n']))
 
 
 class LensSliceCliTest(unittest.TestCase):
@@ -716,7 +716,7 @@ class LensSliceCliTest(unittest.TestCase):
         vendored = Path(self.tmp.name) / 'vendor/scripts'
         shutil.copytree(SCRIPTS, vendored, ignore=shutil.ignore_patterns('__pycache__'))
         out = self.prep_with('--base', 'main', '--groups', 'a=L9,L15', '--groups', 'b=L16,L17', script=vendored)
-        self.assertRegex(out, r'(?m)^notice: no SKILL\.md beside .*, so each prompt file carries the lens file alone')
+        self.assertRegex(out, r'(?m)^notice: no skill beside .*, so each prompt file carries the lens file alone')
         a = self.prompts(out)['a']
         self.assertIn('ranking text', a)
         self.assertNotIn('sixteen text', a)

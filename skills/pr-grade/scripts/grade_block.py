@@ -585,8 +585,8 @@ def _inert(line: str) -> str:
 
 def to_settle(meta: dict, status: dict[str, str], unapplied: list[str], outside: list[str], open_blocking: int,
               shared: int, flagged: int, unchecked: str | None, pathless: int) -> list[str]:
-    """What SKILL.md section 5 leaves to the coordinator in this merge, one line each. A P3 claim is not
-    on it: it leaves the score where it is."""
+    """What the skill's section 5, in scoring.md, leaves to the coordinator in this merge, one line each. A P3 claim
+    is not on it: it leaves the score where it is."""
     def counted(n: int, one: str, many: str) -> str:
         return f'{n} {one if n == 1 else many}'
     unaccounted = [lens for lens in unapplied if status.get(lens, '').startswith('unaccounted')]

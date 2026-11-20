@@ -66,7 +66,7 @@ Hand the graders the review findings you declined, each with its reason. They tr
 
 The grader makes the call on every lens. The scripts behind L4, L7, L9, L14, and L16 hand it a starting list, and no script output clears a lens on its own. `proof_dir.py` gives every grader a clone of the graded commit to prove findings in, whatever its lenses.
 
-The full definitions, with an example each, are in [the skill](skills/pr-grade/SKILL.md#3-the-fourteen-lenses).
+The full definitions, with an example each, are in [the skill's `lenses.md`](skills/pr-grade/lenses.md#3-the-fourteen-lenses).
 
 ## Set up a repository
 
@@ -195,13 +195,26 @@ The workflow template runs `grade_block.py check` on `opened`, `edited`, `synchr
 - It fails closed when GitHub's lists are cut off (3000 PR files, 300 compared files) or when the PR moves during the check.
 - The config and lens file are silent files by default, so a PR that changes them needs a heavier grade.
 
+## Skill files
+
+`SKILL.md` is the core: what every grade needs before its graders report. The coordinator reads each file beside it at the step the core names, and a section keeps its number in whichever file holds it.
+
+| File | Sections | Read |
+|---|---|---|
+| `SKILL.md` | 1 the diff, 2 mode and prep, 4 what a finding carries, 6 the report | On every invocation |
+| `lenses.md` | 3 the fourteen lenses | In-thread only. A grader gets its lenses in its prompt file |
+| `scoring.md` | 5 scoring and settling | Once the graders report, or in-thread before grading |
+| `fix-and-regrade.md` | 7 fix, then re-grade | When a grade holds something to fix |
+| `setup-and-enforcement.md` | 0 repository setup, 8 enforcement | When setting a repository up, in-thread, or before marking a PR ready |
+| `surface-grades.md` | 9 grading a surface | When grading code no branch is changing |
+
 ## Scripts
 
 All live in `skills/pr-grade/scripts/`. The skill calls them; you rarely run one by hand.
 
 | Script | What it does |
 |---|---|
-| `grade_prep.py` | Prepares a grade in one call: mode, lens groups (minus any `--skip`), callers, the L7 scan, the L9 near misses, the L14 replay, the L16 exit codes and env sweep, proof clones, and every grader's prompt. `--surface <path ...>` grades the code under paths with no diff (SKILL.md section 9). |
+| `grade_prep.py` | Prepares a grade in one call: mode, lens groups (minus any `--skip`), callers, the L7 scan, the L9 near misses, the L14 replay, the L16 exit codes and env sweep, proof clones, and every grader's prompt. `--surface <path ...>` grades the code under paths with no diff (section 9, in `surface-grades.md`). |
 | `grade_mode.py` | Picks the mode alone and prints the files that decided it. |
 | `proof_dir.py` | Makes and removes the proof clones outside the repository, with dependencies linked in, and a `proofs` directory per grader for the tests that proved its findings. `remove` refuses while a kept test is still there. Nothing is registered in the repository. |
 | `check_then_act.py` | Lists check-then-act windows (L7) in the functions a branch changed: a check, then an `await`, transaction boundary, or external call, then the write the check guards. A grader clears each one or proves the race. It never gates anything, and an empty list clears nothing. |

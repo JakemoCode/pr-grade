@@ -221,6 +221,14 @@ class MergeTest(unittest.TestCase):
         self.assertIn('only because no record lacks `hit` today', line)
         self.assertIn('re-rank', line)
 
+    def test_a_proven_p3_sharing_its_line_with_a_p2_is_matched_to_the_p3(self) -> None:
+        # The PR 1280 run: the grader's own P2 and the suspect's P3 both sat at run-report-store.ts:292.
+        merged = self.merged(report('S1 proven: P3, L1, src/a.py:9; a P3 because only the error type reads wrong.\n',
+                                    findings=FINDING + 'P3 L1 src/a.py:9 in f - throws TypeError\nwhat breaks\n'))
+        line = next(line for line in merged.splitlines() if line.lstrip().startswith('grade S1'))
+        self.assertIn('P3 at src/a.py:9', line)
+        self.assertIn('only the error type reads wrong', line)
+
     def test_a_suspect_beyond_the_count_handed_is_read_like_the_rest(self) -> None:
         block = self.block(report('S1 proven: P2 L1 src/a.py:9, above.\nS2 refuted: P2, none.\n'))
         self.assertIn('S2', block['Could not verify'])

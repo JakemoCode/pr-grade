@@ -66,6 +66,8 @@ MAX_PREDICATES = 20
 MAX_ROWS = 16
 MAX_ANCHORS = 20
 MAX_READERS = 10
+MAX_NOTES = 10
+MAX_HIT_LINES = 10
 MAX_POOL = 5000
 # Seconds per child process. A regex that backtracks without end on one input costs its predicate, never the prep.
 RUN_TIMEOUT = 10
@@ -110,6 +112,8 @@ JS_ANY_REGEXP = re.compile(r'\bnew\s+RegExp\(([^)\n]*)')
 JS_NEW_REGEXP = re.compile(r'\bnew\s+RegExp\(\s*' + _QUOTED + r'(?:\s*,\s*' + _QUOTED + r')?\s*\)')
 JS_SPLITTER = re.compile(r'\.(split|indexOf|lastIndexOf)\(\s*' + _QUOTED + r'\s*[,)]')
 JS_ESCAPE = re.compile(r'\\(u\{[0-9a-fA-F]+\}|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|\n|.)', re.S)
+# What str.splitlines breaks on.
+LINE_BREAK = re.compile('[\n\r\x0b\x0c\x1c-\x1e\x85\u2028\u2029]')
 
 PY_RUNNER = r'''
 import json, re, sys
@@ -357,9 +361,7 @@ def js_scan(path: str, text: str, ranges) -> tuple[list[dict], list[dict], list[
     def line(at: int) -> int:
         return text.count('\n', 0, at) + 1
 
-    predicates, anchors = [], []
-    literals = [(_js_unescape(ambient._body(m)), line(m.start())) for m in ambient.STRING.finditer(text)
-                if not (m.group(0).startswith('`') and '${' in m.group(0))]
+    predicates, anchors, literals = [], [], []
 
     def add(at: int, found: dict) -> None:
         number = line(at)
@@ -369,13 +371,17 @@ def js_scan(path: str, text: str, ranges) -> tuple[list[dict], list[dict], list[
     def transforms(chain: str) -> list[tuple[str, tuple]]:
         return [(JS_TRANSFORMS[name], ()) for name in re.findall(r'\.(\w+)\(', chain or '')]
 
+    # The string literals come from this pass too, so a quote in a comment or a regex literal opens none.
     code = list(text)
     for m in JS_TOKEN.finditer(text):
         if m.group('regex') is not None:
             add(m.start('regex'), {'kind': 'regex', 'pattern': m.group('regex'), 'flags': m.group('flags'),
                                    'transforms': []})
+            code[m.start('regex'):m.end('regex')] = ' ' * len(m.group('regex'))
         elif m.group('comment') is not None:
             code[m.start():m.end()] = [c if c == '\n' else ' ' for c in m.group(0)]
+        elif not (m.group('string').startswith('`') and '${' in m.group('string')):
+            literals.append((_js_literal(m.group('string')), line(m.start())))
     code = ''.join(code)
     literal_regexps = set()
     for m in JS_NEW_REGEXP.finditer(code):
@@ -418,8 +424,8 @@ def _scanner(path: str):
 
 def scan(root: Path, lines: dict, config: dict) -> tuple[list[dict], list[dict], list[str], dict[str, list]]:
     """Predicates and anchors on the changed lines of every changed code file, a note for each code file not
-    scanned, and each scanned file's string literals."""
-    predicates, anchors, notes, literals = [], [], [], {}
+    scanned, the files that failed to scan first, and each scanned file's string literals."""
+    predicates, anchors, failed_notes, notes, literals = [], [], [], [], {}
     for path, ranges in sorted(lines.items()):
         if not (root / path).is_file() or not grade_mode.code_files([path], config):
             continue
@@ -430,11 +436,12 @@ def scan(root: Path, lines: dict, config: dict) -> tuple[list[dict], list[dict],
         try:
             found, anchored, literals[path] = scanner(path, _read(root, path), ranges)
         except (OSError, SyntaxError, ValueError) as failed:
-            notes.append(f'{path}: {type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}')
+            failed_notes.append(f'{path}: {type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}')
             continue
         predicates += sorted(found, key=lambda p: (p['line'], p['col']))
         anchors += anchored
-    return predicates, anchors, notes, literals
+    # A file that failed to scan needs reading by hand, so the cap on notes never cuts it behind a language list.
+    return predicates, anchors, failed_notes + notes, literals
 
 
 # ---- running them
@@ -502,6 +509,12 @@ def _run(predicate: dict, inputs: list[str]) -> tuple[list[bool] | None, str | N
 def _show(text: str) -> str:
     shown = ascii(text)
     return shown if len(shown) <= TEXT_CHARS else shown[:TEXT_CHARS] + "...'"
+
+
+def _one_line(text: str) -> str:
+    """The text with each line break escaped. A consumer reads the prep's print a line at a time, so a pattern
+    that holds one must not start a line of its own."""
+    return LINE_BREAK.sub(lambda m: ascii(m.group())[1:-1], text)
 
 
 def _describe(predicate: dict) -> str:
@@ -597,8 +610,10 @@ def near_miss_table(root: Path, lines: dict, changed: list[str], config: dict, s
     if not predicates:
         out.append('- none: the change adds or modifies no regex, startswith, endswith, or marker test in Python, '
                    'JavaScript, or TypeScript')
-    out += [f'- not scanned {note}' for note in notes]
-    return out
+    out += [f'- not scanned {note}' for note in notes[:MAX_NOTES]]
+    if len(notes) > MAX_NOTES:
+        out.append(f'- and {len(notes) - MAX_NOTES} more files not scanned, cut by the cap of {MAX_NOTES}')
+    return [_one_line(line) for line in out]
 
 
 # ---- second readers
@@ -731,7 +746,9 @@ def second_readers(root: Path, head: str, lines: dict, config: dict, scanned: tu
                 files.setdefault(path, []).append(number)
             elif grade_mode.matches(path, config['tests']):
                 tests.add(path)
-        listed = [f"{path}:{', '.join(numbers)}" for path, numbers in list(files.items())[:MAX_READERS]]
+        listed = [f"{path}:{', '.join(numbers[:MAX_HIT_LINES])}"
+                  + (f' and {len(numbers) - MAX_HIT_LINES} more lines' if len(numbers) > MAX_HIT_LINES else '')
+                  for path, numbers in list(files.items())[:MAX_READERS]]
         more = f', and {len(files) - MAX_READERS} more files' if len(files) > MAX_READERS else ''
         counted = f"; and {len(tests)} test file{'s' if len(tests) != 1 else ''}" if tests else ''
         out.append(f"{label}: {', '.join(listed) or 'none found'}{more}{counted}")

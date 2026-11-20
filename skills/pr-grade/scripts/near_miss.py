@@ -67,6 +67,7 @@ MAX_ROWS = 16
 MAX_ANCHORS = 20
 MAX_READERS = 10
 MAX_NOTES = 10
+MAX_HIT_LINES = 10
 MAX_POOL = 5000
 # Seconds per child process. A regex that backtracks without end on one input costs its predicate, never the prep.
 RUN_TIMEOUT = 10
@@ -744,7 +745,9 @@ def second_readers(root: Path, head: str, lines: dict, config: dict, scanned: tu
                 files.setdefault(path, []).append(number)
             elif grade_mode.matches(path, config['tests']):
                 tests.add(path)
-        listed = [f"{path}:{', '.join(numbers)}" for path, numbers in list(files.items())[:MAX_READERS]]
+        listed = [f"{path}:{', '.join(numbers[:MAX_HIT_LINES])}"
+                  + (f' and {len(numbers) - MAX_HIT_LINES} more lines' if len(numbers) > MAX_HIT_LINES else '')
+                  for path, numbers in list(files.items())[:MAX_READERS]]
         more = f', and {len(files) - MAX_READERS} more files' if len(files) > MAX_READERS else ''
         counted = f"; and {len(tests)} test file{'s' if len(tests) != 1 else ''}" if tests else ''
         out.append(f"{label}: {', '.join(listed) or 'none found'}{more}{counted}")

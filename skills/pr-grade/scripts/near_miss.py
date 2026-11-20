@@ -357,9 +357,7 @@ def js_scan(path: str, text: str, ranges) -> tuple[list[dict], list[dict], list[
     def line(at: int) -> int:
         return text.count('\n', 0, at) + 1
 
-    predicates, anchors = [], []
-    literals = [(_js_unescape(ambient._body(m)), line(m.start())) for m in ambient.STRING.finditer(text)
-                if not (m.group(0).startswith('`') and '${' in m.group(0))]
+    predicates, anchors, literals = [], [], []
 
     def add(at: int, found: dict) -> None:
         number = line(at)
@@ -369,13 +367,17 @@ def js_scan(path: str, text: str, ranges) -> tuple[list[dict], list[dict], list[
     def transforms(chain: str) -> list[tuple[str, tuple]]:
         return [(JS_TRANSFORMS[name], ()) for name in re.findall(r'\.(\w+)\(', chain or '')]
 
+    # The string literals come from this pass too, so a quote in a comment or a regex literal opens none.
     code = list(text)
     for m in JS_TOKEN.finditer(text):
         if m.group('regex') is not None:
             add(m.start('regex'), {'kind': 'regex', 'pattern': m.group('regex'), 'flags': m.group('flags'),
                                    'transforms': []})
+            code[m.start('regex'):m.end('regex')] = ' ' * len(m.group('regex'))
         elif m.group('comment') is not None:
             code[m.start():m.end()] = [c if c == '\n' else ' ' for c in m.group(0)]
+        elif not (m.group('string').startswith('`') and '${' in m.group('string')):
+            literals.append((_js_literal(m.group('string')), line(m.start())))
     code = ''.join(code)
     literal_regexps = set()
     for m in JS_NEW_REGEXP.finditer(code):

@@ -7,6 +7,21 @@
 
 Each entry says what changed, where, and why. Under it, **Before** is the old behavior and **Seen on** is the grade that exposed it.
 
+## 0.17.1
+
+- `near_miss.py`: fixed `js_scan` to take a JavaScript or TypeScript file's string literals from the same token pass that finds its comments and regex literals, and to blank each regex literal's body before the string predicates are read, so that a regex is seeded from the file's real literals and no text inside a comment or a regex literal reads as a string.
+  - **Before:** the literals came from a quote pattern run over the raw text, so an apostrophe in a comment (`// don't`) opened a "string" that ran to the next quote and swallowed the real literals after it, and a quote inside a regex literal (`/['"]/`) produced a junk literal that seeded the regex beside it. A regex printed "no seed found", or was seeded from the junk and read accepted on every row.
+  - **Seen on:** the downstream review of 0.17.0 at `cf18598`, reproduced by a grader run on 2026-11-20 (issue #75, line 361).
+- `near_miss.py`: fixed the near-miss table to escape every line break in its rows, so that a pattern holding one, or a node error quoting such a pattern, stays on its row.
+  - **Before:** `_describe` printed a multi-line pattern raw, so a pattern line starting `merge:` or `remove:` became a line of the prep's print, and a consumer that reads that print a line at a time read it as the prep's own.
+  - **Seen on:** the same review (issue #75, line 516).
+- `near_miss.py`: added `MAX_NOTES`, 10, to cap the `not scanned` notes, with a line counting the rest.
+  - **Before:** each changed file with no scanner added a line; 300 changed `.go` files gave 302 lines, 16,601 characters, re-read on every grader turn.
+  - **Seen on:** the same review (issue #75, line 428).
+- `near_miss.py`: added `MAX_HIT_LINES`, 10, to cap the line numbers listed for each second reader, with a count of the rest.
+  - **Before:** `MAX_READERS` capped the files under an anchor but not their line numbers, and 12 files of 400 hits gave one 19,041-character row.
+  - **Seen on:** the same review (issue #75, line 734).
+
 ## 0.17.0
 
 - `near_miss.py`: added a near-miss table with two kinds of row to give L9's Boundaries probe a floor. Every predicate the change adds or modifies, a regex or a `startswith`, `endswith`, `in`, `includes`, or `==` test against a marker string in Python, JavaScript, or TypeScript, runs against near misses of a string it accepts: the seed with a prefix, a suffix, other casing, surrounding whitespace, CRLF, a Unicode lookalike, empty, and embedded in a longer word, then every other literal of its file and the touched tests that it accepts. A string predicate is seeded with its own literal, a regex with the first literal it matches there, or printed with "no seed found". Python's `re` runs a Python regex and `node` a JavaScript one, each in a child process with a timeout and a CPU limit; a regex found and not run says why. `near_misses()` is importable alone, for issue #43.

@@ -88,6 +88,8 @@ FIELD = re.compile(rf'(?m)^({FIELD_NAMES}):[ \t]*(.*?)[ \t]*$')
 # A finding's line the merge prints into the block that `parse` would read as one of the block's fields.
 FIELD_LEAD = re.compile(rf'^({FIELD_NAMES}):')
 HEADING_LEAD = re.compile(r'^#')
+# A fence as `without_code` reads one: at the start of the line, closed by a line that starts with the same run.
+FENCE = re.compile(r'^(`{3,}|~{3,})')
 SURFACE_REFUSED = 'a surface grade is not a pull request grade'
 LENS_HEADING = re.compile(r'(?m)^###[ \t]+(L\d+)\.')
 LENS_ID = re.compile(r'L\d+\b')
@@ -543,10 +545,17 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
     for f in findings:
         out += ['', f"{f['rank']} " + ''.join(f'{lens} ' for lens in f['lenses']) + f['where']
                 + (f" in {f['symbol']}" if f['symbol'] else '') + f" - {f['title']}"]
-        body = [_inert(line) for line in f['body']]
+        # `parse` drops a closed fence before it reads, so a line inside one prints as the grader wrote it.
+        body, fence = [], None
+        for line in f['body']:
+            opens = FENCE.match(line)
+            body.append(line if fence or opens else _inert(line))
+            if fence and line.startswith(fence):
+                fence = None
+            elif not fence and opens:
+                fence = opens[1]
         # A fence the grader left open would swallow every finding below it.
-        body += [fence for fence in ('```', '~~~') if sum(line.lstrip().startswith(fence) for line in body) % 2]
-        out += body
+        out += body + ([fence] if fence else [])
         if f.get('proof_test'):
             kept = f['proof_test']
             out.append(f"Proof test: {kept['at']}{f['proof_note']}" if kept['at']

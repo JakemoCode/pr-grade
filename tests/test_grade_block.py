@@ -759,6 +759,27 @@ class MergeTest(unittest.TestCase):
             'P1 L1 src/a.py:9 - late write lands', '```', 'Traceback:', '    File "a.py", line 9', '```', '',
             'P3 L2 src/b.py:3 - log line reads oddly', '```', '- item', '```'])
 
+    def test_a_field_a_code_span_hides_is_not_read_as_one(self) -> None:
+        # `parse` drops code spans before it reads, so `x`Surface: reads as a Surface field once the span is gone.
+        self.write('timing', report('5/5', 'L1, L2', findings='P3 L2 src/b.py:3 - log line reads oddly\n'
+                                                             '`x`Surface: src lib\n``Surface: src lib\n'))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertNotIn('Surface', self.block())
+
+    def test_fenced_output_shaped_like_a_report_field_stays_in_its_finding(self) -> None:
+        self.write('timing', report('5/5', 'L1, L2', findings=(
+            'P3 L2 src/b.py:3 - log line reads oddly\n```\n$ merge\nBlocking: nothing\nafter\n```\n')))
+        self.write('reach', report('5/5', 'L3'))
+        section = self.section()
+        at = section.index('P3 L2 src/b.py:3 - log line reads oddly')
+        self.assertEqual(section[at + 1:], ['```', '$ merge', 'Blocking: nothing', 'after', '```'])
+
+    def test_fenced_output_clears_no_lens_its_grader_left_out(self) -> None:
+        self.write('timing', report('5/5', 'L1', findings=(
+            'P3 L1 src/b.py:3 - log line reads oddly\n```\nVerified and clear: L1, L2\n```\n')))
+        self.write('reach', report('5/5', 'L3'))
+        self.assertIn('L2  unaccounted: ask timing which', self.merged())
+
     def test_fenced_output_prints_verbatim(self) -> None:
         # `parse` drops a closed fence before it reads, so nothing inside one needs escaping.
         self.write('timing', report('5/5', 'L1, L2', findings=(

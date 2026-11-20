@@ -585,6 +585,13 @@ class LensSliceTest(unittest.TestCase):
         self.assertIn('\n## 5. Score it\n', rules)
         self.assertNotIn('## 6. Report it', rules)
 
+    def test_a_fenced_heading_ends_no_section_of_the_skill(self) -> None:
+        text = ('## 3. Lenses\n\nopen\n\n### L1. A\n\na\n\n```md\n## 9. fenced\n```\n\na tail\n\n## 4. Finding\n\nb\n\n'
+                '## 5. Score\n\n```md\n## Grade\n## 6. fenced\n```\n\nscore tail\n\n## 6. Report\n\nc\n')
+        opening, sections, rules = grade_prep.skill_lens_text(text)
+        self.assertEqual(sections, {'L1': '### L1. A\n\na\n\n```md\n## 9. fenced\n```\n\na tail\n\n'})
+        self.assertEqual(rules, '## 4. Finding\n\nb\n\n## 5. Score\n\n```md\n## Grade\n## 6. fenced\n```\n\nscore tail\n\n')
+
     def test_a_skill_text_missing_a_section_gives_none(self) -> None:
         self.assertIsNone(grade_prep.skill_lens_text('## 3. Lenses\n\n### L1. A\n\na\n\n## 4. Finding\n\nb\n'))
 

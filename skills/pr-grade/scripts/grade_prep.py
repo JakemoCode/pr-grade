@@ -14,9 +14,9 @@ one proof copy per grader with proof_dir.py, plus one for the env sweep when the
 prompt is a shared block followed by its own block. The prep writes it to `prompt.md` in the grader's directory
 under the proof root and prints one line per grader naming that file, which the coordinator passes as the Agent
 prompt unchanged, and the line names the diff command, so a grader's first turn reads its file and the change. After
-the dispatch, each file carries the grader's lens text: SKILL.md section 3 up to its first lens, each lens the grader
-holds, sections 4 and 5, then the lens file less the lens sections of lenses the grader does not hold, so the grader
-reads neither file. `--skill PATH` names the SKILL.md to slice; with none beside this directory, the files carry the
+the dispatch, each file carries the grader's lens text: SKILL.md section 3 and the lens file, each less the lens
+sections of lenses the grader does not hold, with sections 4 and 5 after the first, so the grader reads neither
+file. `--skill PATH` names the SKILL.md to slice; with none beside this directory, the files carry the
 lens file alone and a `notice:` line says so. `"sliceLenses": false` leaves the lens text out. In-thread, or with
 `"promptFiles": false` in the config, it prints the blocks instead.
 It ends with the command that merges the graders' reports and the one that removes the proof copies.
@@ -152,10 +152,11 @@ def sliced_lens_file(text: str, held: list[str]) -> str:
     return ''.join(piece for lens, piece in pieces if lens is None or lens in held)
 
 
-def skill_lens_text(text: str) -> tuple[str, dict[str, str], str] | None:
-    """The skill's lens text as a prompt file takes it: section 3 up to its first lens, each lens's `### L<n>.`
-    section by id in the skill's order, and sections 4 and 5 whole. None when a section is missing. The one reader
-    of where the skill keeps its lenses, so splitting SKILL.md re-points this function alone."""
+def skill_lens_text(text: str) -> tuple[str, str] | None:
+    """The skill's lens text as a prompt file takes it: section 3 whole, which `sliced_lens_file` cuts to the lenses a
+    grader holds and every piece between them, and sections 4 and 5 whole. None when a section is missing or the
+    slicer cannot place every lens heading. The one reader of where the skill keeps its lenses, so splitting SKILL.md
+    re-points this function alone."""
     level_two = [(offset, line) for offset, level, line in headings(text) if level == 2]
     starts = {}
     for offset, line in level_two:
@@ -167,21 +168,20 @@ def skill_lens_text(text: str) -> tuple[str, dict[str, str], str] | None:
     after = [offset for offset, _ in level_two if offset > starts['5']]
     lenses = text[starts['3']:starts['4']]
     pieces = lens_pieces(lenses)
-    sections = {lens: piece for lens, piece in pieces if lens is not None}
-    if not sections or pieces[0][0] is not None or not every_lens_found(lenses, pieces):
+    if not any(lens for lens, _ in pieces) or pieces[0][0] is not None or not every_lens_found(lenses, pieces):
         return None
-    return pieces[0][1], sections, text[starts['4']:after[0] if after else len(text)]
+    return lenses, text[starts['4']:after[0] if after else len(text)]
 
 
-def prompt_lens_text(held: list[str], skill: tuple[str, dict[str, str], str] | None, skill_path: Path,
+def prompt_lens_text(held: list[str], skill: tuple[str, str] | None, skill_path: Path,
                      lens_file: str | None, lens_path: Path) -> str:
     """What a grader holding `held` reads in its prompt file in place of SKILL.md sections 3 to 5 and the lens file:
     each copied whole but for the lens sections of the lenses it does not hold. Empty when there is neither."""
     parts = []
     if skill is not None:
-        opening, sections, rules = skill
-        parts += [f'===== skill: {skill_path}, section 3 up to its first lens, the lenses you hold, then sections 4 '
-                  'and 5 =====', '', opening + ''.join(text for lens, text in sections.items() if lens in held) + rules]
+        lenses, rules = skill
+        parts += [f'===== skill: {skill_path}, section 3 less the lens sections of lenses you do not hold, then '
+                  'sections 4 and 5 =====', '', sliced_lens_file(lenses, held) + rules]
     if lens_file is not None:
         parts += [f'===== lens file: {lens_path}, less the lens sections of lenses you do not hold =====', '',
                   sliced_lens_file(lens_file, held)]

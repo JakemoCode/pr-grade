@@ -574,10 +574,10 @@ class LensSliceTest(unittest.TestCase):
 
     def test_the_skill_text_holds_every_lens_and_sections_4_and_5(self) -> None:
         # The one reader of the skill's lens text. When SKILL.md is split, this fails until it is re-pointed.
-        opening, sections, rules = grade_prep.skill_lens_text((SCRIPTS.parent / 'SKILL.md').read_text())
+        lenses, rules = grade_prep.skill_lens_text((SCRIPTS.parent / 'SKILL.md').read_text())
+        sections = {lens: piece for lens, piece in grade_prep.lens_pieces(lenses) if lens}
         self.assertEqual(list(sections), LENSES)
-        self.assertTrue(opening.startswith('## 3. The fourteen lenses\n'))
-        self.assertNotIn('### L', opening)
+        self.assertTrue(lenses.startswith('## 3. The fourteen lenses\n'))
         self.assertTrue(sections['L9'].startswith('### L9. Correctness\n'))
         self.assertIn('*Examples, from EngOS:* PR #900', sections['L9'])
         self.assertNotIn('### L10', sections['L9'])
@@ -588,8 +588,8 @@ class LensSliceTest(unittest.TestCase):
     def test_a_fenced_heading_ends_no_section_of_the_skill(self) -> None:
         text = ('## 3. Lenses\n\nopen\n\n### L1. A\n\na\n\n```md\n## 9. fenced\n```\n\na tail\n\n## 4. Finding\n\nb\n\n'
                 '## 5. Score\n\n```md\n## Grade\n## 6. fenced\n```\n\nscore tail\n\n## 6. Report\n\nc\n')
-        opening, sections, rules = grade_prep.skill_lens_text(text)
-        self.assertEqual(sections, {'L1': '### L1. A\n\na\n\n```md\n## 9. fenced\n```\n\na tail\n\n'})
+        lenses, rules = grade_prep.skill_lens_text(text)
+        self.assertEqual(lenses, '## 3. Lenses\n\nopen\n\n### L1. A\n\na\n\n```md\n## 9. fenced\n```\n\na tail\n\n')
         self.assertEqual(rules, '## 4. Finding\n\nb\n\n## 5. Score\n\n```md\n## Grade\n## 6. fenced\n```\n\nscore tail\n\n')
 
     def test_a_lens_heading_an_unclosed_fence_hides_keeps_the_lens_file_whole(self) -> None:

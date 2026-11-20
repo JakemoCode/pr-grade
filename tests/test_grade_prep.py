@@ -572,24 +572,11 @@ class LensSliceTest(unittest.TestCase):
         text = '# lenses\n\n## Proof\n\nrun pytest\n\n### L9 without a dot\n\nkept\n'
         self.assertEqual(grade_prep.sliced_lens_file(text, ['L1']), text)
 
-    def test_the_skill_text_holds_every_lens_and_sections_4_and_5(self) -> None:
-        # The one reader of the skill's lens text. When SKILL.md is split, this fails until it is re-pointed.
-        opening, sections, rules = grade_prep.skill_lens_text((SCRIPTS.parent / 'SKILL.md').read_text())
-        self.assertEqual(list(sections), LENSES)
-        self.assertTrue(opening.startswith('## 3. The fourteen lenses\n'))
-        self.assertNotIn('### L', opening)
-        self.assertTrue(sections['L9'].startswith('### L9. Correctness\n'))
-        self.assertIn('*Examples, from EngOS:* PR #900', sections['L9'])
-        self.assertNotIn('### L10', sections['L9'])
-        self.assertTrue(rules.startswith('## 4. What a finding must carry\n'))
-        self.assertIn('\n## 5. Score it\n', rules)
-        self.assertNotIn('## 6. Report it', rules)
-
     def test_a_fenced_heading_ends_no_section_of_the_skill(self) -> None:
         text = ('## 3. Lenses\n\nopen\n\n### L1. A\n\na\n\n```md\n## 9. fenced\n```\n\na tail\n\n## 4. Finding\n\nb\n\n'
                 '## 5. Score\n\n```md\n## Grade\n## 6. fenced\n```\n\nscore tail\n\n## 6. Report\n\nc\n')
-        opening, sections, rules = grade_prep.skill_lens_text(text)
-        self.assertEqual(sections, {'L1': '### L1. A\n\na\n\n```md\n## 9. fenced\n```\n\na tail\n\n'})
+        lenses, rules = grade_prep.skill_lens_text([text])
+        self.assertEqual(lenses, '## 3. Lenses\n\nopen\n\n### L1. A\n\na\n\n```md\n## 9. fenced\n```\n\na tail\n\n')
         self.assertEqual(rules, '## 4. Finding\n\nb\n\n## 5. Score\n\n```md\n## Grade\n## 6. fenced\n```\n\nscore tail\n\n')
 
     def test_a_lens_heading_an_unclosed_fence_hides_keeps_the_lens_file_whole(self) -> None:
@@ -600,10 +587,10 @@ class LensSliceTest(unittest.TestCase):
     def test_a_skill_lens_heading_inside_a_fence_gives_none(self) -> None:
         # The lens-id regex reads the fenced heading as a lens; the slicer cannot say where its text is.
         text = '## 3. Lenses\n\n### L1. A\n\n```md\n### L2. B\n```\n\nb\n\n## 4. F\n\nf\n\n## 5. S\n\ns\n'
-        self.assertIsNone(grade_prep.skill_lens_text(text))
+        self.assertIsNone(grade_prep.skill_lens_text([text]))
 
     def test_a_skill_text_missing_a_section_gives_none(self) -> None:
-        self.assertIsNone(grade_prep.skill_lens_text('## 3. Lenses\n\n### L1. A\n\na\n\n## 4. Finding\n\nb\n'))
+        self.assertIsNone(grade_prep.skill_lens_text(['## 3. Lenses\n\n### L1. A\n\na\n\n## 4. Finding\n\nb\n']))
 
 
 class LensSliceCliTest(unittest.TestCase):
@@ -692,12 +679,25 @@ class LensSliceCliTest(unittest.TestCase):
     def test_skill_names_the_copy_to_slice(self) -> None:
         # The nightly replays slice a copy with the pool's pull request numbers stripped.
         self.commit('{"silent": ["store.py"]}\n', FS_SHAPED)
-        blinded = Path(self.tmp.name) / 'blinded.md'
-        blinded.write_text((SCRIPTS.parent / 'SKILL.md').read_text().replace('PR #900', 'PR #<n>'))
+        blinded = Path(self.tmp.name) / 'blinded'
+        shutil.copytree(SCRIPTS.parent, blinded, ignore=shutil.ignore_patterns('scripts', 'templates'))
+        lenses = blinded / 'lenses.md'
+        lenses.write_text(lenses.read_text().replace('PR #900', 'PR #<n>'))
         [text] = self.prompts(self.prep('--skill', str(blinded))).values()
         self.assertIn('*Examples, from EngOS:* PR #<n>', text)
         self.assertNotIn('PR #900', text)
         self.assertIn(str(blinded), text)
+
+    def test_a_non_lens_section_between_the_skills_lenses_reaches_every_grader(self) -> None:
+        # Issue #81: a grader loses only the lens sections of lenses it does not hold, as in the lens file.
+        self.commit('{"silent": ["store.py"]}\n', FS_SHAPED)
+        noted = Path(self.tmp.name) / 'noted.md'
+        noted.write_text('## 3. Lenses\n\nopen\n\n### L9. A\n\nnine skill\n\n### Note on ranking\n\nranking prose\n\n'
+                         '### L16. B\n\nsixteen skill\n\n## 4. F\n\nf\n\n## 5. S\n\ns\n')
+        files = self.prompts(self.prep('--skill', str(noted), '--groups', 'a=L9,L15', '--groups', 'b=L16,L17'))
+        for text in files.values():
+            self.assertIn('### Note on ranking\n\nranking prose\n\n', text)
+        self.assertNotIn('nine skill', files['b'])
 
     def test_a_skill_that_is_missing_or_cannot_be_sliced_stops_the_run_before_any_copy(self) -> None:
         self.commit('{"silent": ["store.py"]}\n', FS_SHAPED)
@@ -716,7 +716,7 @@ class LensSliceCliTest(unittest.TestCase):
         vendored = Path(self.tmp.name) / 'vendor/scripts'
         shutil.copytree(SCRIPTS, vendored, ignore=shutil.ignore_patterns('__pycache__'))
         out = self.prep_with('--base', 'main', '--groups', 'a=L9,L15', '--groups', 'b=L16,L17', script=vendored)
-        self.assertRegex(out, r'(?m)^notice: no SKILL\.md beside .*, so each prompt file carries the lens file alone')
+        self.assertRegex(out, r'(?m)^notice: no skill beside .*, so each prompt file carries the lens file alone')
         a = self.prompts(out)['a']
         self.assertIn('ranking text', a)
         self.assertNotIn('sixteen text', a)

@@ -1,0 +1,27 @@
+## 5. Score it
+
+One score for the change: the honest answer to "would a reviewer merge this without asking a question."
+
+| Score | Meaning |
+| --- | --- |
+| 5 | No P1 or P2 survives. Merge. |
+| 4 | One issue that must be fixed first, named in one sentence. |
+| 3 | Several issues, or one whose repair is a design decision. |
+| 2 | A lens could not be applied, so the change is not assessed. |
+| 1 | A finding contradicts the change's stated purpose. |
+
+Rank findings `P1` (fix before merge), `P2` (fix or justify), `P3` (note). The score counts P1 and P2; a P3 is listed and leaves the score at 5, or one standing note would hold a change below 5 forever.
+
+Rank by what the defect does to a run. Rank a defect in a check by what the check exists to refuse, never by whether today's callers write the input it lets through: a version check that passes a prerelease of the next minor is a P2 when no build writes that range yet, because the check is the only thing between that input and the code, and callers change. The same rule makes each of these a P2: a changed default that explicit sites keep from reaching them (L4), a guard whose wait can time out open (L8), a stand-in check passing an input that lacks the named property (L9), a validator accepting a key the writer drops (L9), enforcement a move or a new tool left behind (L10), and a check or metric that silently skips an input its stated scope covers (L15). It holds when no caller writes the input today, when the code the enforcement guarded is clean today, and when you found no path to the timeout. An L11 finding is always a P3 and never moves the score. When a run fails either way, in the same direction, and the only defect is how the failure reads, such as a traceback where a message belongs, the finding is a P3. That holds in a re-grade whose fix was itself about messages, where the next traceback looks like the fix left unfinished.
+
+Merge the graders' reports before you score, with the `merge:` line the prep printed. Two graders on one branch each scored the same proven P1 as 2/5, and a third cleared the path it broke as outside its lenses. The merge reads every grader's report and prints where each lens ended, the findings with any two at one line flagged and any whose line the graded diff did not change flagged `anchor:`, the defects raised outside their lenses, the lowest score these rules allow, a list of what it leaves to your judgment, and the whole `## Grade` block in section 6's shape, every finding in it with its proof. The block keeps each grader's notes in `Verified and clear`, and writes a lens the prep skipped as `L2 (not applicable)`; leave both as written. While its list is open the block's `Score` reads `<n>/5 floor; ...`, a line `check` refuses, so the score is never pasted as settled before you settle it. Then settle what it leaves to you:
+
+- Two findings with one cause, the same wrong state, are one finding, at one line or two: keep the stronger proof and name both lenses. The merge counts every finding until you join them, so its floor never assumes two defects are one.
+- A finding flagged `anchor:` cites a line the graded diff did not change, and the flag names the nearest changed line and the function it sits in. Read the finding's proof. When the proof mutated or asserted on another line, usually the one the flag names, re-anchor the finding there, in the same `<file>:<line> in <symbol>` form. When the defect does sit in unchanged code, such as a caller the change broke (L4) or a default a new binding made wrong, confirm the line and name the changed line that broke it in the finding's first sentence. A flag never drops a finding or moves the floor. When the merge prints `anchors: not checked`, check each finding's line against the diff yourself.
+- A proof beats a clearance, and the merge counts the finding. If the clearance names a sub-claim that would break the proof, run it.
+- A defect a grader lists under `Outside my lenses` belongs to the lens it names. Prove it, or carry it to `Could not verify`.
+- A lens the merge calls unaccounted: ask that grader which, in one message, before you write the block.
+- A lens the merge says has no report, from a grader that replied with its report but wrote no file: run the merge again with `--report <group>=-` and the reply on stdin, or `--report <group>=<file>`. Pass the reply unedited. The merge refuses it for a group that wrote its file.
+- The score is yours. A grader's score covers only its own lenses. The merge cannot see a 3 for a repair that is a design decision, or a 1 for a finding that contradicts the change's stated purpose.
+
+Then take `Could not verify` item by item. For a claim that would be a P1 or P2 if true, prove or refute it yourself, or dispatch one grader with only that claim, its lens, and what was tried. What survives that one attempt stays under `Could not verify`, labelled a guess. Its lens stays out of `Verified and clear`, it scores as the finding it would be, and the guess is the `Blocking` sentence, for a person to decide. A guess that would only be a P3 leaves the score where it is.

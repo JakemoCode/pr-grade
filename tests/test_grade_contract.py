@@ -14,6 +14,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 AGENT = (ROOT / 'agents/grade.md').read_text()
 SKILL = (ROOT / 'skills/pr-grade/SKILL.md').read_text()
+LENSES = (ROOT / 'skills/pr-grade/lenses.md').read_text()
+SCORING = (ROOT / 'skills/pr-grade/scoring.md').read_text()
 sys.path.insert(0, str(ROOT / 'skills/pr-grade/scripts'))
 import grade_block  # noqa: E402
 # What a grader needs from the coordinator. A coordinator that never loads the skill sees only the
@@ -68,7 +70,8 @@ class DispatchTest(unittest.TestCase):
         # The diff command rides on the dispatch line, so the first turn reads the file and the change together.
         self.assertIn('the diff command the line names', inputs)
         # A prompt file without lens text, or a pasted dispatch, still reads both sources.
-        self.assertIn('${CLAUDE_PLUGIN_ROOT}/skills/pr-grade/SKILL.md', inputs)
+        for name in ('lenses.md', 'SKILL.md', 'scoring.md'):
+            self.assertIn(f'${{CLAUDE_PLUGIN_ROOT}}/skills/pr-grade/{name}', inputs)
         skill = section(SKILL, '2. Pick the mode and prepare the graders')
         self.assertIn('"sliceLenses": false', skill)
 
@@ -78,6 +81,10 @@ class DispatchTest(unittest.TestCase):
         for path in paths:
             with self.subTest(path=path):
                 self.assertTrue((ROOT / path).is_file())
+
+    def test_the_agent_scores_by_section_5_where_it_lives(self) -> None:
+        self.assertIn('section 5, in `scoring.md`', AGENT)
+        self.assertNotIn('SKILL.md section 5', AGENT)
 
     def test_the_turn_count_the_agent_is_told_is_its_limit(self) -> None:
         limit = frontmatter(AGENT)['maxTurns']
@@ -166,10 +173,10 @@ class ReportTest(unittest.TestCase):
         verified = re.search(r'(?m)^Verified and clear: (.*)$', block).group(1)
         self.assertIn('the strongest input you tried', verified)
         self.assertIn('the strongest input you tried', section(AGENT, 'Work'))
-        self.assertIn('`Verified and clear`', section(SKILL, '3. The fourteen lenses'))
+        self.assertIn('`Verified and clear`', section(LENSES, '3. The fourteen lenses'))
 
     def test_the_fields_the_merge_names_are_in_the_report(self) -> None:
-        merge = section(SKILL, '5. Score it')
+        merge = section(SCORING, '5. Score it')
         for field in ('Outside my lenses', 'Could not verify', 'Verified and clear', 'Blocking'):
             with self.subTest(field=field):
                 self.assertIn(f'`{field}`', merge)

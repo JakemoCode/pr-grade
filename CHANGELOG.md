@@ -7,6 +7,60 @@
 
 Each entry says what changed, where, and why. Under it, **Before** is the old behavior and **Seen on** is the grade that exposed it.
 
+## 0.18.0
+
+- `grade_prep.py`: added prompt files, one `<proof root>/<group>/prompt.md` per grader holding its shared block and its own block, with one printed line per grader naming the file in place of the blocks, so that the coordinator passes a line as the Agent prompt instead of retyping the blocks. `"promptFiles": false` prints the blocks as before.
+  - **Before:** the prep printed a shared block and one block per grader, and the coordinator pasted both into each Agent call, all of it output tokens.
+  - **Seen on:** five measured grades in the reader-and-loop study, where the retyping was 13% of the Opus coordinator's time, about 35 seconds a grade.
+- `agents/grade.md`: added a first-turn rule for a dispatch that names a prompt file: read it alone and treat it as the dispatch, and stop with `Could not grade: no prompt file at <path>` when it is missing, so that a grader handed one line grades from the same text it was pasted before. A pasted dispatch still reads as it stands.
+  - **Before:** the grader's Inputs assumed the dispatch was pasted whole, and its `description` told a dispatcher to paste.
+  - **Seen on:** the same five grades.
+- `SKILL.md`: changed section 2 to pass each grader's printed line as its Agent prompt, then the `Probe first:` list, and to paste the blocks only in-thread or with `"promptFiles": false`.
+  - **Before:** section 2 told the coordinator to paste the shared block and each grader's block.
+  - **Seen on:** the same five grades.
+- `skills/pr-grade/templates/pr-grade.json`: added `"promptFiles": true`, so that the template still shows every key.
+  - **Before:** the template had no key for the prompt files.
+  - **Seen on:** the same five grades.
+- `grade_prep.py`: added the lens text to each prompt file: SKILL.md section 3's opening and each lens the grader holds, sections 4 and 5, and the lens file less the lens sections of lenses it does not hold, so that a grader reads neither source and a fan-out grader stops reading lenses it does not hold. `--skill PATH` names the SKILL.md to slice, and `"sliceLenses": false` leaves the text out.
+  - **Before:** every grader read the whole lens file and SKILL.md sections 3 to 5 itself and re-read them each turn, a fan-out grader all fourteen lenses in both.
+  - **Seen on:** 115 ForgeSmith-OS grader runs since 2026-11-10 in the reader-and-loop study, where the two files were 18% of what a grader re-read.
+- `grade_prep.py`: changed the dispatch line to name the diff command, so that a grader's first turn reads its prompt file and the change together.
+  - **Before:** the line named the file alone, and the grader ran the diff in its second turn.
+  - **Seen on:** PR #78's measured grader run, whose second turn read the sources and ran the diff.
+- `agents/grade.md`: added the rule that a part under `===== lens text =====` is the grader's copy of the file it names, so that a grader with lens text in its prompt file reads neither SKILL.md nor the lens file. A pasted dispatch, or a file with no lens text, reads both as before.
+  - **Before:** the grader read the lens file and SKILL.md sections 3 to 5 in its first or second turn whatever its dispatch held.
+  - **Seen on:** the same 115 runs.
+- `SKILL.md`: changed section 2 to say what each prompt file carries after the dispatch, and to name `--skill` and `"sliceLenses": false`.
+  - **Before:** section 2 said the file held the shared block and the grader's block.
+  - **Seen on:** the same 115 runs.
+- `skills/pr-grade/templates/pr-grade.json`: added `"sliceLenses": true`, so that the template still shows every key.
+  - **Before:** the template had no key for slicing.
+  - **Seen on:** the same 115 runs.
+- `skills/pr-grade/scripts/grade_block.py`: changed `merge` to print the whole `## Grade` block with every finding, its lines and its `Proof test:` at the repository path, so that the coordinator pastes the block instead of retyping each finding.
+  - **Before:** the draft block held only the six fields, so the coordinator typed every finding and its proof out again.
+  - **Seen on:** five measured grades, where that retyping was 21% of the Opus coordinator's time, about 55 seconds a grade.
+- `skills/pr-grade/scripts/grade_block.py`: added a list of what section 5 leaves to judgment to the merge's print, and wrote the block's `Score` as `<n>/5 floor; settle the items above, then write the score` while that list is open, so that a score is never pasted as settled while a judgment call is open.
+  - **Before:** the draft printed `Score: <floor>/5` whatever was open, so a floor of 5 with an outside-lens defect or an unchecked anchor passed `check` pasted as it stood.
+  - **Seen on:** the same five grades, read for what a paste-as-printed block would need.
+- `skills/pr-grade/scripts/grade_block.py`: fixed `read_report` to keep every line inside a finding's fence as that finding's output, so that a fenced line shaped like a report field neither ends the finding nor clears a lens.
+  - **Before:** a fenced `Verified and clear: L1, L2` under a finding ended it and marked L2 clear for a grader that cleared only L1.
+  - **Seen on:** round 2 of this pull request's own grade, which reproduced it at the base commit.
+- `skills/pr-grade/SKILL.md`: changed sections 5 and 6 to tell the coordinator to paste the merge's block and edit only the lines its judgment touched, so that no finding is retyped.
+  - **Before:** section 6 gave the block's shape and the coordinator wrote it out.
+  - **Seen on:** the same five grades.
+- `skills/pr-grade/SKILL.md`: changed the skill to a core holding sections 1, 2, 4 and 6, with the other sections moved word for word into files beside it: section 3 to `lenses.md`, 5 to `scoring.md`, 7 to `fix-and-regrade.md`, 0 and 8 to `setup-and-enforcement.md`, and 9 to `surface-grades.md`. Each section keeps its number, and the core names each file at the step that needs it, so that a coordinator loads 15,593 bytes on invoking the skill instead of 45,573 and reads the lenses only in-thread.
+  - **Before:** invoking the skill loaded the whole file, about 11,000 tokens, re-read on every later turn of the coordinator's session, though since PR #80 a coordinator that dispatches graders never needs the lenses, 44% of it.
+  - **Seen on:** the context-loading measurements in the reader-and-loop study, 2026-11-20.
+- `skills/pr-grade/scripts/grade_prep.py`: changed `skill_lens_text` to read each numbered section from whichever of the skill's files holds it, and `--skill PATH` to take the skill's directory, or one file holding sections 3 to 5, so that the prompt files keep carrying the skill's lens text after the split and a caller can still name a blinded copy. A section found in two files, or a skill file that is not UTF-8 text, stops the slicing, and a dotfile such as an AppleDouble `._lenses.md` is skipped.
+  - **Before:** `skill_lens_text` read sections 3 to 5 from one `SKILL.md`, and `--skill` named that file.
+  - **Seen on:** the split above, which `test_the_skill_text_holds_every_lens_and_sections_4_and_5` was written to catch.
+- `skills/pr-grade/scripts/grade_prep.py`: fixed `skill_lens_text` to return section 3 whole and cut it with `sliced_lens_file`, so that a non-lens heading between two lenses, such as a `### Note on ranking`, reaches every grader as the lens file's pieces do.
+  - **Before:** the text under such a heading reached no prompt file, and the grader was told not to read the source.
+  - **Seen on:** round 4 of PR #79's grade, filed as issue #81.
+- `agents/grade.md`: changed where a grader reads the skill's sections when its prompt file carries none: section 3 in `lenses.md`, 4 in `SKILL.md`, and 5 in `scoring.md`, with its score taken from section 5 in `scoring.md`, so that a pasted dispatch or a vendored prep with no skill beside it still reads every lens.
+  - **Before:** the grader read sections 3 to 5 of `SKILL.md`, the one file that held them.
+  - **Seen on:** the split above.
+
 ## 0.17.2
 
 - `agents/grade.md`: added `omitClaudeMd: true` to the frontmatter to stop a grader loading the user, project, and local `CLAUDE.md` files of the session that dispatched it, so that a grader reads grading instructions only.

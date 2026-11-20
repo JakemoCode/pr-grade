@@ -9,9 +9,12 @@ Each entry says what changed, where, and why. Under it, **Before** is the old be
 
 ## 0.17.2
 
-- `agents/grade.md`: added `omitClaudeMd: true` to the frontmatter to stop a grader loading the user, project, and local `CLAUDE.md` files of the session that dispatched it, so that a grader reads grading instructions only. A repository that relied on `CLAUDE.md` reaching its graders puts what a grader needs to run things in the `## Proof` section of `.claude/pr-grade-lenses.md`, and `templates/pr-grade-lenses.md` says so.
+- `agents/grade.md`: added `omitClaudeMd: true` to the frontmatter to stop a grader loading the user, project, and local `CLAUDE.md` files of the session that dispatched it, so that a grader reads grading instructions only.
   - **Before:** a grader inherited the dispatching session's whole instruction stack. Measured from `~/Workspace` with the stack present, the grader's first request held 29,332 tokens from 0.17.1's agent and 8,906 with the key, and it re-reads that on every turn. The stack is about the session's work, and some of it (fix every loose end, ask the user) works against grading.
   - **Seen on:** 115 ForgeSmith-OS grader runs since 2026-11-10: a first request of 46,800 tokens against about 10,500 with no inherited instructions, 54% of everything a grader re-reads over a median of 13 turns.
+- `skills/pr-grade/templates/pr-grade-lenses.md`: added a sentence under `## Proof` saying a grader does not load `CLAUDE.md`, so that what it needs to run things in the repository goes in that section.
+  - **Before:** the template said nothing about `CLAUDE.md`, and a repository could keep its run instructions there on the assumption that its graders read them.
+  - **Seen on:** the same 115 ForgeSmith-OS grader runs, whose graders took their repository's `CLAUDE.md` from the dispatching session, a path `omitClaudeMd` closes.
 
 ## 0.17.1
 

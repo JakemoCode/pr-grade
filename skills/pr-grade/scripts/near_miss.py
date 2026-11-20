@@ -110,6 +110,8 @@ JS_ANY_REGEXP = re.compile(r'\bnew\s+RegExp\(([^)\n]*)')
 JS_NEW_REGEXP = re.compile(r'\bnew\s+RegExp\(\s*' + _QUOTED + r'(?:\s*,\s*' + _QUOTED + r')?\s*\)')
 JS_SPLITTER = re.compile(r'\.(split|indexOf|lastIndexOf)\(\s*' + _QUOTED + r'\s*[,)]')
 JS_ESCAPE = re.compile(r'\\(u\{[0-9a-fA-F]+\}|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|\n|.)', re.S)
+# What str.splitlines breaks on.
+LINE_BREAK = re.compile('[\n\r\x0b\x0c\x1c-\x1e\x85\u2028\u2029]')
 
 PY_RUNNER = r'''
 import json, re, sys
@@ -506,6 +508,12 @@ def _show(text: str) -> str:
     return shown if len(shown) <= TEXT_CHARS else shown[:TEXT_CHARS] + "...'"
 
 
+def _one_line(text: str) -> str:
+    """The text with each line break escaped. A consumer reads the prep's print a line at a time, so a pattern
+    that holds one must not start a line of its own."""
+    return LINE_BREAK.sub(lambda m: ascii(m.group())[1:-1], text)
+
+
 def _describe(predicate: dict) -> str:
     where = f"{predicate['file']}:{predicate['line']}"
     if predicate.get('source'):
@@ -600,7 +608,7 @@ def near_miss_table(root: Path, lines: dict, changed: list[str], config: dict, s
         out.append('- none: the change adds or modifies no regex, startswith, endswith, or marker test in Python, '
                    'JavaScript, or TypeScript')
     out += [f'- not scanned {note}' for note in notes]
-    return out
+    return [_one_line(line) for line in out]
 
 
 # ---- second readers

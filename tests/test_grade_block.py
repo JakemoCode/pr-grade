@@ -748,16 +748,25 @@ class MergeTest(unittest.TestCase):
         self.assertIn('`Surface:` src lib', self.merged())
 
     def test_a_findings_lines_keep_their_indent_and_fences(self) -> None:
-        # Output a grader fenced reads verbatim in the PR, and a fence the grader left open is closed in its finding.
+        # Output a grader fenced reads verbatim in the PR.
         self.write('timing', report('4/5', 'L2', findings=(
             'P1 L1 src/a.py:9 - late write lands\n```\nTraceback:\n    File "a.py", line 9\n```\n'
-            'P3 L2 src/b.py:3 - log line reads oddly\n```\n- item\n')))
+            'P3 L2 src/b.py:3 - log line reads oddly\n```\n- item\n```\n')))
         self.write('reach', report('5/5', 'L3'))
         section = self.section()
         at = section.index('P1 L1 src/a.py:9 - late write lands')
         self.assertEqual(section[at:], [
             'P1 L1 src/a.py:9 - late write lands', '```', 'Traceback:', '    File "a.py", line 9', '```', '',
             'P3 L2 src/b.py:3 - log line reads oddly', '```', '- item', '```'])
+
+    def test_a_fence_left_open_holds_the_rest_of_the_report_and_fails_closed(self) -> None:
+        # Its lenses read unaccounted, and the block closes the fence so it swallows nothing below.
+        self.write('timing', report('5/5', 'L1, L2', findings='P3 L2 src/b.py:3 - log line reads oddly\n```\n- item\n'))
+        self.write('reach', report('5/5', 'L3'))
+        merged = self.merged()
+        self.assertIn('L1  unaccounted: ask timing which', merged)
+        self.assertEqual(floor(self.block()), '2/5')
+        self.assertEqual(self.section()[-1], '```')
 
     def test_a_field_a_code_span_hides_is_not_read_as_one(self) -> None:
         # `parse` drops code spans before it reads, so `x`Surface: reads as a Surface field once the span is gone.

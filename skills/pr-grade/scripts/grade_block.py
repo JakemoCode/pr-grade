@@ -117,7 +117,7 @@ SKIPPED = 'not applicable: skipped by grade_prep.py --skip'
 
 def without_code(markdown: str) -> str:
     """Drop fenced blocks and code spans, so a quoted example block is never read as the grade."""
-    fenced = re.sub(r'(?ms)^(`{3,}|~{3,}).*?^\1[^\n]*$', '', markdown)
+    fenced = re.sub(rf'(?ms){FENCE.pattern}.*?^\1[^\n]*$', '', markdown)
     return re.sub(r'`[^`\n]*`', '', fenced)
 
 
@@ -274,18 +274,28 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
     line naming no rank, below a claim that blocks. Under `Could not verify` or `Outside my lenses` a line shaped like a finding
     is still an item of that field: an unproven P2 is a claim. The lines below a finding, up to the next
     finding or field, are its `body`: what breaks, the command, its output, with their fences and their
-    indent past the finding's own, since output reads verbatim only inside its fence. A `Proof test:` line among them
+    indent past the finding's own, since output reads verbatim only inside its fence. A line inside such a
+    fence is output even when it is shaped like a field or a finding. A `Proof test:` line among them
     names the test the grader kept, with any words after its paths kept as `proof_note`. A finding's file written
     from one of `roots`, the repository or a proof copy, reads as the path inside it."""
     fields: dict[str, list[str]] = {}
-    findings, current, indent, last_finding, finding_depth = [], None, None, None, 0
+    findings, current, indent, last_finding, finding_depth, fence = [], None, None, None, 0, None
     for raw in text.splitlines():
         line = raw.strip()
         depth = len(raw) - len(raw.lstrip())
         in_body = current is None and last_finding is not None
+        body_line = raw.rstrip()[min(depth, finding_depth):]
+        opens = FENCE.match(line)
+        if in_body and (fence or opens):
+            # Inside a finding's fence every line is its output, never a field or a finding. A fence left open
+            # holds the rest of the report, so its lenses read unaccounted: the merge fails closed.
+            last_finding['body'].append(body_line)
+            if not fence:
+                fence = opens[1]
+            elif line.startswith(fence):
+                fence = None
+            continue
         if line.startswith('```'):
-            if in_body:
-                last_finding['body'].append(raw.rstrip()[min(depth, finding_depth):])
             continue
         finding, field = FINDING.match(line), REPORT_LINE.match(line)
         if finding and current in ('Could not verify', 'Outside my lenses'):
@@ -311,7 +321,7 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
             fields.setdefault(current, []).extend([inline] if inline else [])
             indent = depth if inline else None
         elif in_body and line:
-            last_finding['body'].append(raw.rstrip()[min(depth, finding_depth):])
+            last_finding['body'].append(body_line)
         elif (current and line and fields[current] and indent is not None and depth > indent
               and not _opens_item(line, current, fields[current][-1])):
             fields[current][-1] += ' ' + line

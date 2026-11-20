@@ -125,16 +125,18 @@ VERDICT = re.compile(r'^(proven|refuted|could not verify)\b[ \t]*[:,.-]?[ \t]*(.
 COMMAND = re.compile(r'\bCommand:[ \t]*(.*?)(?=[ \t]+Output:|$)', re.M)
 OUTPUT = re.compile(r'\bOutput:[ \t]*(.*)', re.S)
 FILE_LINE = re.compile(r'([^\s`(]+?):(\d+)')
-NO_COMMAND = {'', 'none', 'n/a', 'na', '-', 'not run', 'no run'}
-# Programs that search or read files. A refutation whose every command is one of these cites the code and never
-# ran it: a grep that shows a guard exists is an argument, and the defect PR 1435 lost was refuted that way.
-READERS = {'grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack', 'cat', 'bat', 'less', 'more', 'head', 'tail', 'sed', 'awk',
-           'ls', 'find', 'fd', 'wc', 'file', 'stat', 'tree', 'diff', 'nl', 'sort', 'uniq', 'cut', 'echo', 'printf',
-           'cd', 'pwd', 'which', 'type', 'true'}
-GIT_READERS = {None, 'grep', 'show', 'log', 'diff', 'blame', 'ls-files', 'ls-tree', 'cat-file', 'rev-parse', 'status',
-               'rev-list', 'merge-base', 'describe', 'branch', 'tag'}
+# Programs that execute code. A refutation is a run only when one of its commands starts one of these, or a script in
+# the repository: a grep that shows a guard exists is an argument, and the defect PR 1435 lost was refuted that way.
+# A runner missing here fails closed, to the coordinator's list; a reader missing from a list of readers would not.
+RUNNER = re.compile(r'(python|pypy)[\d.]*|node|npx|npm|pnpm|yarn|bun|deno|tsx|ts-node|pytest|py\.test|vitest|jest|'
+                    r'mocha|go|cargo|rustc|make|ruby|rake|rspec|perl|php|phpunit|java|mvn|gradle|dotnet|uv|uvx|poetry|'
+                    r'pipenv|tox|nox|swift|gcc|cc|clang|sqlite3|psql|docker')
 SEPARATORS = {'&&', '||', '|', ';', '&', '(', ')', ';;', '|&'}
-WRAPPERS = {'env', 'xargs', 'timeout', 'nice', 'command', 'time', 'sudo', 'nohup'}
+# Commands that start the program after their own words, and the options among those words that take a value.
+WRAPPERS = {'env', 'xargs', 'timeout', 'nice', 'command', 'time', 'sudo', 'nohup', 'exec'}
+WRAPPER_VALUES = {'-u', '-C', '-S', '-s', '-k', '-n', '-I', '-L', '-P', '-d', '-E', '-a', '-g', '--unset', '--chdir',
+                  '--signal', '--kill-after'}
+DURATION = re.compile(r'\d+(\.\d+)?[smhd]?')
 SHELLS = {'sh', 'bash', 'zsh', 'dash'}
 
 
@@ -289,10 +291,27 @@ def _inside(path: str, roots: tuple[str, ...]) -> str:
     return path
 
 
+def _program(words: list[str]) -> list[str]:
+    """`words` from the program they start: past `NAME=value` words, and past each wrapper with its options, the
+    values those options take, and a duration, so `env -u HOME grep` and `timeout -s KILL 5 cat` start at the read."""
+    i = 0
+    while i < len(words):
+        if re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', words[i]):
+            i += 1
+        elif os.path.basename(words[i]) in WRAPPERS:
+            i += 1
+            while i < len(words) and (words[i].startswith('-') or '=' in words[i] or DURATION.fullmatch(words[i])):
+                i += 2 if words[i] in WRAPPER_VALUES else 1
+        else:
+            break
+    return words[i:]
+
+
 def is_run(command: str) -> bool:
-    """Whether `command` gives the code an input: some command in it, split at `&&`, `|`, `;` and the like, is
-    neither a program in READERS nor a git subcommand in GIT_READERS. Leading `NAME=value` words and a wrapper such
-    as `env` or `xargs` are skipped to the program they run, and `bash -c '<text>'` is judged by its text."""
+    """Whether `command` gives the code an input: some command in it, split at `&&`, `|`, `;` and the like, starts a
+    program RUNNER names or a script by a path inside the repository (relative, such as `./scripts/check.sh`). A
+    shell's `-c` text, in any flag holding `c` such as `-lc`, is judged the same way. Anything else, a search, a read,
+    or prose, is not a run, so a runner this does not know fails closed."""
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
@@ -307,33 +326,18 @@ def is_run(command: str) -> bool:
         else:
             segment.append(token)
     for words in segments:
-        words = [word for word in words if word.strip()]
-        while words and re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', words[0]):
-            words = words[1:]
-        # `env X=1 grep`, `xargs -n1 grep` and `timeout 5 cat` run the program after their own words.
-        while words and os.path.basename(words[0]) in WRAPPERS:
-            words = words[1:]
-            while words and (words[0].startswith('-') or '=' in words[0] or re.fullmatch(r'\d+(\.\d+)?[smhd]?', words[0])):
-                words = words[1:]
+        words = _program([word for word in words if word.strip()])
         if not words:
             continue
-        program = os.path.basename(words[0])
-        if program in SHELLS and '-c' in words[1:-1]:
-            if is_run(words[words.index('-c', 1) + 1]):
+        program, name = words[0], os.path.basename(words[0])
+        if name in SHELLS:
+            flag = next((i for i, word in enumerate(words[1:], 1) if re.fullmatch(r'-[A-Za-z]*c[A-Za-z]*', word)), None)
+            if flag is not None:
+                if flag + 1 < len(words) and is_run(words[flag + 1]):
+                    return True
+            elif any(not word.startswith('-') for word in words[1:]):
                 return True
-            continue
-        if program != 'git':
-            if program not in READERS:
-                return True
-            continue
-        sub, rest = None, iter(words[1:])
-        for word in rest:
-            if word in ('-C', '-c', '--git-dir', '--work-tree', '--namespace'):
-                next(rest, None)
-            elif not word.startswith('-'):
-                sub = word
-                break
-        if sub not in GIT_READERS:
+        elif RUNNER.fullmatch(name) or ('/' in program and not program.startswith(('/', '~'))):
             return True
     return False
 
@@ -341,7 +345,8 @@ def is_run(command: str) -> bool:
 def _suspects(items: list[str]) -> list[dict]:
     """The `Suspects:` field's items as `id`, `number`, `verdict` (`proven`, `refuted`, `could not verify`, or None
     for a line naming none of them), `rank` (the first `P<n>` on the line, or None), `text` (the words after the
-    verdict on the item's first line), `command` and `output` (each None when absent), and `item`, the whole of it."""
+    verdict on the item's first line), `commands` (each `Command:` in it, in order), `output` (the text after the first
+    `Output:` past the first command, or the lines after that command; None when absent), and `item`, the whole of it."""
     read = []
     for item in items:
         first, _, rest = item.partition('\n')
@@ -349,6 +354,7 @@ def _suspects(items: list[str]) -> list[dict]:
         if not head:
             continue
         verdict = VERDICT.match(head[2])
+        commands = [found.strip().strip('`').strip() for found in COMMAND.findall(item)]
         command = COMMAND.search(item)
         output = None
         if command:
@@ -360,7 +366,7 @@ def _suspects(items: list[str]) -> list[dict]:
         read.append({'id': f'S{int(head[1])}', 'number': int(head[1]),
                      'verdict': verdict[1].lower() if verdict else None, 'rank': rank[0] if rank else None,
                      'text': (verdict[2] if verdict else head[2]).strip(),
-                     'command': command[1].strip().strip('`').strip() if command else None, 'output': output,
+                     'commands': commands, 'output': output,
                      'item': item})
     return read
 
@@ -713,10 +719,9 @@ def settle_suspects(group: str, handed: int, report: dict, roots: tuple[str, ...
             claims.append(f'{sid} could not verify: {text}')
             lines.append(f'  {group} {sid} could not verify, ' + (suspect['rank'] or 'no rank') + ': see could not verify')
         elif verdict == 'refuted':
-            ran = (suspect['command'] or '').strip('`. ').lower() not in NO_COMMAND and suspect['output'] \
-                and is_run(suspect['command'])
+            ran = next((command for command in suspect['commands'] if is_run(command)), None) if suspect['output'] else None
             if ran:
-                lines.append(f"  {group} {sid} refuted by a run: {suspect['command']}")
+                lines.append(f'  {group} {sid} refuted by a run: {ran}')
             else:
                 claims.append(f'{sid} refuted without a run: {text}')
                 lines.append(f'  {group} {sid} refuted without a run: moved to could not verify')

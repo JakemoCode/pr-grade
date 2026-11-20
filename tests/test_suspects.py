@@ -61,7 +61,7 @@ class ReadTest(unittest.TestCase):
             'S3 could not verify: P3, the fixture needs a database the copy cannot start.\n'))
         self.assertEqual([(s['id'], s['verdict']) for s in read['suspects']],
                          [('S1', 'proven'), ('S2', 'refuted'), ('S3', 'could not verify')])
-        self.assertEqual(read['suspects'][1]['command'], 'python3 -c "import a; a.f(); a.f()"')
+        self.assertEqual(read['suspects'][1]['commands'], ['python3 -c "import a; a.f(); a.f()"'])
         self.assertEqual(read['suspects'][1]['output'], '`2`')
         self.assertEqual(read['suspects'][2]['rank'], 'P3')
         self.assertEqual(len(read['fields']['Suspects']), 3)

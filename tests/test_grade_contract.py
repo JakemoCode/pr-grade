@@ -58,6 +58,14 @@ class DispatchTest(unittest.TestCase):
         self.assertIn(f'You have {limit} turns', section(AGENT, 'Turns'))
 
 
+class InstructionsTest(unittest.TestCase):
+    """A grader re-reads the dispatching session's CLAUDE.md files on every turn, about 36,000 tokens in
+    ForgeSmith-OS, and some of what they say (fix every loose end, ask the user) works against grading."""
+
+    def test_the_agent_does_not_inherit_the_dispatching_sessions_claude_md_files(self) -> None:
+        self.assertEqual(frontmatter(AGENT).get('omitClaudeMd'), 'true')
+
+
 class WriteTest(unittest.TestCase):
     """A worktree-isolated session refuses a heredoc whose text names git, and a report nearly always
     does, so the grader writes files with the Write tool and keeps file text off the command line."""

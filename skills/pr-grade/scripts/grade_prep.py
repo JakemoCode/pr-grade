@@ -156,10 +156,16 @@ def sliced_lens_file(text: str, held: list[str]) -> str:
 
 def skill_texts(path: Path) -> list[str]:
     """The text of each file `--skill` can name: a directory's top-level Markdown files, as the skill ships them, or a
-    single file. Empty when the path is neither."""
+    single file. A dotfile, such as the AppleDouble `._lenses.md` macOS writes on some disks, is not one. Empty when
+    the path is neither, or a file in it is not UTF-8 text, so the prep falls back as it does with no skill."""
     if path.is_dir():
-        return [found.read_text() for found in sorted(path.glob('*.md'))]
-    return [path.read_text()] if path.is_file() else []
+        found = [file for file in sorted(path.glob('*.md')) if file.is_file() and not file.name.startswith('.')]
+    else:
+        found = [path] if path.is_file() else []
+    try:
+        return [file.read_text(encoding='utf-8') for file in found]
+    except (OSError, UnicodeDecodeError):
+        return []
 
 
 def skill_lens_text(texts: list[str]) -> tuple[str, str] | None:

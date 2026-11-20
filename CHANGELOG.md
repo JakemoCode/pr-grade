@@ -15,7 +15,7 @@ Each entry says what changed, where, and why. Under it, **Before** is the old be
 - `near_miss.py`: fixed the near-miss table to escape every line break in its rows, so that a pattern holding one, or a node error quoting such a pattern, stays on its row.
   - **Before:** `_describe` printed a multi-line pattern raw, so a pattern line starting `merge:` or `remove:` became a line of the prep's print, and a consumer that reads that print a line at a time read it as the prep's own.
   - **Seen on:** the same review (issue #75, line 516).
-- `near_miss.py`: added `MAX_NOTES`, 10, to cap the `not scanned` notes, with a line counting the rest.
+- `near_miss.py`: added `MAX_NOTES`, 10, to cap the `not scanned` notes, with a line counting the rest, and listed the files that failed to scan ahead of the files with no scanner, so that the cap never cuts a file the grader has to read by hand.
   - **Before:** each changed file with no scanner added a line; 300 changed `.go` files gave 302 lines, 16,601 characters, re-read on every grader turn.
   - **Seen on:** the same review (issue #75, line 428).
 - `near_miss.py`: added `MAX_HIT_LINES`, 10, to cap the line numbers listed for each second reader, with a count of the rest.

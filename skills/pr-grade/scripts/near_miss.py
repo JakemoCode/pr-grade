@@ -424,8 +424,8 @@ def _scanner(path: str):
 
 def scan(root: Path, lines: dict, config: dict) -> tuple[list[dict], list[dict], list[str], dict[str, list]]:
     """Predicates and anchors on the changed lines of every changed code file, a note for each code file not
-    scanned, and each scanned file's string literals."""
-    predicates, anchors, notes, literals = [], [], [], {}
+    scanned, the files that failed to scan first, and each scanned file's string literals."""
+    predicates, anchors, failed_notes, notes, literals = [], [], [], [], {}
     for path, ranges in sorted(lines.items()):
         if not (root / path).is_file() or not grade_mode.code_files([path], config):
             continue
@@ -436,11 +436,12 @@ def scan(root: Path, lines: dict, config: dict) -> tuple[list[dict], list[dict],
         try:
             found, anchored, literals[path] = scanner(path, _read(root, path), ranges)
         except (OSError, SyntaxError, ValueError) as failed:
-            notes.append(f'{path}: {type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}')
+            failed_notes.append(f'{path}: {type(failed).__name__}: {str(failed)[:OUTPUT_CHARS]}')
             continue
         predicates += sorted(found, key=lambda p: (p['line'], p['col']))
         anchors += anchored
-    return predicates, anchors, notes, literals
+    # A file that failed to scan needs reading by hand, so the cap on notes never cuts it behind a language list.
+    return predicates, anchors, failed_notes + notes, literals
 
 
 # ---- running them

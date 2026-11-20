@@ -28,6 +28,16 @@ class NotesCappedTest(unittest.TestCase):
         self.assertIn(f'- and {300 - near_miss.MAX_NOTES} more files not scanned, cut by the cap of '
                       f'{near_miss.MAX_NOTES}', out)
 
+    def test_a_file_that_failed_to_scan_is_named_ahead_of_the_files_with_no_scanner(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            files = [f'a{i:02}.go' for i in range(near_miss.MAX_NOTES + 1)] + ['z.py']
+            for path in files[:-1]:
+                (root / path).write_text('package x\n')
+            (root / 'z.py').write_text('def f(:\n')
+            out = near_miss.near_miss_table(root, {path: None for path in files}, files, CONFIG)
+        self.assertTrue(any(line.startswith('- not scanned z.py: SyntaxError') for line in out), out)
+
 
 if __name__ == '__main__':
     unittest.main()

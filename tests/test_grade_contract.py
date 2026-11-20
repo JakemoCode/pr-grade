@@ -60,6 +60,18 @@ class DispatchTest(unittest.TestCase):
         self.assertIn('as the Agent prompt, unchanged', skill)
         self.assertIn('"promptFiles": false', skill)
 
+    def test_a_prompt_file_carrying_lens_text_stands_in_for_the_sources_it_copied(self) -> None:
+        # grade_prep.py copies the skill's and the lens file's text for a grader's lenses into its prompt file.
+        inputs = section(AGENT, 'Inputs')
+        self.assertIn('===== lens text =====', inputs)
+        self.assertIn('do not read that file', inputs)
+        # The diff command rides on the dispatch line, so the first turn reads the file and the change together.
+        self.assertIn('the diff command the line names', inputs)
+        # A prompt file without lens text, or a pasted dispatch, still reads both sources.
+        self.assertIn('${CLAUDE_PLUGIN_ROOT}/skills/pr-grade/SKILL.md', inputs)
+        skill = section(SKILL, '2. Pick the mode and prepare the graders')
+        self.assertIn('"sliceLenses": false', skill)
+
     def test_the_skill_the_agent_reads_ships_with_it(self) -> None:
         paths = re.findall(r'\$\{CLAUDE_PLUGIN_ROOT\}/(\S+?)`', AGENT)
         self.assertTrue(paths)

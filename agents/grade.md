@@ -4,6 +4,7 @@ description: Applies named /pr-grade lenses to one change and reports a verdict 
 tools: Read, Glob, Grep, Bash, Write
 model: sonnet
 effort: high
+omitClaudeMd: true
 maxTurns: 50
 ---
 

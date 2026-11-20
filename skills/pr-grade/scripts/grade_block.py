@@ -723,8 +723,9 @@ def settle_suspects(group: str, handed: int, report: dict, roots: tuple[str, ...
         else:
             cited = [(_inside(file[2:] if file.startswith('./') else file, roots), int(line))
                      for file, line in FILE_LINE.findall(suspect['item'].partition('\n')[0])]
-            finding = next((f for f in report['findings'] for file, line in cited
-                            if f['file'] == file and f['start'] <= line <= f['end']), None)
+            at = [f for f in report['findings'] for file, line in cited if f['file'] == file and f['start'] <= line <= f['end']]
+            # Two findings can share a line: the one at the rank the suspect's line gives is its finding.
+            finding = next((f for f in at if f['rank'] == suspect['rank']), at[0] if at else None)
             if finding is None:
                 no_finding.append(f'{group} {sid}')
                 lines.append(f'  {group} {sid} proven, names no finding in its report: {text}')

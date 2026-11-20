@@ -40,8 +40,8 @@ nearest changed line and the function it sits in, and never refuses one: a defec
 the change left alone. The block keeps each grader's notes in `Verified and clear` and writes a lens
 grade_prep.py skipped as `L2 (not applicable)`. It settles nothing that needs judgment: two lines with
 one cause, a clearance against a proof, a 3 for a design decision, or a 1. While a duplicate line, an
-`anchor:` flag, an open claim that would block, a defect outside its lens, or an unassessed lens is
-open, its `Score` reads `<floor>/5 floor; ...`, which `check` refuses until the coordinator writes one.
+`anchor:` flag, an open claim that would block, a defect outside its lens, an unassessed lens, or a
+proof test with no repository path is open, its `Score` reads `<floor>/5 floor; ...`, which `check` refuses until the coordinator writes one.
 """
 from __future__ import annotations
 
@@ -271,16 +271,20 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
     a rank starts a new item at any depth, except a possessive under `Could not verify` (`L2's pool`) on a
     line naming no rank, below a claim that blocks. Under `Could not verify` or `Outside my lenses` a line shaped like a finding
     is still an item of that field: an unproven P2 is a claim. The lines below a finding, up to the next
-    finding or field, are its `body`: what breaks, the command, its output. A `Proof test:` line among them
+    finding or field, are its `body`: what breaks, the command, its output, with their fences and their
+    indent past the finding's own, since output reads verbatim only inside its fence. A `Proof test:` line among them
     names the test the grader kept, with any words after its paths kept as `proof_note`. A finding's file written
     from one of `roots`, the repository or a proof copy, reads as the path inside it."""
     fields: dict[str, list[str]] = {}
-    findings, current, indent, last_finding = [], None, None, None
+    findings, current, indent, last_finding, finding_depth = [], None, None, None, 0
     for raw in text.splitlines():
         line = raw.strip()
-        if line.startswith('```'):
-            continue
         depth = len(raw) - len(raw.lstrip())
+        in_body = current is None and last_finding is not None
+        if line.startswith('```'):
+            if in_body:
+                last_finding['body'].append(raw.rstrip()[min(depth, finding_depth):])
+            continue
         finding, field = FINDING.match(line), REPORT_LINE.match(line)
         if finding and current in ('Could not verify', 'Outside my lenses'):
             fields[current].append(line)
@@ -292,8 +296,8 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
             findings.append({'rank': finding[1], 'lenses': LENS_ID.findall(finding[2]), 'file': file,
                              'start': start, 'end': end, 'where': f'{file}:{start}' + (f'-{end}' if end != start else ''),
                              'symbol': finding[6], 'title': finding[7].strip(), 'body': []})
-            current, last_finding = None, findings[-1]
-        elif current is None and last_finding is not None and PROOF_TEST.match(line):
+            current, last_finding, finding_depth = None, findings[-1], depth
+        elif in_body and PROOF_TEST.match(line):
             kept = PROOF_TEST.match(line)
             # A sentence-ending period is not part of a path.
             file, at = kept[1] or kept[2], kept[3] or kept[4]
@@ -304,8 +308,8 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
             inline = field[2].strip()
             fields.setdefault(current, []).extend([inline] if inline else [])
             indent = depth if inline else None
-        elif current is None and last_finding is not None and line:
-            last_finding['body'].append(line)
+        elif in_body and line:
+            last_finding['body'].append(raw.rstrip()[min(depth, finding_depth):])
         elif (current and line and fields[current] and indent is not None and depth > indent
               and not _opens_item(line, current, fields[current][-1])):
             fields[current][-1] += ' ' + line
@@ -520,8 +524,9 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
     out += ['', f'score floor: {floor}/5. Two lines with one cause, a clearance against a proof, a 3 for a design',
             'decision, and a 1 for a finding that contradicts the stated purpose are yours to judge.',
             'The Score line is yours to raise or lower.']
+    pathless = sum(1 for f in findings if f.get('proof_test') and not f['proof_test']['at'])
     settle = to_settle(meta, status, unapplied, outside, sum(blocking for _, _, blocking in open_claims),
-                       shared_count, sum(1 for anchor in anchor_notes if anchor), unchecked)
+                       shared_count, sum(1 for anchor in anchor_notes if anchor), unchecked, pathless)
     if settle:
         out += ['left to your judgment; settle each, then edit only the lines it touches in the block below:']
         out += [f'  {item}' for item in settle]
@@ -538,16 +543,29 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
     for f in findings:
         out += ['', f"{f['rank']} " + ''.join(f'{lens} ' for lens in f['lenses']) + f['where']
                 + (f" in {f['symbol']}" if f['symbol'] else '') + f" - {f['title']}"]
-        # A line `parse` would take for one of the block's own fields goes in code, which `parse` skips, and a
-        # heading is escaped, since a `## ` line would end the section and hide every finding below it.
-        out += [FIELD_LEAD.sub(r'`\1:`', HEADING_LEAD.sub(r'\\#', line)) for line in f['body']]
+        body = [_inert(line) for line in f['body']]
+        # A fence the grader left open would swallow every finding below it.
+        body += [fence for fence in ('```', '~~~') if sum(line.lstrip().startswith(fence) for line in body) % 2]
+        out += body
         if f.get('proof_test'):
-            out.append(f"Proof test: {f['proof_test']['at'] or f['proof_test']['file']}{f['proof_note']}")
+            kept = f['proof_test']
+            out.append(f"Proof test: {kept['at']}{f['proof_note']}" if kept['at']
+                       else f"Proof test: {kept['file']}, no repository path given")
     return '\n'.join(out)
 
 
+def _inert(line: str) -> str:
+    """A finding's line as the block prints it, so that `parse` reads it as neither a field nor the heading
+    that ends the section. A field name goes in code, which `parse` drops, and a heading's `#` is escaped.
+    A code span before either hides it from those two and not from `parse`, which drops spans before it
+    reads, so such a line is indented one space, which neither of its patterns matches."""
+    line = FIELD_LEAD.sub(r'`\1:`', HEADING_LEAD.sub(r'\\#', line))
+    seen = without_code(line)
+    return ' ' + line if FIELD_LEAD.match(seen) or HEADING_LEAD.match(seen) else line
+
+
 def to_settle(meta: dict, status: dict[str, str], unapplied: list[str], outside: list[str], open_blocking: int,
-              shared: int, flagged: int, unchecked: str | None) -> list[str]:
+              shared: int, flagged: int, unchecked: str | None, pathless: int) -> list[str]:
     """What SKILL.md section 5 leaves to the coordinator in this merge, one line each. A P3 claim is not
     on it: it leaves the score where it is."""
     def counted(n: int, one: str, many: str) -> str:
@@ -576,6 +594,9 @@ def to_settle(meta: dict, status: dict[str, str], unapplied: list[str], outside:
         items.append(counted(len(unassessed), 'lens', 'lenses') + ' no report assessed: '
                      + '; '.join(f"{lens} ({status.get(lens, 'not held by any grader')})" for lens in unassessed)
                      + '; grade it, or pass a reply that never reached its file with --report <group>=<file or ->')
+    if pathless:
+        items.append(counted(pathless, 'proof test names', 'proof tests name') + ' no repository path: write the '
+                     'path it was committed at')
     return items
 
 

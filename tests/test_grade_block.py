@@ -302,6 +302,11 @@ PROVEN = ('P1 L1 src/a.py:9 in f - late write lands\n'
 UNSETTLED = 'floor; settle the items above, then write the score'
 
 
+def floor(block: dict) -> str:
+    """The score a drafted block leads with, whether or not the merge left it unsettled."""
+    return block['Score'].split()[0]
+
+
 
 def report(score: str, verified: str, *, findings: str = '', unverified: str = 'none', outside: str = 'none') -> str:
     return (f'Score: {score}\nBlocking: nothing\n{findings}L1: closed\nVerified and clear: {verified}\n'
@@ -355,7 +360,7 @@ class MergeTest(unittest.TestCase):
         self.write('timing', report('2/5', 'L2', findings='P1 L1 src/a.py:9 - late write lands\nwhat breaks\n'))
         self.write('reach', report('5/5', 'L3'))
         block = self.block()
-        self.assertEqual((block['Score'], block['Verified and clear']), ('4/5', 'L2, L3'))
+        self.assertEqual((floor(block), block['Verified and clear']), ('4/5', 'L2, L3'))
         self.assertIn('L1  P1 at src/a.py:9', self.merged())
 
     def test_two_findings_at_one_line_are_flagged_and_both_count(self) -> None:
@@ -365,7 +370,7 @@ class MergeTest(unittest.TestCase):
         merged = self.merged()
         self.assertIn('findings (2):', merged)
         self.assertEqual(merged.count('same line as another finding'), 2)
-        self.assertEqual(self.block()['Score'], '3/5')
+        self.assertEqual(floor(self.block()), '3/5')
 
     def test_a_findings_proof_test_is_named_and_a_copy_line_is_printed(self) -> None:
         meta = json.loads((self.root / 'grade.json').read_text())
@@ -459,14 +464,14 @@ class MergeTest(unittest.TestCase):
         merged = self.merged()
         self.assertIn('findings (0):', merged)
         self.assertIn('Could not verify: guess: P2 L2 src/a.py:10', merged)
-        self.assertEqual(self.block()['Score'], '4/5')
+        self.assertEqual(floor(self.block()), '4/5')
 
     def test_an_open_p2_claim_blocks_like_the_finding_it_would_be(self) -> None:
         self.write('timing', report('5/5', 'L1, L2'))
         self.write('reach', report('5/5', 'L3', unverified='L3 would be P2: script caller skips the lease; '
                                                          'three runs never reached it'))
         block = self.block()
-        self.assertEqual((block['Score'], block['Verified and clear']), ('4/5', 'L1, L2'))
+        self.assertEqual((floor(block), block['Verified and clear']), ('4/5', 'L1, L2'))
         self.assertIn('Could not verify: guess: L3 would be P2', self.merged())
 
     def test_an_open_p3_claim_does_not_block(self) -> None:
@@ -479,7 +484,7 @@ class MergeTest(unittest.TestCase):
         self.write('reach', report('5/5', 'L3'))
         merged = self.merged()
         self.assertIn('L2  unaccounted: ask timing which', merged)
-        self.assertEqual(self.block()['Score'], '2/5')
+        self.assertEqual(floor(self.block()), '2/5')
 
     def test_a_report_with_no_clear_lens_lines_accounts_for_every_lens(self) -> None:
         # A grader names a cleared lens only in `Verified and clear`, with the input it tried as the note, and
@@ -498,7 +503,7 @@ class MergeTest(unittest.TestCase):
         self.assertIn('L3  open claim from reach', merged)
         self.assertNotIn('unaccounted', merged)
         block = self.block()
-        self.assertEqual((block['Score'], block['Verified and clear']), ('4/5', 'L1 (two writers racing at line 40), L2'))
+        self.assertEqual((floor(block), block['Verified and clear']), ('4/5', 'L1 (two writers racing at line 40), L2'))
 
     def test_a_report_from_an_older_grader_with_clear_lens_lines_still_merges(self) -> None:
         self.write('timing', 'Score: 5/5\nBlocking: nothing\nL1: Clear: two writers racing at line 40 both lost.\n'
@@ -511,7 +516,7 @@ class MergeTest(unittest.TestCase):
     def test_a_missing_report_leaves_its_lenses_unapplied(self) -> None:
         self.write('timing', report('5/5', 'L1, L2'))
         self.assertIn('L3  no report from reach', self.merged())
-        self.assertEqual(self.block()['Score'], '2/5')
+        self.assertEqual(floor(self.block()), '2/5')
 
     def test_a_defect_outside_the_graders_lenses_is_carried(self) -> None:
         self.write('timing', report('5/5', 'L1, L2', outside='L3 src/b.py:4: a second caller skips the guard'))
@@ -524,26 +529,26 @@ class MergeTest(unittest.TestCase):
         self.write('reach', report('5/5', 'L3'))
         merged = self.merged()
         self.assertIn('Could not verify: guess: P2 L2 src/a.py:10 - maybe a race ran: npm test', merged)
-        self.assertEqual(self.block()['Score'], '4/5')
+        self.assertEqual(floor(self.block()), '4/5')
 
     def test_separate_claims_stay_separate(self) -> None:
         self.write('timing', report('5/5', 'L1', unverified='\n- P2 L2 src/a.py:10 - maybe a race\n'
                                                           '  ran: npm test, which passed\n- P3 L1 the log reads oddly'))
         self.write('reach', report('5/5', 'L3'))
         self.assertIn('P3, does not block', self.merged())
-        self.assertEqual(self.block()['Score'], '4/5')
+        self.assertEqual(floor(self.block()), '4/5')
 
     def test_an_indented_bullet_is_a_claim_of_its_own(self) -> None:
         self.write('timing', report('5/5', 'L1', unverified='P2 L2 src/a.py:10 - maybe a race\n'
                                                           '  - P2 L2 src/a.py:30 - maybe a second race'))
         self.write('reach', report('5/5', 'L3'))
-        self.assertEqual(self.block()['Score'], '3/5')
+        self.assertEqual(floor(self.block()), '3/5')
 
     def test_an_indented_claim_is_a_claim_of_its_own(self) -> None:
         self.write('timing', report('5/5', 'L1', unverified='L1 P2 src/a.py:10 - maybe a race\n'
                                                           '    L2 P2 whether close leaks the handle'))
         self.write('reach', report('5/5', 'L3'))
-        self.assertEqual(self.block()['Score'], '3/5')
+        self.assertEqual(floor(self.block()), '3/5')
 
     def test_an_indented_possessive_lens_id_is_prose(self) -> None:
         self.write('timing', report('5/5', 'L2', unverified='L1 P2 src/a.py:10 - maybe a race\n'
@@ -551,27 +556,27 @@ class MergeTest(unittest.TestCase):
         self.write('reach', report('5/5', 'L3'))
         self.assertIn("timing: L1 P2 src/a.py:10 - maybe a race L2's pool releases the handle on close\n",
                       self.merged())
-        self.assertEqual(self.block()['Score'], '4/5')
+        self.assertEqual(floor(self.block()), '4/5')
 
     def test_an_indented_possessive_below_a_p3_claim_still_counts(self) -> None:
         # Joined to the P3 above it, the claim would stop counting.
         self.write('timing', report('5/5', 'L1', unverified="\n- L1 P3 the log reads oddly\n"
                                                           "    L2's pool may leak the handle under load"))
         self.write('reach', report('5/5', 'L3'))
-        self.assertEqual(self.block()['Score'], '4/5')
+        self.assertEqual(floor(self.block()), '4/5')
 
     def test_an_indented_possessive_naming_a_rank_is_a_claim(self) -> None:
         self.write('timing', report('5/5', 'L1', unverified='L1 P2 src/a.py:10 - maybe a race\n'
                                                           "    L2's close would be P2: leaks the handle"))
         self.write('reach', report('5/5', 'L3'))
-        self.assertEqual(self.block()['Score'], '3/5')
+        self.assertEqual(floor(self.block()), '3/5')
 
     def test_an_indented_unranked_claim_still_counts(self) -> None:
         # Prose and an unranked claim read alike after a bare lens id; splitting keeps the floor safe.
         self.write('timing', report('5/5', 'L1', unverified='L1 P2 src/a.py:10 - maybe a race\n'
                                                           '    L2 handle may leak on close'))
         self.write('reach', report('5/5', 'L3'))
-        self.assertEqual(self.block()['Score'], '3/5')
+        self.assertEqual(floor(self.block()), '3/5')
 
     def test_a_possessive_under_verified_does_not_join_the_lens_above(self) -> None:
         self.write('timing', report('5/5', 'L1 (proved by test_x)\n    L2 (no await)\n'
@@ -636,20 +641,20 @@ class MergeTest(unittest.TestCase):
         self.skip('L3')
         self.write('timing', report('4/5', 'L1, L2', findings='P2 L3 src/a.py:9 - a caller skips the guard\n'))
         block = self.block()
-        self.assertEqual((block['Score'], block['Verified and clear']), ('4/5', 'L1, L2'))
+        self.assertEqual((floor(block), block['Verified and clear']), ('4/5', 'L1, L2'))
         self.assertIn('L3  P2 at src/a.py:9', self.merged())
 
     def test_an_open_claim_on_a_skipped_lens_outranks_the_skip(self) -> None:
         self.skip('L3')
         self.write('timing', report('5/5', 'L1, L2', unverified='L3 would be P2: a caller may skip the guard'))
         block = self.block()
-        self.assertEqual((block['Score'], block['Verified and clear']), ('4/5', 'L1, L2'))
+        self.assertEqual((floor(block), block['Verified and clear']), ('4/5', 'L1, L2'))
 
     def test_a_grade_json_without_skipped_skips_nothing(self) -> None:
         # A root from an older grade_prep.py has no `skipped` key.
         self.write('timing', report('5/5', 'L1, L2'))
         self.assertIn('L3  no report from reach', self.merged())
-        self.assertEqual(self.block()['Score'], '2/5')
+        self.assertEqual(floor(self.block()), '2/5')
 
     def run_merge(self, *reports: str, stdin: str = '') -> subprocess.CompletedProcess:
         args = [arg for given in reports for arg in ('--report', given)]
@@ -724,7 +729,10 @@ class MergeTest(unittest.TestCase):
         reach = 'P3 L3 docs/x.md:2 - stale link\n'
         self.write('timing', report('3/5', '', findings=timing))
         self.write('reach', report('4/5', '', findings=reach))
-        printed = grade_block.read_report('\n'.join(self.section()))['findings']
+        # Below the fields the block is shaped as a report's findings are.
+        section = self.section()
+        below = next(i for i, line in enumerate(section) if line.startswith('Could not verify: '))
+        printed = grade_block.read_report('\n'.join(section[below + 1:]))['findings']
         written = grade_block.read_report(timing)['findings'] + grade_block.read_report(reach)['findings']
         fields = ('rank', 'lenses', 'where', 'symbol', 'title', 'body')
         self.assertEqual(len(printed), 3)
@@ -739,6 +747,14 @@ class MergeTest(unittest.TestCase):
         self.assertEqual((block['Mode'], block['Graded']), ('fan-out', HEAD))
         self.assertIn('`Surface:` src lib', self.merged())
 
+    def test_a_heading_in_a_findings_lines_does_not_end_the_block(self) -> None:
+        self.write('timing', report('4/5', 'L2', findings='P1 L1 src/a.py:9 - late write lands\n## Repro\n'
+                                                          'P3 L2 src/b.py:3 - log line reads oddly\n'))
+        self.write('reach', report('5/5', 'L3'))
+        section = grade_block.SECTION.search(self.merged()).group(1)
+        self.assertIn('\\## Repro', section)
+        self.assertIn('P3 L2 src/b.py:3 - log line reads oddly', section)
+
     def test_two_findings_at_one_line_leave_the_score_unsettled(self) -> None:
         self.write('timing', report('4/5', 'L2', findings='P1 L1 src/a.py:9 - late write lands\n'))
         self.write('reach', report('4/5', '', findings='P1 L3 src/a.py:9 - caller sees stale row\n'))
@@ -750,13 +766,13 @@ class MergeTest(unittest.TestCase):
         self.write('reach', report('5/5', 'L3', unverified='\n- L3 would be P2: a caller skips the lease'))
         merged = self.merged()
         self.assertEqual(self.block()['Score'], f'4/5 {UNSETTLED}')
-        self.assertIn('  1 open claim that would block: prove it, refute it, or leave it a guess', merged)
-        self.assertIn('Could not verify: guess: L3 would be P2: a caller skips the lease\n', merged)
+        self.assertIn('  1 open claim that would block: prove or refute each, or leave it a guess', merged)
+        self.assertIn('Could not verify: guess: L3 would be P2: a caller skips the lease', merged.splitlines())
 
     def test_a_defect_outside_its_lens_leaves_the_score_unsettled(self) -> None:
         self.write('timing', report('5/5', 'L1, L2', outside='L3 src/b.py:4: a second caller skips the guard'))
         self.write('reach', report('5/5', 'L3'))
-        self.assertIn('  1 defect raised outside its lens: prove it, or carry it to Could not verify', self.merged())
+        self.assertIn('  1 defect raised outside its lens: prove each, or carry it to Could not verify', self.merged())
         self.assertEqual(self.block()['Score'], f'5/5 {UNSETTLED}')
 
     def test_a_missing_report_leaves_the_score_unsettled(self) -> None:
@@ -996,7 +1012,7 @@ class AnchorTest(unittest.TestCase):
         # Flagged, never refused: L4 finds a caller the change broke in code it never touched.
         merged = self.merged('P2 L1 src/untouched.py:1 - reads the dropped render')
         self.assertIn('(anchor: the graded diff changed nothing in src/untouched.py)', merged)
-        self.assertEqual(grade_block.parse(merged)['Score'], '4/5')
+        self.assertEqual(floor(grade_block.parse(merged)), '4/5')
 
     def test_a_finding_in_a_file_the_head_lacks_is_flagged(self) -> None:
         merged = self.merged('P2 L1 src/gone.py:1 - reads the dropped render')

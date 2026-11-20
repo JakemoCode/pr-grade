@@ -33,12 +33,15 @@ rules it is checked against.
 `merge` reads the report each grader wrote under the root grade_prep.py printed, or the one `--report`
 gives for a group whose grader replied without writing its file. It prints where every lens ended
 (clear, not applicable, a finding, an open claim, or unaccounted), the findings with any two at one line
-flagged, the lowest score the rules allow, and a draft block. It flags a finding whose line touches no
-line the graded diff changed, naming the nearest changed line and the function it sits in, and never
-refuses one: a defect can sit in a caller the change left alone. The draft keeps each grader's notes in
-`Verified and clear` and writes a lens grade_prep.py skipped as `L2 (not applicable)`. It settles
-nothing that needs judgment: two lines with one cause, a clearance against a proof, a 3 for a design
-decision, or a 1.
+flagged, the lowest score the rules allow, what it leaves to the coordinator's judgment, and the whole
+block, each finding below the fields with the lines its grader wrote under it and its `Proof test:` at
+the repository path. It flags a finding whose line touches no line the graded diff changed, naming the
+nearest changed line and the function it sits in, and never refuses one: a defect can sit in a caller
+the change left alone. The block keeps each grader's notes in `Verified and clear` and writes a lens
+grade_prep.py skipped as `L2 (not applicable)`. It settles nothing that needs judgment: two lines with
+one cause, a clearance against a proof, a 3 for a design decision, or a 1. While a duplicate line, an
+`anchor:` flag, an open claim that would block, a defect outside its lens, or an unassessed lens is
+open, its `Score` reads `<floor>/5 floor; ...`, which `check` refuses until the coordinator writes one.
 """
 from __future__ import annotations
 
@@ -80,7 +83,11 @@ DEFAULT_LENSES = [f'L{n}' for n in range(1, 12)] + ['L14', 'L15', 'L16']
 COMPARE_CAP = 300
 PR_FILE_CAP = 3000
 SECTION = re.compile(r'(?ms)^##[ \t]+Grade[ \t]*$(.*?)(?=^##[ \t]|\Z)')
-FIELD = re.compile(r'(?m)^(Mode|Surface|Graded|Score|Verified and clear):[ \t]*(.*?)[ \t]*$')
+FIELD_NAMES = 'Mode|Surface|Graded|Score|Verified and clear'
+FIELD = re.compile(rf'(?m)^({FIELD_NAMES}):[ \t]*(.*?)[ \t]*$')
+# A finding's line the merge prints into the block that `parse` would read as one of the block's fields.
+FIELD_LEAD = re.compile(rf'^({FIELD_NAMES}):')
+HEADING_LEAD = re.compile(r'^#')
 SURFACE_REFUSED = 'a surface grade is not a pull request grade'
 LENS_HEADING = re.compile(r'(?m)^###[ \t]+(L\d+)\.')
 LENS_ID = re.compile(r'L\d+\b')
@@ -98,6 +105,7 @@ FINDING = re.compile(r'^(P[123])[ \t]+((?:L\d+[ \t,]*)*)(\S+?):(\d+)(?::\d+)?(?:
 PROOF_TEST = re.compile(r'^Proof test:[ \t]*(?:`([^`]+)`|([^`\s,;]+))'
                         r'(?:[ \t]*(?:\([^)]*\))?[ \t]*,?[ \t]*ran at[ \t]+(?:`([^`]+)`|([^`\s,;]+)))?')
 BLOCKING = re.compile(r'\bP[12]\b')
+BULLET = re.compile(r'^[-*+][ \t]+')
 NEW_ITEM = re.compile(r'([-*+]|\d+[.)])[ \t]|(L\d+|P[123])\b')
 # `L2's pool releases` continues a claim, unless its line names a rank or the claim above is a P3.
 LENS_POSSESSIVE = re.compile(r"L\d+['’]s\b")
@@ -262,8 +270,9 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
     a claim wrapped onto a second line is still one claim. A heading that repeats adds to its field. A line that opens with a bullet, a lens id, or
     a rank starts a new item at any depth, except a possessive under `Could not verify` (`L2's pool`) on a
     line naming no rank, below a claim that blocks. Under `Could not verify` or `Outside my lenses` a line shaped like a finding
-    is still an item of that field: an unproven P2 is a claim. A `Proof test:` line below a finding, before
-    the next field, names the test the grader kept and belongs to that finding. A finding's file written
+    is still an item of that field: an unproven P2 is a claim. The lines below a finding, up to the next
+    finding or field, are its `body`: what breaks, the command, its output. A `Proof test:` line among them
+    names the test the grader kept, with any words after its paths kept as `proof_note`. A finding's file written
     from one of `roots`, the repository or a proof copy, reads as the path inside it."""
     fields: dict[str, list[str]] = {}
     findings, current, indent, last_finding = [], None, None, None
@@ -282,18 +291,21 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
             file = _inside(file, roots)
             findings.append({'rank': finding[1], 'lenses': LENS_ID.findall(finding[2]), 'file': file,
                              'start': start, 'end': end, 'where': f'{file}:{start}' + (f'-{end}' if end != start else ''),
-                             'symbol': finding[6], 'title': finding[7].strip()})
+                             'symbol': finding[6], 'title': finding[7].strip(), 'body': []})
             current, last_finding = None, findings[-1]
         elif current is None and last_finding is not None and PROOF_TEST.match(line):
             kept = PROOF_TEST.match(line)
             # A sentence-ending period is not part of a path.
             file, at = kept[1] or kept[2], kept[3] or kept[4]
             last_finding['proof_test'] = {'file': file.rstrip('.'), 'at': at.rstrip('.') if at else None}
+            last_finding['proof_note'] = line[kept.end():].rstrip()
         elif field:
             current, last_finding = field[1], None
             inline = field[2].strip()
             fields.setdefault(current, []).extend([inline] if inline else [])
             indent = depth if inline else None
+        elif current is None and last_finding is not None and line:
+            last_finding['body'].append(line)
         elif (current and line and fields[current] and indent is not None and depth > indent
               and not _opens_item(line, current, fields[current][-1])):
             fields[current][-1] += ' ' + line
@@ -474,10 +486,12 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
     out += [f'  {lens}  {status.get(lens, "not held by any grader")}' for lens in lenses]
     out += ['', f'findings ({len(findings)}):']
     anchor_notes, unchecked = anchors(meta, findings) if findings else ([], None)
+    shared_count = 0
     for f, anchor in zip(findings, anchor_notes):
         # Two findings at one line may be one defect or two; counting both keeps the floor on the safe side.
         shared = any(g is not f and g['file'] == f['file'] and g['start'] <= f['end'] and f['start'] <= g['end']
                      for g in findings)
+        shared_count += shared
         out.append(f"  {f['rank']} {f['where']}" + (f" in {f['symbol']}" if f['symbol'] else '')
                    + f" - {f['title']}  [{f['by']}]"
                    + (f"  (proof test: {f['proof_test']['path']}, "
@@ -504,12 +518,65 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
     out += ['', 'outside the lenses that raised them, prove or carry each under its own lens:']
     out += [f'  {item}' for item in outside] or ['  none']
     out += ['', f'score floor: {floor}/5. Two lines with one cause, a clearance against a proof, a 3 for a design',
-            'decision, and a 1 for a finding that contradicts the stated purpose are yours to judge.', '',
-            '## Grade', '', f"Mode: {meta['mode']}", *([f"Surface: {' '.join(meta['surface'])}"] if meta.get('surface') else []),
-            f"Graded: {meta['head']}", f'Score: {floor}/5',
+            'decision, and a 1 for a finding that contradicts the stated purpose are yours to judge.',
+            'The Score line is yours to raise or lower.']
+    settle = to_settle(meta, status, unapplied, outside, sum(blocking for _, _, blocking in open_claims),
+                       shared_count, sum(1 for anchor in anchor_notes if anchor), unchecked)
+    if settle:
+        out += ['left to your judgment; settle each, then edit only the lines it touches in the block below:']
+        out += [f'  {item}' for item in settle]
+    else:
+        out += ['nothing above is left to your judgment: paste the block below as printed.']
+    # While anything is left to judgment the Score is a floor, written so that `check` refuses it as printed.
+    score = f'{floor}/5' + (' floor; settle the items above, then write the score' if settle else '')
+    # A claim's own bullet is noise once the block joins the claims on one line.
+    guesses = '; '.join('guess: ' + BULLET.sub('', claim) for _, claim, _ in open_claims)
+    out += ['', '## Grade', '', f"Mode: {meta['mode']}", *([f"Surface: {' '.join(meta['surface'])}"] if meta.get('surface') else []),
+            f"Graded: {meta['head']}", f'Score: {score}',
             f"Blocking: {first or 'nothing'}", f"Verified and clear: {', '.join(clear) or 'none'}",
-            'Could not verify: ' + ('; '.join(f'guess: {claim}' for _, claim, _ in open_claims) or 'none')]
+            f"Could not verify: {guesses or 'none'}"]
+    for f in findings:
+        out += ['', f"{f['rank']} " + ''.join(f'{lens} ' for lens in f['lenses']) + f['where']
+                + (f" in {f['symbol']}" if f['symbol'] else '') + f" - {f['title']}"]
+        # A line `parse` would take for one of the block's own fields goes in code, which `parse` skips, and a
+        # heading is escaped, since a `## ` line would end the section and hide every finding below it.
+        out += [FIELD_LEAD.sub(r'`\1:`', HEADING_LEAD.sub(r'\\#', line)) for line in f['body']]
+        if f.get('proof_test'):
+            out.append(f"Proof test: {f['proof_test']['at'] or f['proof_test']['file']}{f['proof_note']}")
     return '\n'.join(out)
+
+
+def to_settle(meta: dict, status: dict[str, str], unapplied: list[str], outside: list[str], open_blocking: int,
+              shared: int, flagged: int, unchecked: str | None) -> list[str]:
+    """What SKILL.md section 5 leaves to the coordinator in this merge, one line each. A P3 claim is not
+    on it: it leaves the score where it is."""
+    def counted(n: int, one: str, many: str) -> str:
+        return f'{n} {one if n == 1 else many}'
+    unaccounted = [lens for lens in unapplied if status.get(lens, '').startswith('unaccounted')]
+    unassessed = [lens for lens in unapplied if lens not in unaccounted]
+    items = []
+    if shared:
+        items.append(f'{shared} findings at a line another finding holds: one defect or two? Join one cause into '
+                     'one finding with the stronger proof and both lenses')
+    if flagged:
+        items.append(counted(flagged, 'anchor: flag', 'anchor: flags') + ': re-anchor the finding where its proof '
+                     'points, or confirm its line and name the changed line that broke it')
+    if unchecked and not meta.get('surface'):
+        items.append("anchors not checked: check each finding's line against the diff")
+    if open_blocking:
+        items.append(counted(open_blocking, 'open claim', 'open claims') + ' that would block: prove or refute each, '
+                     'or leave it a guess as the Blocking sentence')
+    if outside:
+        items.append(counted(len(outside), 'defect raised outside its lens', 'defects raised outside their lenses')
+                     + ': prove each, or carry it to Could not verify')
+    if unaccounted:
+        items.append(counted(len(unaccounted), 'lens', 'lenses') + f" a report left unaccounted: {', '.join(unaccounted)}; "
+                     'ask its grader which, in one message')
+    if unassessed:
+        items.append(counted(len(unassessed), 'lens', 'lenses') + ' no report assessed: '
+                     + '; '.join(f"{lens} ({status.get(lens, 'not held by any grader')})" for lens in unassessed)
+                     + '; grade it, or pass a reply that never reached its file with --report <group>=<file or ->')
+    return items
 
 
 def gh(*args: str) -> str:

@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -23,6 +25,17 @@ PLACES = {'SKILL.md': ['1', '2', '4', '6'], 'lenses.md': ['3'], 'scoring.md': ['
           'setup-and-enforcement.md': ['0', '8'], 'surface-grades.md': ['9']}
 # git's blob id for SKILL.md at adbdd3c, the last commit before the split, which held every section in one file.
 BEFORE_SPLIT = '4f08d711a45bb300b78fd3b4310e849294947b0a'
+# Each sentence the split reworded, as it reads now and as it read before. Section 2 described the one file the prep
+# sliced and the cut it made, and both changed with the split and issue #81.
+REWORDED = {
+    ('section 3 less the lens sections of lenses the grader does not hold, sections 4 and 5 whole, and the lens file '
+     'less the lens sections of lenses it does not hold'):
+    ('section 3 up to its first lens and each lens the grader holds, sections 4 and 5 whole, and the lens file less '
+     'the lens sections of lenses it does not hold'),
+    ("The prep slices the skill's files beside its `scripts/` directory, or the copy `--skill <path>` names, a "
+     'directory or one file holding sections 3 to 5;'):
+    'The prep slices the `SKILL.md` beside its `scripts/` directory, or the copy `--skill <path>` names;',
+}
 SECTION = re.compile(r'(?m)^## (\d+)\. ')
 LINK = re.compile(r'\]\(([\w-]+\.md)\)')
 
@@ -57,11 +70,19 @@ class SplitTest(unittest.TestCase):
         self.assertIn('(scoring.md)', pointer)
         self.assertIn('before you grade', pointer)
 
+    def test_section_2_says_what_the_prep_slices_now(self) -> None:
+        two = cut(files()['SKILL.md'])[1]['2']
+        self.assertNotIn('section 3 up to its first lens', two)
+        self.assertNotIn('slices the `SKILL.md` beside', two)
+
     def test_the_split_moved_every_line_and_added_only_the_pointers(self) -> None:
         # A one-time proof for the 0.18.0 split: the core less its pointer paragraphs, with every file's sections put
         # back in number order, is byte for byte the SKILL.md before it. The first change that rewords a moved section
         # deletes this test.
         core = files()['SKILL.md']
+        for now, before in REWORDED.items():
+            self.assertIn(now, core)
+            core = core.replace(now, before)
         pointers = [paragraph for paragraph in core.split('\n\n') if LINK.search(paragraph)
                     and set(LINK.findall(paragraph)) <= set(PLACES)]
         self.assertTrue(pointers)
@@ -111,6 +132,22 @@ class SkillTextTest(unittest.TestCase):
         self.assertEqual(len(grade_prep.skill_texts(SKILL_DIR)), len(PLACES))
         self.assertEqual(grade_prep.skill_texts(SKILL_DIR / 'lenses.md'), [(SKILL_DIR / 'lenses.md').read_text()])
         self.assertEqual(grade_prep.skill_texts(SKILL_DIR / 'absent'), [])
+
+    def test_a_dotfile_or_a_directory_named_like_markdown_is_not_skill_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / 'skill'
+            shutil.copytree(SKILL_DIR, copy, ignore=shutil.ignore_patterns('scripts', 'templates'))
+            # macOS writes an AppleDouble `._<name>` beside a file on some disks, and it is not UTF-8.
+            (copy / '._lenses.md').write_bytes(b'\x00\x05\x16\x07\xff\xfe')
+            (copy / 'notes.md').mkdir()
+            self.assertEqual(grade_prep.skill_texts(copy), grade_prep.skill_texts(SKILL_DIR))
+
+    def test_a_skill_file_that_is_not_text_gives_no_skill_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / 'skill'
+            shutil.copytree(SKILL_DIR, copy, ignore=shutil.ignore_patterns('scripts', 'templates'))
+            (copy / 'scoring.md').write_bytes(b'## 5. Score\n\xff\xfe\n')
+            self.assertEqual(grade_prep.skill_texts(copy), [])
 
 
 if __name__ == '__main__':

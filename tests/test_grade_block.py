@@ -747,6 +747,25 @@ class MergeTest(unittest.TestCase):
         self.assertEqual((block['Mode'], block['Graded']), ('fan-out', HEAD))
         self.assertIn('`Surface:` src lib', self.merged())
 
+    def test_a_findings_lines_keep_their_indent_and_fences(self) -> None:
+        # Output a grader fenced reads verbatim in the PR, and a fence the grader left open is closed in its finding.
+        self.write('timing', report('4/5', 'L2', findings=(
+            'P1 L1 src/a.py:9 - late write lands\n```\nTraceback:\n    File "a.py", line 9\n```\n'
+            'P3 L2 src/b.py:3 - log line reads oddly\n```\n- item\n')))
+        self.write('reach', report('5/5', 'L3'))
+        section = self.section()
+        at = section.index('P1 L1 src/a.py:9 - late write lands')
+        self.assertEqual(section[at:], [
+            'P1 L1 src/a.py:9 - late write lands', '```', 'Traceback:', '    File "a.py", line 9', '```', '',
+            'P3 L2 src/b.py:3 - log line reads oddly', '```', '- item', '```'])
+
+    def test_a_proof_test_with_no_repository_path_is_left_to_settle(self) -> None:
+        self.write('timing', report('4/5', 'L2', findings='P1 L1 src/a.py:9 - late write lands\nProof test: proofs/x.py\n'))
+        self.write('reach', report('5/5', 'L3'))
+        merged = self.merged()
+        self.assertIn('  1 proof test names no repository path: write the path it was committed at', merged)
+        self.assertIn('Proof test: proofs/x.py, no repository path given', merged.splitlines())
+
     def test_a_heading_in_a_findings_lines_does_not_end_the_block(self) -> None:
         self.write('timing', report('4/5', 'L2', findings='P1 L1 src/a.py:9 - late write lands\n## Repro\n'
                                                           'P3 L2 src/b.py:3 - log line reads oddly\n'))

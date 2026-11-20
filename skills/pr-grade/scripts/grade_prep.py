@@ -10,8 +10,15 @@ does, splits the lenses among graders (the lens file's `## Fan-out groups` table
 lifetime and contract), lists the callers of each function the branch modified, runs check_then_act.py
 for whoever holds L7, near_miss.py for whoever holds L9, history_replay.py for whoever holds L14, ambient.py
 for whoever holds L16, and makes
-one proof copy per grader with proof_dir.py, plus one for the env sweep when the repository declares one. It prints a shared block
-and one block per grader: a grader's prompt is the shared block followed by its own, pasted unchanged.
+one proof copy per grader with proof_dir.py, plus one for the env sweep when the repository declares one. A grader's
+prompt is a shared block followed by its own block. The prep writes it to `prompt.md` in the grader's directory
+under the proof root and prints one line per grader naming that file, which the coordinator passes as the Agent
+prompt unchanged, and the line names the diff command, so a grader's first turn reads its file and the change. After
+the dispatch, each file carries the grader's lens text: SKILL.md section 3 up to its first lens, each lens the grader
+holds, sections 4 and 5, then the lens file less the lens sections of lenses the grader does not hold, so the grader
+reads neither file. `--skill PATH` names the SKILL.md to slice; with none beside this directory, the files carry the
+lens file alone and a `notice:` line says so. `"sliceLenses": false` leaves the lens text out. In-thread, or with
+`"promptFiles": false` in the config, it prints the blocks instead.
 It ends with the command that merges the graders' reports and the one that removes the proof copies.
 
 `--base` is where the branch left, or the last commit graded for a re-grade. `--settled` names the
@@ -85,6 +92,108 @@ VENDORED = tuple(f':(exclude){d}*' for d in VENDORED_DIRS)
 # A surface has no parent commit to diff against, so the diff is against git's empty tree.
 EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 CALLERS_SHOWN = 30
+
+# The skill text sliced into each grader's prompt file, unless --skill names another copy. A vendored copy of the
+# scripts may have none beside it.
+SKILL = HERE.parent / 'SKILL.md'
+SKILL_SECTION = re.compile(r'##[ \t]+(\d+)\.[ \t]')
+HEADING = re.compile(r'(#{1,6})[ \t]')
+FENCE = re.compile(r' {0,3}(`{3,}|~{3,})(.*)')
+
+
+def headings(text: str) -> list[tuple[int, int, str]]:
+    """Each Markdown heading outside a code fence, as its offset, its level, and its line: a `# comment` in a
+    fenced shell block is not a heading."""
+    found, fence, offset = [], '', 0
+    for line in text.splitlines(keepends=True):
+        mark = FENCE.match(line)
+        if fence:
+            # As CommonMark has it: only a run of the opener's character, as long or longer, with nothing after it.
+            if mark and mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence) and not mark.group(2).strip():
+                fence = ''
+        elif mark and not (mark.group(1)[0] == '`' and '`' in mark.group(2)):
+            # A backtick in the info string makes the line an inline code span, not a fence.
+            fence = mark.group(1)
+        else:
+            heading = HEADING.match(line)
+            if heading:
+                found.append((offset, len(heading.group(1)), line))
+        offset += len(line)
+    return found
+
+
+def every_lens_found(text: str, pieces: list[tuple[str | None, str]]) -> bool:
+    """Whether the slicer found each lens heading grade_block's lens-id regex reads in `text`. One it missed, such as
+    a heading inside a fence, leaves that lens's text in a piece the slicer cannot name."""
+    return sorted(lens for lens, _ in pieces if lens) == sorted(grade_block.LENS_HEADING.findall(text))
+
+
+def lens_pieces(text: str) -> list[tuple[str | None, str]]:
+    """The text cut into its `### L<n>.` sections, each under its lens id, and the pieces between them under None.
+    A lens section runs to the next heading of its own level or higher, so a `## Ranking` between two lenses
+    belongs to none. Joined back, the pieces are the text."""
+    pieces: list[tuple[str | None, str]] = []
+    lens, start = None, 0
+    for offset, level, line in headings(text):
+        opens = grade_block.LENS_HEADING.match(line)
+        if opens or (lens is not None and level <= 3):
+            pieces.append((lens, text[start:offset]))
+            lens, start = (opens.group(1) if opens else None), offset
+    pieces.append((lens, text[start:]))
+    return [(lens, piece) for lens, piece in pieces if piece]
+
+
+def sliced_lens_file(text: str, held: list[str]) -> str:
+    """The lens file less the lens sections of lenses not in `held`. Every other piece stays, whatever it is, and
+    the file stays whole when the slicer cannot place every lens heading in it."""
+    pieces = lens_pieces(text)
+    if not every_lens_found(text, pieces):
+        return text
+    return ''.join(piece for lens, piece in pieces if lens is None or lens in held)
+
+
+def skill_lens_text(text: str) -> tuple[str, dict[str, str], str] | None:
+    """The skill's lens text as a prompt file takes it: section 3 up to its first lens, each lens's `### L<n>.`
+    section by id in the skill's order, and sections 4 and 5 whole. None when a section is missing. The one reader
+    of where the skill keeps its lenses, so splitting SKILL.md re-points this function alone."""
+    level_two = [(offset, line) for offset, level, line in headings(text) if level == 2]
+    starts = {}
+    for offset, line in level_two:
+        numbered = SKILL_SECTION.match(line)
+        if numbered:
+            starts.setdefault(numbered.group(1), offset)
+    if not {'3', '4', '5'} <= starts.keys():
+        return None
+    after = [offset for offset, _ in level_two if offset > starts['5']]
+    lenses = text[starts['3']:starts['4']]
+    pieces = lens_pieces(lenses)
+    sections = {lens: piece for lens, piece in pieces if lens is not None}
+    if not sections or pieces[0][0] is not None or not every_lens_found(lenses, pieces):
+        return None
+    return pieces[0][1], sections, text[starts['4']:after[0] if after else len(text)]
+
+
+def prompt_lens_text(held: list[str], skill: tuple[str, dict[str, str], str] | None, skill_path: Path,
+                     lens_file: str | None, lens_path: Path) -> str:
+    """What a grader holding `held` reads in its prompt file in place of SKILL.md sections 3 to 5 and the lens file:
+    each copied whole but for the lens sections of the lenses it does not hold. Empty when there is neither."""
+    parts = []
+    if skill is not None:
+        opening, sections, rules = skill
+        parts += [f'===== skill: {skill_path}, section 3 up to its first lens, the lenses you hold, then sections 4 '
+                  'and 5 =====', '', opening + ''.join(text for lens, text in sections.items() if lens in held) + rules]
+    if lens_file is not None:
+        parts += [f'===== lens file: {lens_path}, less the lens sections of lenses you do not hold =====', '',
+                  sliced_lens_file(lens_file, held)]
+    if not parts:
+        return ''
+    notes = ['Each part below is a copy of the file its heading names, every piece of it but the lens sections of '
+             'lenses you do not hold, so do not read that file.']
+    if skill is None:
+        notes.append('SKILL.md is not copied here: read sections 3 to 5 of your installed SKILL.md, as your Inputs say.')
+    if lens_file is None:
+        notes.append("No lens file: the skill's lenses apply as written.")
+    return '\n'.join(['', '===== lens text =====', '', ' '.join(notes), '', *parts])
 
 
 def git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -286,6 +395,8 @@ def main() -> None:
     ap.add_argument('--callers', default='', help='callers found by hand, for a type, option, or other language')
     ap.add_argument('--exclude-path', action='append', default=[], metavar='PREFIX',
                     help='leave paths starting with PREFIX out of the change and its file count; repeats')
+    ap.add_argument('--skill', metavar='PATH', help='the SKILL.md whose lens text the prompt files carry (default: '
+                                                     'the one beside this script)')
     args = ap.parse_args()
     surface = args.surface is not None
     if surface and (args.base is not None or args.branch_base is not None):
@@ -300,6 +411,19 @@ def main() -> None:
     if git(root, 'status', '--porcelain', '--untracked-files=no').stdout.strip():
         sys.exit('grade_prep: the change has uncommitted edits. Graders see commits only; commit, then run this again.')
     config = grade_mode.load_config(root)
+    prompt_files = config.get('promptFiles', True)
+    if not isinstance(prompt_files, bool):
+        # "false" as a string is truthy, and would write the files the author turned off.
+        sys.exit(f'grade_prep: promptFiles in {grade_mode.CONFIG} must be true or false, not {json.dumps(prompt_files)}')
+    slice_lenses = config.get('sliceLenses', True)
+    if not isinstance(slice_lenses, bool):
+        sys.exit(f'grade_prep: sliceLenses in {grade_mode.CONFIG} must be true or false, not {json.dumps(slice_lenses)}')
+    skill_path = Path(args.skill).resolve() if args.skill else SKILL
+    skill = skill_lens_text(skill_path.read_text()) if skill_path.is_file() else None
+    if args.skill and skill is None:
+        # A caller that names its own copy, such as one with the pool's pull request numbers stripped, must never
+        # have its graders fall back to the installed text.
+        sys.exit(f'grade_prep: --skill {args.skill} is not a file whose sections 3 to 5 hold `### L<n>.` lenses')
     notice = grade_mode.ordinary_notice(root)
     head = git(root, 'rev-parse', 'HEAD').stdout.strip()
     kept = tuple(args.exclude_path)
@@ -348,6 +472,7 @@ def main() -> None:
     lenses = grade_block.lens_ids(lens_text)
     skipped = skipped_lenses(args.skip, lenses)
     groups = groups_for(mode, lenses, lens_text, args.groups, skipped)
+    slicing = prompt_files and slice_lenses and mode != 'in-thread'
 
     # None means all of a file is new, which is what every file of a surface is.
     lines = ({path: None for path in changed} if surface else
@@ -413,14 +538,16 @@ def main() -> None:
         print(f'mode: {mode} ({why})' + (f'; the grade block keeps {branch_mode}, the whole branch' if branch_mode != mode else ''))
         if notice:
             print(notice)
+        if slicing and skill is None:
+            print(f'notice: no SKILL.md beside {HERE} holds the lenses in sections 3 to 5, so each prompt file carries '
+                  'the lens file alone and each grader reads sections 3 to 5 of its installed SKILL.md')
         print('graders: ' + ', '.join(f"{name} ({', '.join(ids)})" for name, ids in groups.items()))
         if skipped:
             print(f"skipped: {', '.join(skipped)}, which no grader holds; the block clears each as "
                   f'`{skipped[0]} (not applicable)`')
         if mode == 'in-thread':
             print('In-thread: grade it yourself from the shared block, proving in the copy below.')
-        print('\n===== shared block =====\n')
-        print('\n'.join([
+        shared = '\n'.join([
             f'- Repository: {root}',
             f"- Lens file: {lens_path if lens_text is not None else 'none; the skill lenses apply as written'}",
             f'- Base: {fork}' + (' (the empty tree: a surface has no before)' if surface else ''),
@@ -450,9 +577,9 @@ def main() -> None:
               if near_miss_lines and near_miss_holder is None else []),
             *(['', f'No grader holds {ambient_lens}, so every grader reads what ambient.py found:', *ambient_lines]
               if ambient_lines and ambient_holder is None else []),
-        ]))
+        ])
+        blocks = {}
         for name, ids in groups.items():
-            print(f'\n===== {name} =====\n')
             block = [f"Apply pr-grade lenses {', '.join(ids)} to the change in the shared block.",
                      f"- Your proof copy: {fields[f'copy {name}']} (a clone of the head commit, yours alone; not the repository)",
                      f"- Your scratch directory: {fields[f'scratch {name}']}",
@@ -467,7 +594,24 @@ def main() -> None:
                 block += ['', f'near_miss.py at the head, for {near_miss_lens}:', *near_miss_lines]
             if ambient_lines and name == ambient_holder:
                 block += ['', f'ambient.py at the head, for {ambient_lens}:', *ambient_lines]
-            print('\n'.join(block))
+            blocks[name] = '\n'.join(block)
+        if prompt_files and mode != 'in-thread':
+            # Each prompt is the shared block and the grader's own, as a coordinator pasted them, so the grader is
+            # told the same text and the coordinator retypes none of it. Then the lens text for its lenses, so it
+            # reads neither source, and the line names the diff so the first turn reads the file and the change.
+            print('\n===== dispatch =====\n')
+            for name, block in blocks.items():
+                path = proof_root / name / 'prompt.md'
+                carried = prompt_lens_text(groups[name], skill, skill_path, lens_text, lens_path) if slicing else ''
+                path.write_text(f'{shared}\n\n{block}\n{carried}')
+                print(f'Read your pr-grade dispatch from {path} and run `{change}` in your first turn, in parallel, '
+                      'then grade exactly as it says.')
+        else:
+            print('\n===== shared block =====\n')
+            print(shared)
+            for name, block in blocks.items():
+                print(f'\n===== {name} =====\n')
+                print(block)
         if mode != 'in-thread':
             print(f"\nmerge: python3 {HERE / 'grade_block.py'} merge {proof_root}")
         print(f"remove: {fields['remove']}")

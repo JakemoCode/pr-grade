@@ -29,6 +29,8 @@
   "ambientLens": "L16",
   "exitCodes": {},
   "envSweep": null,
+  "promptFiles": true,
+  "sliceLenses": true,
   "proofDir": [
     {"path": "node_modules", "pinnedBy": ["package.json", "package-lock.json"], "install": "npm ci"},
     {"path": ".venv", "pinnedBy": ["pyproject.toml", "uv.lock"], "install": "uv sync --frozen"},

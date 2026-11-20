@@ -100,6 +100,8 @@ Every key in `.claude/pr-grade.json` is optional. A key you set replaces its def
 | `exitCodes` | empty | Commands to add to the registry L16's scan reads, command to a note on its exit codes. |
 | `envSweep` | none | The command that runs the test files a change touches, for the L16 env sweep. See [Declaring an env sweep](#declaring-an-env-sweep). |
 | `ambientLens` | `L16` | The lens whose grader gets `ambient.py`'s output. |
+| `promptFiles` | `true` | The prep writes each grader's prompt to `prompt.md` under its proof root and prints one line naming it. `false` prints the blocks for the coordinator to paste, as 0.17 did. |
+| `sliceLenses` | `true` | Each prompt file also carries the skill's and the lens file's text for the grader's lenses, and every other piece of both, so the grader reads neither file. `false` leaves the lens text out, and the grader reads both itself. Off whenever `promptFiles` is. |
 | `proofDir` | `node_modules`, `.venv` | Installed dependencies to link into each proof clone, each with the files that pin it and the command that installs it. |
 | `requireGrade.branches` | every branch | A regex; the check only requires a grade on matching branches. |
 

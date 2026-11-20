@@ -68,7 +68,8 @@ class DispatchTest(unittest.TestCase):
         # The diff command rides on the dispatch line, so the first turn reads the file and the change together.
         self.assertIn('the diff command the line names', inputs)
         # A prompt file without lens text, or a pasted dispatch, still reads both sources.
-        self.assertIn('${CLAUDE_PLUGIN_ROOT}/skills/pr-grade/SKILL.md', inputs)
+        for name in ('lenses.md', 'SKILL.md', 'scoring.md'):
+            self.assertIn(f'${{CLAUDE_PLUGIN_ROOT}}/skills/pr-grade/{name}', inputs)
         skill = section(SKILL, '2. Pick the mode and prepare the graders')
         self.assertIn('"sliceLenses": false', skill)
 
@@ -78,6 +79,10 @@ class DispatchTest(unittest.TestCase):
         for path in paths:
             with self.subTest(path=path):
                 self.assertTrue((ROOT / path).is_file())
+
+    def test_the_agent_scores_by_section_5_where_it_lives(self) -> None:
+        self.assertIn('section 5, in `scoring.md`', AGENT)
+        self.assertNotIn('SKILL.md section 5', AGENT)
 
     def test_the_turn_count_the_agent_is_told_is_its_limit(self) -> None:
         limit = frontmatter(AGENT)['maxTurns']

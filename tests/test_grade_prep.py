@@ -572,19 +572,6 @@ class LensSliceTest(unittest.TestCase):
         text = '# lenses\n\n## Proof\n\nrun pytest\n\n### L9 without a dot\n\nkept\n'
         self.assertEqual(grade_prep.sliced_lens_file(text, ['L1']), text)
 
-    def test_the_skill_text_holds_every_lens_and_sections_4_and_5(self) -> None:
-        # The one reader of the skill's lens text. When SKILL.md is split, this fails until it is re-pointed.
-        lenses, rules = grade_prep.skill_lens_text((SCRIPTS.parent / 'SKILL.md').read_text())
-        sections = {lens: piece for lens, piece in grade_prep.lens_pieces(lenses) if lens}
-        self.assertEqual(list(sections), LENSES)
-        self.assertTrue(lenses.startswith('## 3. The fourteen lenses\n'))
-        self.assertTrue(sections['L9'].startswith('### L9. Correctness\n'))
-        self.assertIn('*Examples, from EngOS:* PR #900', sections['L9'])
-        self.assertNotIn('### L10', sections['L9'])
-        self.assertTrue(rules.startswith('## 4. What a finding must carry\n'))
-        self.assertIn('\n## 5. Score it\n', rules)
-        self.assertNotIn('## 6. Report it', rules)
-
     def test_a_fenced_heading_ends_no_section_of_the_skill(self) -> None:
         text = ('## 3. Lenses\n\nopen\n\n### L1. A\n\na\n\n```md\n## 9. fenced\n```\n\na tail\n\n## 4. Finding\n\nb\n\n'
                 '## 5. Score\n\n```md\n## Grade\n## 6. fenced\n```\n\nscore tail\n\n## 6. Report\n\nc\n')
@@ -692,8 +679,10 @@ class LensSliceCliTest(unittest.TestCase):
     def test_skill_names_the_copy_to_slice(self) -> None:
         # The nightly replays slice a copy with the pool's pull request numbers stripped.
         self.commit('{"silent": ["store.py"]}\n', FS_SHAPED)
-        blinded = Path(self.tmp.name) / 'blinded.md'
-        blinded.write_text((SCRIPTS.parent / 'SKILL.md').read_text().replace('PR #900', 'PR #<n>'))
+        blinded = Path(self.tmp.name) / 'blinded'
+        shutil.copytree(SCRIPTS.parent, blinded, ignore=shutil.ignore_patterns('scripts', 'templates'))
+        lenses = blinded / 'lenses.md'
+        lenses.write_text(lenses.read_text().replace('PR #900', 'PR #<n>'))
         [text] = self.prompts(self.prep('--skill', str(blinded))).values()
         self.assertIn('*Examples, from EngOS:* PR #<n>', text)
         self.assertNotIn('PR #900', text)

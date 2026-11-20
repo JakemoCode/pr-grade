@@ -98,22 +98,34 @@ CALLERS_SHOWN = 30
 SKILL = HERE.parent / 'SKILL.md'
 SKILL_SECTION = re.compile(r'##[ \t]+(\d+)\.[ \t]')
 HEADING = re.compile(r'(#{1,6})[ \t]')
-FENCE = re.compile(r'[ \t]{0,3}(```|~~~)')
+FENCE = re.compile(r' {0,3}(`{3,}|~{3,})(.*)')
 
 
 def headings(text: str) -> list[tuple[int, int, str]]:
     """Each Markdown heading outside a code fence, as its offset, its level, and its line: a `# comment` in a
     fenced shell block is not a heading."""
-    found, fenced, offset = [], False, 0
+    found, fence, offset = [], '', 0
     for line in text.splitlines(keepends=True):
-        if FENCE.match(line):
-            fenced = not fenced
-        elif not fenced:
+        mark = FENCE.match(line)
+        if fence:
+            # As CommonMark has it: only a run of the opener's character, as long or longer, with nothing after it.
+            if mark and mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence) and not mark.group(2).strip():
+                fence = ''
+        elif mark and not (mark.group(1)[0] == '`' and '`' in mark.group(2)):
+            # A backtick in the info string makes the line an inline code span, not a fence.
+            fence = mark.group(1)
+        else:
             heading = HEADING.match(line)
             if heading:
                 found.append((offset, len(heading.group(1)), line))
         offset += len(line)
     return found
+
+
+def every_lens_found(text: str, pieces: list[tuple[str | None, str]]) -> bool:
+    """Whether the slicer found each lens heading grade_block's lens-id regex reads in `text`. One it missed, such as
+    a heading inside a fence, leaves that lens's text in a piece the slicer cannot name."""
+    return sorted(lens for lens, _ in pieces if lens) == sorted(grade_block.LENS_HEADING.findall(text))
 
 
 def lens_pieces(text: str) -> list[tuple[str | None, str]]:
@@ -132,8 +144,12 @@ def lens_pieces(text: str) -> list[tuple[str | None, str]]:
 
 
 def sliced_lens_file(text: str, held: list[str]) -> str:
-    """The lens file less the lens sections of lenses not in `held`. Every other piece stays, whatever it is."""
-    return ''.join(piece for lens, piece in lens_pieces(text) if lens is None or lens in held)
+    """The lens file less the lens sections of lenses not in `held`. Every other piece stays, whatever it is, and
+    the file stays whole when the slicer cannot place every lens heading in it."""
+    pieces = lens_pieces(text)
+    if not every_lens_found(text, pieces):
+        return text
+    return ''.join(piece for lens, piece in pieces if lens is None or lens in held)
 
 
 def skill_lens_text(text: str) -> tuple[str, dict[str, str], str] | None:
@@ -149,9 +165,10 @@ def skill_lens_text(text: str) -> tuple[str, dict[str, str], str] | None:
     if not {'3', '4', '5'} <= starts.keys():
         return None
     after = [offset for offset, _ in level_two if offset > starts['5']]
-    pieces = lens_pieces(text[starts['3']:starts['4']])
+    lenses = text[starts['3']:starts['4']]
+    pieces = lens_pieces(lenses)
     sections = {lens: piece for lens, piece in pieces if lens is not None}
-    if not sections or pieces[0][0] is not None:
+    if not sections or pieces[0][0] is not None or not every_lens_found(lenses, pieces):
         return None
     return pieces[0][1], sections, text[starts['4']:after[0] if after else len(text)]
 

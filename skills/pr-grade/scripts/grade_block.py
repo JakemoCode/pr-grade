@@ -383,8 +383,8 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
     fence is output even when it is shaped like a field or a finding. A `Proof test:` line among them
     names the test the grader kept, with any words after its paths kept as `proof_note`. A finding's file written
     from one of `roots`, the repository or a proof copy, reads as the path inside it. Under `Suspects:` an item starts
-    at each `S<n>` line and runs on, through its `Command:`, `Output:` and fenced lines, to the next one or the next
-    field; `suspects` is those items as `_suspects` reads them, empty for a report without the field."""
+    at each `S<n>` line and runs on, through its `Command:`, `Output:` and fenced lines, to the next one, the next
+    field, or a finding; `suspects` is those items as `_suspects` reads them, empty for a report without the field."""
     fields: dict[str, list[str]] = {}
     findings, current, indent, last_finding, finding_depth, fence = [], None, None, None, 0, None
     for raw in text.splitlines():
@@ -414,9 +414,7 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
         if line.startswith('```'):
             continue
         finding, field = FINDING.match(line), REPORT_LINE.match(line)
-        if finding and joins_suspect:
-            fields[current][-1] += '\n' + line
-        elif finding and current in ('Could not verify', 'Outside my lenses'):
+        if finding and current in ('Could not verify', 'Outside my lenses'):
             fields[current].append(line)
             indent = depth if indent is None else indent
         elif finding:
@@ -708,11 +706,12 @@ def settle_suspects(group: str, handed: int, report: dict, roots: tuple[str, ...
     that `is_run` and its output. A `proven` line must name a finding of its report at the finding's file:line, and
     one ranked P3 prints its reason, for the coordinator to re-rank. Each handed suspect with no line the merge reads
     goes on `unread`, and a proven one naming no finding on `no_finding`, so the block's Score stays a floor."""
-    claims, read = [], set()
+    claims, read, unverdicted = [], set(), set()
     for suspect in report['suspects']:
         sid, verdict, text = suspect['id'], suspect['verdict'], suspect['text']
         if verdict is None:
             lines.append(f'  {group} {sid} names no verdict: {text}')
+            unverdicted.add(suspect['number'])
             continue
         read.add(suspect['number'])
         if verdict == 'could not verify':
@@ -742,7 +741,7 @@ def settle_suspects(group: str, handed: int, report: dict, roots: tuple[str, ...
     missing = [f'S{n}' for n in range(1, handed + 1) if n not in read]
     if missing:
         unread.append(f"{group} {', '.join(missing)}")
-        lines += [f'  {group} {sid} has no line' for sid in missing]
+        lines += [f'  {group} {sid} has no line' for sid in missing if int(sid[1:]) not in unverdicted]
     return claims
 
 

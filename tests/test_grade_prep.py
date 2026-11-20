@@ -127,7 +127,7 @@ class CliTest(unittest.TestCase):
         self.proofs.mkdir()
         git(self.repo, 'init', '-q', '-b', 'main')
         (self.repo / '.claude').mkdir()
-        (self.repo / '.claude/pr-grade.json').write_text('{"silent": ["store.py"]}\n')
+        (self.repo / '.claude/pr-grade.json').write_text('{"promptFiles": false, "silent": ["store.py"]}\n')
         (self.repo / 'store.py').write_text('def claim(x):\n    return x\n\n\ndef other():\n    return 1\n')
         (self.repo / 'app.py').write_text('from store import claim\n\nprint(claim(1))\n')
         (self.repo / 'NOTES.md').write_text('Always claim before you release.\n')
@@ -266,7 +266,7 @@ class CliTest(unittest.TestCase):
         (self.repo / 'tests/test_claim.py').write_text('import unittest\nfrom store import claim\n\n\nclass T(unittest.TestCase):\n'
                                                       '    def test_claim(self):\n        self.assertEqual(claim(1), 2)\n')
         (self.repo / '.claude/pr-grade.json').write_text(json.dumps(
-            {'silent': ['store.py'], 'envSweep': {'command': [sys.executable, '-m', 'unittest', '{tests}'], 'timeout': 60}}))
+            {'promptFiles': False, 'silent': ['store.py'], 'envSweep': {'command': [sys.executable, '-m', 'unittest', '{tests}'], 'timeout': 60}}))
         git(self.repo, 'add', '-A')
         git(self.repo, 'commit', '-q', '-m', 'a test and a sweep')
         out = self.prep()
@@ -284,7 +284,7 @@ class CliTest(unittest.TestCase):
         (self.repo / 'tests/test_claim.py').write_text('import unittest\n\n\nclass T(unittest.TestCase):\n'
                                                       '    def test_ok(self):\n        self.assertTrue(True)\n')
         (self.repo / '.claude/pr-grade.json').write_text(json.dumps(
-            {'silent': ['store.py'], 'envSweep': {'command': [sys.executable, '-m', 'unittest', '{tests}'], 'timeout': 60}}))
+            {'promptFiles': False, 'silent': ['store.py'], 'envSweep': {'command': [sys.executable, '-m', 'unittest', '{tests}'], 'timeout': 60}}))
         git(self.repo, 'add', '-A')
         git(self.repo, 'commit', '-q', '-m', 'nine lenses and a sweep')
         out = self.prep()
@@ -313,7 +313,7 @@ class CliTest(unittest.TestCase):
         self.assertNotIn('### Near misses', out)
 
     def test_nearmisslens_routes_the_table_to_another_lens(self) -> None:
-        (self.repo / '.claude/pr-grade.json').write_text('{"silent": ["store.py"], "nearMissLens": "L4"}\n')
+        (self.repo / '.claude/pr-grade.json').write_text('{"promptFiles": false, "silent": ["store.py"], "nearMissLens": "L4"}\n')
         git(self.repo, 'commit', '-q', '-am', 'route near misses to L4')
         out = self.prep()
         self.assertIn('near_miss.py at the head, for L4:', out)
@@ -369,7 +369,7 @@ class CliTest(unittest.TestCase):
         self.assertIn('notice: no `ordinary` key', self.prep())
 
     def test_in_thread_prints_no_merge_line(self) -> None:
-        (self.repo / '.claude/pr-grade.json').write_text('{"silent": [], "ordinary": ["*"]}\n')
+        (self.repo / '.claude/pr-grade.json').write_text('{"promptFiles": false, "silent": [], "ordinary": ["*"]}\n')
         git(self.repo, 'commit', '-q', '-am', 'nothing silent')
         out = self.prep()
         self.assertIn('mode: in-thread', out)
@@ -415,7 +415,7 @@ class CliTest(unittest.TestCase):
         check = [sys.executable, '-c', 'import json, sys; print(json.dumps([[] for _ in json.load(open(sys.argv[2]))]))',
                  '{tree}', '{instances}']
         fmt = {'name': 'store records', 'readers': ['store.py'], 'check': check, 'instances': [{'files': 'app.py'}]}
-        (self.repo / '.claude/pr-grade.json').write_text(json.dumps({'silent': ['store.py'], 'formats': [fmt], **config}))
+        (self.repo / '.claude/pr-grade.json').write_text(json.dumps({'promptFiles': False, 'silent': ['store.py'], 'formats': [fmt], **config}))
         git(self.repo, 'commit', '-q', '-am', 'declare a format')
 
     def test_the_grader_holding_the_old_state_lens_gets_the_replay(self) -> None:
@@ -458,6 +458,82 @@ class CliTest(unittest.TestCase):
         self.assertEqual(list(self.proofs.iterdir()), [])
 
 
+class PromptFilesTest(unittest.TestCase):
+    """CliTest's repository with prompt files on, as they are by default: each grader's prompt goes to a file,
+    and the print names it in one line the coordinator passes as the Agent prompt, so it retypes nothing."""
+
+    setUp, tearDown, prep, prep_with, run_cli = (CliTest.setUp, CliTest.tearDown, CliTest.prep, CliTest.prep_with,
+                                                 CliTest.run_cli)
+    GROUPS = ('--groups', 'timing=L1,L2,L7', '--groups', f"rest={','.join(REST)}")
+    DISPATCH = re.compile(r'^Read your pr-grade dispatch from (\S+/prompt\.md) in your first turn, then grade exactly '
+                          r'as it says\.$', re.M)
+
+    def config(self, text: str) -> None:
+        (self.repo / '.claude/pr-grade.json').write_text(text)
+        git(self.repo, 'commit', '-q', '-am', 'config')
+
+    def test_each_grader_gets_one_line_naming_its_prompt_file_in_place_of_the_blocks(self) -> None:
+        self.config('{"silent": ["store.py"]}\n')
+        out = self.prep(*self.GROUPS)
+        root = Path(re.search(r'^merge: python3 \S+/grade_block\.py merge (\S+)$', out, re.M).group(1))
+        self.assertEqual(self.DISPATCH.findall(out), [str(root / 'timing/prompt.md'), str(root / 'rest/prompt.md')])
+        self.assertNotIn('===== shared block =====', out)
+        self.assertNotIn('- Write your report to:', out)
+        self.assertRegex(out, r'(?m)^mode: subagent \(store\.py \(silent-failure\)')
+        self.assertRegex(out, r'(?m)^graders: timing \(L1, L2, L7\), rest \(')
+        self.assertRegex(out, r'(?m)^remove: python3 \S+/proof_dir\.py remove \S+$')
+        self.assertIn(f"- Write your report to: {root / 'rest/grade.md'}", (root / 'rest/prompt.md').read_text())
+
+    def test_a_prompt_file_holds_the_shared_block_and_its_own_exactly_as_the_blocks_print(self) -> None:
+        self.config('{"silent": ["store.py"]}\n')
+        on = self.prep(*self.GROUPS)
+        # The same head with prompt files off: the config edit stays out of git's sight, so the change is the same.
+        git(self.repo, 'update-index', '--skip-worktree', '.claude/pr-grade.json')
+        (self.repo / '.claude/pr-grade.json').write_text('{"silent": ["store.py"], "promptFiles": false}\n')
+        off = self.prep(*self.GROUPS)
+
+        def root(out: str) -> str:
+            return re.search(r'^merge: .* merge (\S+)$', out, re.M).group(1)
+
+        printed = off.replace(root(off), '<root>')
+        shared = printed.split('\n===== shared block =====\n\n')[1].split('\n\n===== timing =====\n\n')[0]
+        timing = printed.split('\n===== timing =====\n\n')[1].split('\n\n===== rest =====\n\n')[0]
+        rest = printed.split('\n===== rest =====\n\n')[1].split('\n\nmerge: ')[0]
+        for name, own in (('timing', timing), ('rest', rest)):
+            with self.subTest(grader=name):
+                written = (Path(root(on)) / name / 'prompt.md').read_text().replace(root(on), '<root>')
+                self.assertEqual(written, f'{shared}\n\n{own}\n')
+        self.assertIn('check-then-act candidates (L7)', timing)
+        self.assertIn('- `claim`, defined store.py:1:', shared)
+
+    def test_prompt_files_false_prints_the_blocks_and_writes_no_file(self) -> None:
+        self.config('{"silent": ["store.py"], "promptFiles": false}\n')
+        out = self.prep(*self.GROUPS)
+        root = Path(re.search(r'^merge: .* merge (\S+)$', out, re.M).group(1))
+        self.assertIn('===== shared block =====', out)
+        self.assertEqual(self.DISPATCH.findall(out), [])
+        self.assertEqual(sorted(root.glob('*/prompt.md')), [])
+
+    def test_in_thread_prints_the_blocks_and_writes_no_file(self) -> None:
+        # In-thread has no grader to hand a file to.
+        self.config('{"silent": [], "ordinary": ["*"]}\n')
+        out = self.prep()
+        self.assertIn('mode: in-thread', out)
+        self.assertIn('===== shared block =====', out)
+        self.assertIn('- Write your report to:', out)
+        self.assertEqual(self.DISPATCH.findall(out), [])
+        remove = re.search(r'^remove: .* remove (\S+)$', out, re.M).group(1)
+        self.assertEqual(sorted(Path(remove).glob('*/prompt.md')), [])
+
+    def test_a_prompt_files_value_that_is_not_true_or_false_stops_the_run_before_any_copy(self) -> None:
+        # "false" as a string is truthy, and would turn on the files the author meant to turn off.
+        self.config('{"silent": ["store.py"], "promptFiles": "false"}\n')
+        run = self.run_cli()
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('promptFiles', run.stderr)
+        self.assertEqual(list(self.proofs.iterdir()), [])
+
+
 class SurfaceTest(unittest.TestCase):
     """One commit on main, graded by path: no branch touched `src`."""
 
@@ -472,7 +548,7 @@ class SurfaceTest(unittest.TestCase):
             folder.mkdir(parents=True)
         (self.repo / 'docs/plan.md').write_text('Callers claim a row, then release it; peek never writes.\n')
         git(self.repo, 'init', '-q', '-b', 'main')
-        (self.repo / '.claude/pr-grade.json').write_text('{"silent": ["src/store.py"], "ordinary": ["src/*", "lib/*"]}\n')
+        (self.repo / '.claude/pr-grade.json').write_text('{"promptFiles": false, "silent": ["src/store.py"], "ordinary": ["src/*", "lib/*"]}\n')
         (self.repo / 'src/store.py').write_text(
             'def claim(x):\n    return x\n\n\ndef release(x):\n    return x\n\n\ndef peek():\n    return 1\n')
         (self.repo / 'src/inner.py').write_text('from store import claim\n\nclaim(1)\n')
@@ -598,7 +674,7 @@ class SurfaceTest(unittest.TestCase):
     def test_a_pinned_install_is_linked_because_a_surface_has_no_since(self) -> None:
         # With the empty tree as `since`, every pin file reads as changed on the branch and the
         # install would be dropped from the copy.
-        config = {'silent': ['src/store.py'], 'ordinary': ['src/*'],
+        config = {'promptFiles': False, 'silent': ['src/store.py'], 'ordinary': ['src/*'],
                   'proofDir': [{'path': '.venv', 'pinnedBy': ['requirements.txt']}]}
         (self.repo / '.claude/pr-grade.json').write_text(json.dumps(config))
         (self.repo / 'requirements.txt').write_text('pytest\n')
@@ -611,7 +687,7 @@ class SurfaceTest(unittest.TestCase):
         self.assertTrue((copy / '.venv/marker').is_file())
 
     def test_history_replay_runs_for_a_format_whose_reader_is_under_the_surface(self) -> None:
-        config = {'silent': ['src/store.py'], 'ordinary': ['src/*', 'lib/*'], 'formats': [
+        config = {'promptFiles': False, 'silent': ['src/store.py'], 'ordinary': ['src/*', 'lib/*'], 'formats': [
             {'name': 'store', 'readers': ['src/store.py'], 'check': ['true'], 'instances': []},
             {'name': 'other', 'readers': ['lib/other.py'], 'check': ['true'], 'instances': []}]}
         (self.repo / '.claude/pr-grade.json').write_text(json.dumps(config))
@@ -624,7 +700,7 @@ class SurfaceTest(unittest.TestCase):
         # Diffed against the empty tree, every record kind in the repository would read as added.
         reader = ['python3', '-c', 'import json,sys;print(json.dumps([[] for _ in json.load(open(sys.argv[1]))]))',
                   '{instances}']
-        config = {'silent': ['src/store.py'], 'ordinary': ['src/*'], 'formats': [
+        config = {'promptFiles': False, 'silent': ['src/store.py'], 'ordinary': ['src/*'], 'formats': [
             {'name': 'notes', 'readers': ['src/store.py'], 'check': reader, 'instances': [{'files': 'notes/*.txt'}],
              'records': r'^(?P<kind>[a-z]+): ', 'values': r'value=(?P<value>\w+)'}]}
         (self.repo / '.claude/pr-grade.json').write_text(json.dumps(config))

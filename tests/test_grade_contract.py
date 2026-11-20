@@ -46,6 +46,20 @@ class DispatchTest(unittest.TestCase):
                 with self.subTest(place=name, input=word):
                     self.assertIn(word, text)
 
+    def test_a_dispatch_naming_a_prompt_file_is_read_from_the_file_where_each_reader_looks(self) -> None:
+        # grade_prep.py writes each grader's prompt to <proof root>/<group>/prompt.md and prints one line naming it.
+        self.assertIn('prompt file', frontmatter(AGENT)['description'])
+        inputs = section(AGENT, 'Inputs')
+        self.assertIn('names a prompt file', inputs)
+        self.assertIn('stop', inputs)
+        self.assertIn('naming the path', inputs)
+        # A 0.17 coordinator pastes the blocks, and the agent must still grade from them.
+        self.assertIn('pasted', inputs)
+        skill = section(SKILL, '2. Pick the mode and prepare the graders')
+        self.assertIn('prompt.md', skill)
+        self.assertIn('as the Agent prompt, unchanged', skill)
+        self.assertIn('"promptFiles": false', skill)
+
     def test_the_skill_the_agent_reads_ships_with_it(self) -> None:
         paths = re.findall(r'\$\{CLAUDE_PLUGIN_ROOT\}/(\S+?)`', AGENT)
         self.assertTrue(paths)

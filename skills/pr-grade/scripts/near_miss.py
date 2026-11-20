@@ -66,6 +66,7 @@ MAX_PREDICATES = 20
 MAX_ROWS = 16
 MAX_ANCHORS = 20
 MAX_READERS = 10
+MAX_NOTES = 10
 MAX_POOL = 5000
 # Seconds per child process. A regex that backtracks without end on one input costs its predicate, never the prep.
 RUN_TIMEOUT = 10
@@ -607,7 +608,9 @@ def near_miss_table(root: Path, lines: dict, changed: list[str], config: dict, s
     if not predicates:
         out.append('- none: the change adds or modifies no regex, startswith, endswith, or marker test in Python, '
                    'JavaScript, or TypeScript')
-    out += [f'- not scanned {note}' for note in notes]
+    out += [f'- not scanned {note}' for note in notes[:MAX_NOTES]]
+    if len(notes) > MAX_NOTES:
+        out.append(f'- and {len(notes) - MAX_NOTES} more files not scanned, cut by the cap of {MAX_NOTES}')
     return [_one_line(line) for line in out]
 
 

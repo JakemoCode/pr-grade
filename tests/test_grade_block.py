@@ -759,6 +759,18 @@ class MergeTest(unittest.TestCase):
             'P1 L1 src/a.py:9 - late write lands', '```', 'Traceback:', '    File "a.py", line 9', '```', '',
             'P3 L2 src/b.py:3 - log line reads oddly', '```', '- item', '```'])
 
+    def test_fenced_output_prints_verbatim(self) -> None:
+        # `parse` drops a closed fence before it reads, so nothing inside one needs escaping.
+        self.write('timing', report('5/5', 'L1, L2', findings=(
+            'P3 L2 src/b.py:3 - log line reads oddly\n```\n# a shell comment\nMode: in-thread\n```\nSurface: src\n')))
+        self.write('reach', report('5/5', 'L3'))
+        section = self.section()
+        at = section.index('P3 L2 src/b.py:3 - log line reads oddly')
+        self.assertEqual(section[at + 1:], ['```', '# a shell comment', 'Mode: in-thread', '```', '`Surface:` src'])
+        block = self.block()
+        self.assertNotIn('Surface', block)
+        self.assertEqual(block['Mode'], 'fan-out')
+
     def test_a_proof_test_with_no_repository_path_is_left_to_settle(self) -> None:
         self.write('timing', report('4/5', 'L2', findings='P1 L1 src/a.py:9 - late write lands\nProof test: proofs/x.py\n'))
         self.write('reach', report('5/5', 'L3'))

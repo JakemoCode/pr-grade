@@ -10,8 +10,10 @@ does, splits the lenses among graders (the lens file's `## Fan-out groups` table
 lifetime and contract), lists the callers of each function the branch modified, runs check_then_act.py
 for whoever holds L7, near_miss.py for whoever holds L9, history_replay.py for whoever holds L14, ambient.py
 for whoever holds L16, and makes
-one proof copy per grader with proof_dir.py, plus one for the env sweep when the repository declares one. It prints a shared block
-and one block per grader: a grader's prompt is the shared block followed by its own, pasted unchanged.
+one proof copy per grader with proof_dir.py, plus one for the env sweep when the repository declares one. A grader's
+prompt is a shared block followed by its own block. The prep writes it to `prompt.md` in the grader's directory
+under the proof root and prints one line per grader naming that file, which the coordinator passes as the Agent
+prompt unchanged. In-thread, or with `"promptFiles": false` in the config, it prints the blocks instead.
 It ends with the command that merges the graders' reports and the one that removes the proof copies.
 
 `--base` is where the branch left, or the last commit graded for a re-grade. `--settled` names the
@@ -300,6 +302,10 @@ def main() -> None:
     if git(root, 'status', '--porcelain', '--untracked-files=no').stdout.strip():
         sys.exit('grade_prep: the change has uncommitted edits. Graders see commits only; commit, then run this again.')
     config = grade_mode.load_config(root)
+    prompt_files = config.get('promptFiles', True)
+    if not isinstance(prompt_files, bool):
+        # "false" as a string is truthy, and would write the files the author turned off.
+        sys.exit(f'grade_prep: promptFiles in {grade_mode.CONFIG} must be true or false, not {json.dumps(prompt_files)}')
     notice = grade_mode.ordinary_notice(root)
     head = git(root, 'rev-parse', 'HEAD').stdout.strip()
     kept = tuple(args.exclude_path)
@@ -419,8 +425,7 @@ def main() -> None:
                   f'`{skipped[0]} (not applicable)`')
         if mode == 'in-thread':
             print('In-thread: grade it yourself from the shared block, proving in the copy below.')
-        print('\n===== shared block =====\n')
-        print('\n'.join([
+        shared = '\n'.join([
             f'- Repository: {root}',
             f"- Lens file: {lens_path if lens_text is not None else 'none; the skill lenses apply as written'}",
             f'- Base: {fork}' + (' (the empty tree: a surface has no before)' if surface else ''),
@@ -450,9 +455,9 @@ def main() -> None:
               if near_miss_lines and near_miss_holder is None else []),
             *(['', f'No grader holds {ambient_lens}, so every grader reads what ambient.py found:', *ambient_lines]
               if ambient_lines and ambient_holder is None else []),
-        ]))
+        ])
+        blocks = {}
         for name, ids in groups.items():
-            print(f'\n===== {name} =====\n')
             block = [f"Apply pr-grade lenses {', '.join(ids)} to the change in the shared block.",
                      f"- Your proof copy: {fields[f'copy {name}']} (a clone of the head commit, yours alone; not the repository)",
                      f"- Your scratch directory: {fields[f'scratch {name}']}",
@@ -467,7 +472,21 @@ def main() -> None:
                 block += ['', f'near_miss.py at the head, for {near_miss_lens}:', *near_miss_lines]
             if ambient_lines and name == ambient_holder:
                 block += ['', f'ambient.py at the head, for {ambient_lens}:', *ambient_lines]
-            print('\n'.join(block))
+            blocks[name] = '\n'.join(block)
+        if prompt_files and mode != 'in-thread':
+            # Each prompt is the shared block and the grader's own, as a coordinator pasted them, so the grader is
+            # told the same text and the coordinator retypes none of it.
+            print('\n===== dispatch =====\n')
+            for name, block in blocks.items():
+                path = proof_root / name / 'prompt.md'
+                path.write_text(f'{shared}\n\n{block}\n')
+                print(f'Read your pr-grade dispatch from {path} in your first turn, then grade exactly as it says.')
+        else:
+            print('\n===== shared block =====\n')
+            print(shared)
+            for name, block in blocks.items():
+                print(f'\n===== {name} =====\n')
+                print(block)
         if mode != 'in-thread':
             print(f"\nmerge: python3 {HERE / 'grade_block.py'} merge {proof_root}")
         print(f"remove: {fields['remove']}")

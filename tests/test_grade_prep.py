@@ -479,7 +479,7 @@ class PromptFilesTest(unittest.TestCase):
         self.assertEqual(self.DISPATCH.findall(out), [str(root / 'timing/prompt.md'), str(root / 'rest/prompt.md')])
         self.assertNotIn('===== shared block =====', out)
         self.assertNotIn('- Write your report to:', out)
-        self.assertRegex(out, r'(?m)^mode: subagent \(store\.py \(silent-failure\)')
+        self.assertRegex(out, r'(?m)^mode: subagent \(.*store\.py \(matches store\.py\)\)$')
         self.assertRegex(out, r'(?m)^graders: timing \(L1, L2, L7\), rest \(')
         self.assertRegex(out, r'(?m)^remove: python3 \S+/proof_dir\.py remove \S+$')
         self.assertIn(f"- Write your report to: {root / 'rest/grade.md'}", (root / 'rest/prompt.md').read_text())

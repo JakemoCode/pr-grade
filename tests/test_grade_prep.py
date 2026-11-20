@@ -592,6 +592,16 @@ class LensSliceTest(unittest.TestCase):
         self.assertEqual(sections, {'L1': '### L1. A\n\na\n\n```md\n## 9. fenced\n```\n\na tail\n\n'})
         self.assertEqual(rules, '## 4. Finding\n\nb\n\n## 5. Score\n\n```md\n## Grade\n## 6. fenced\n```\n\nscore tail\n\n')
 
+    def test_a_lens_heading_an_unclosed_fence_hides_keeps_the_lens_file_whole(self) -> None:
+        # grade_block.lens_ids still reads L16 there, so its grader exists; which piece holds its text is unknown.
+        text = '### L15. A\n\nfifteen\n\n```sh\nno closing fence\n\n### L16. B\n\nsixteen\n'
+        self.assertEqual(grade_prep.sliced_lens_file(text, ['L16']), text)
+
+    def test_a_skill_lens_heading_inside_a_fence_gives_none(self) -> None:
+        # The lens-id regex reads the fenced heading as a lens; the slicer cannot say where its text is.
+        text = '## 3. Lenses\n\n### L1. A\n\n```md\n### L2. B\n```\n\nb\n\n## 4. F\n\nf\n\n## 5. S\n\ns\n'
+        self.assertIsNone(grade_prep.skill_lens_text(text))
+
     def test_a_skill_text_missing_a_section_gives_none(self) -> None:
         self.assertIsNone(grade_prep.skill_lens_text('## 3. Lenses\n\n### L1. A\n\na\n\n## 4. Finding\n\nb\n'))
 

@@ -78,6 +78,13 @@ class ReadTest(unittest.TestCase):
         read = grade_block.read_report(report('S1 - Proven, P2 L1 src/a.py:9.\nS2. Could not verify - P3, no run.\n'))
         self.assertEqual([s['verdict'] for s in read['suspects']], ['proven', 'could not verify'])
 
+    def test_a_finding_written_after_the_field_is_still_a_finding(self) -> None:
+        read = grade_block.read_report('Score: 4/5\nSuspects:\nS1 proven: P2 L1 src/a.py:9, below.\n'
+                                       'P2 L1 src/a.py:9 in f - late write lands\nwhat breaks\n'
+                                       'Verified and clear: L2, L3\n')
+        self.assertEqual([f['where'] for f in read['findings']], ['src/a.py:9'])
+        self.assertEqual(read['suspects'][0]['item'], 'S1 proven: P2 L1 src/a.py:9, below.')
+
     def test_a_line_with_no_verdict_the_merge_knows_has_none(self) -> None:
         read = grade_block.read_report(report('S1 latent: the bases are frozen.\n'))
         self.assertIsNone(read['suspects'][0]['verdict'])
@@ -200,6 +207,8 @@ class MergeTest(unittest.TestCase):
     def test_a_line_with_no_verdict_the_merge_reads_counts_as_no_line(self) -> None:
         merged = self.merged(report('S1 latent: the bases are frozen.\n'))
         self.assertRegex(merged, r'(?m)^  .*S1.*ask .*grade')
+        self.assertEqual([line for line in merged.splitlines() if line.startswith('  grade S1')],
+                         ['  grade S1 names no verdict: latent: the bases are frozen.'])
         self.assertTrue(left(merged))
         self.assertIn(UNSETTLED, printed(merged)['Score'])
 

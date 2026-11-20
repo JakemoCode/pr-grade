@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -151,8 +152,8 @@ class CliTest(unittest.TestCase):
     def prep(self, *args: str) -> str:
         return self.prep_with('--base', 'main', *args)
 
-    def prep_with(self, *args: str) -> str:
-        run = subprocess.run([sys.executable, str(SCRIPTS / 'grade_prep.py'), *args], cwd=self.repo,
+    def prep_with(self, *args: str, script: Path = SCRIPTS) -> str:
+        run = subprocess.run([sys.executable, str(script / 'grade_prep.py'), *args], cwd=self.repo,
                              env={**os.environ, 'TMPDIR': str(self.proofs)}, capture_output=True, text=True)
         self.assertEqual(run.returncode, 0, run.stderr)
         return run.stdout
@@ -465,8 +466,10 @@ class PromptFilesTest(unittest.TestCase):
     setUp, tearDown, prep, prep_with, run_cli = (CliTest.setUp, CliTest.tearDown, CliTest.prep, CliTest.prep_with,
                                                  CliTest.run_cli)
     GROUPS = ('--groups', 'timing=L1,L2,L7', '--groups', f"rest={','.join(REST)}")
-    DISPATCH = re.compile(r'^Read your pr-grade dispatch from (\S+/prompt\.md) in your first turn, then grade exactly '
-                          r'as it says\.$', re.M)
+    # The line carries the diff command, so the grader's first turn reads its file and the change together.
+    DISPATCH = re.compile(r'^Read your pr-grade dispatch from (\S+/prompt\.md) and run `git -C \S+ diff [0-9a-f]{40} '
+                          r'[0-9a-f]{40} -- \.[^`]*` in your first turn, in parallel, then grade exactly as it says\.$',
+                          re.M)
 
     def config(self, text: str) -> None:
         (self.repo / '.claude/pr-grade.json').write_text(text)
@@ -501,8 +504,9 @@ class PromptFilesTest(unittest.TestCase):
         rest = printed.split('\n===== rest =====\n\n')[1].split('\n\nmerge: ')[0]
         for name, own in (('timing', timing), ('rest', rest)):
             with self.subTest(grader=name):
+                # The lens text follows the dispatch; LensSliceTest pins what it holds.
                 written = (Path(root(on)) / name / 'prompt.md').read_text().replace(root(on), '<root>')
-                self.assertEqual(written, f'{shared}\n\n{own}\n')
+                self.assertTrue(written.startswith(f'{shared}\n\n{own}\n\n'), written[:2000])
         self.assertIn('check-then-act candidates (L7)', timing)
         self.assertIn('- `claim`, defined store.py:1:', shared)
 
@@ -532,6 +536,193 @@ class PromptFilesTest(unittest.TestCase):
         self.assertNotEqual(run.returncode, 0)
         self.assertIn('promptFiles', run.stderr)
         self.assertEqual(list(self.proofs.iterdir()), [])
+
+
+# A lens file shaped like forgesmith-os's: a `##` section between two lens sections, a deeper heading and a fenced
+# shell comment inside one, and a lens the skill does not define.
+FS_SHAPED = ('# pr-grade lenses: X\n\n## Mode\n\nmode text\n\n## The lenses\n\nlens intro\n\n'
+             '### L9. Correctness here\n\nnine text\n\n#### Boundaries\n\nnine deeper\n\n'
+             '### L15. Promised coverage here\n\nfifteen text\n\n## Ranking\n\nranking text\n\n'
+             '### L16. Ambient here\n\nsixteen text\n\n```sh\n# a shell comment, not a heading\n```\n\nsixteen tail\n\n'
+             '### L17. Repository only\n\nseventeen text\n\n## Proof\n\nproof text\n')
+
+
+class LensSliceTest(unittest.TestCase):
+    """What a grader keeps of each source: every piece but the lens sections of lenses it does not hold."""
+
+    def test_a_lens_section_ends_at_the_next_heading_of_its_level_or_higher(self) -> None:
+        self.assertEqual(grade_prep.sliced_lens_file(FS_SHAPED, ['L16']),
+                         '# pr-grade lenses: X\n\n## Mode\n\nmode text\n\n## The lenses\n\nlens intro\n\n'
+                         '## Ranking\n\nranking text\n\n'
+                         '### L16. Ambient here\n\nsixteen text\n\n```sh\n# a shell comment, not a heading\n```\n\n'
+                         'sixteen tail\n\n## Proof\n\nproof text\n')
+
+    def test_a_held_lens_keeps_its_deeper_headings_and_a_dropped_one_loses_them(self) -> None:
+        kept = grade_prep.sliced_lens_file(FS_SHAPED, ['L9', 'L17'])
+        self.assertIn('### L9. Correctness here\n\nnine text\n\n#### Boundaries\n\nnine deeper\n\n### L15', FS_SHAPED)
+        self.assertIn('nine deeper', kept)
+        self.assertIn('seventeen text', kept)
+        self.assertNotIn('fifteen text', kept)
+        self.assertNotIn('sixteen tail', kept)
+
+    def test_holding_every_lens_keeps_the_file_whole(self) -> None:
+        self.assertEqual(grade_prep.sliced_lens_file(FS_SHAPED, ['L9', 'L15', 'L16', 'L17']), FS_SHAPED)
+
+    def test_a_lens_file_with_no_lens_headings_is_kept_whole(self) -> None:
+        text = '# lenses\n\n## Proof\n\nrun pytest\n\n### L9 without a dot\n\nkept\n'
+        self.assertEqual(grade_prep.sliced_lens_file(text, ['L1']), text)
+
+    def test_the_skill_text_holds_every_lens_and_sections_4_and_5(self) -> None:
+        # The one reader of the skill's lens text. When SKILL.md is split, this fails until it is re-pointed.
+        opening, sections, rules = grade_prep.skill_lens_text((SCRIPTS.parent / 'SKILL.md').read_text())
+        self.assertEqual(list(sections), LENSES)
+        self.assertTrue(opening.startswith('## 3. The fourteen lenses\n'))
+        self.assertNotIn('### L', opening)
+        self.assertTrue(sections['L9'].startswith('### L9. Correctness\n'))
+        self.assertIn('*Examples, from EngOS:* PR #900', sections['L9'])
+        self.assertNotIn('### L10', sections['L9'])
+        self.assertTrue(rules.startswith('## 4. What a finding must carry\n'))
+        self.assertIn('\n## 5. Score it\n', rules)
+        self.assertNotIn('## 6. Report it', rules)
+
+    def test_a_fenced_heading_ends_no_section_of_the_skill(self) -> None:
+        text = ('## 3. Lenses\n\nopen\n\n### L1. A\n\na\n\n```md\n## 9. fenced\n```\n\na tail\n\n## 4. Finding\n\nb\n\n'
+                '## 5. Score\n\n```md\n## Grade\n## 6. fenced\n```\n\nscore tail\n\n## 6. Report\n\nc\n')
+        opening, sections, rules = grade_prep.skill_lens_text(text)
+        self.assertEqual(sections, {'L1': '### L1. A\n\na\n\n```md\n## 9. fenced\n```\n\na tail\n\n'})
+        self.assertEqual(rules, '## 4. Finding\n\nb\n\n## 5. Score\n\n```md\n## Grade\n## 6. fenced\n```\n\nscore tail\n\n')
+
+    def test_a_lens_heading_an_unclosed_fence_hides_keeps_the_lens_file_whole(self) -> None:
+        # grade_block.lens_ids still reads L16 there, so its grader exists; which piece holds its text is unknown.
+        text = '### L15. A\n\nfifteen\n\n```sh\nno closing fence\n\n### L16. B\n\nsixteen\n'
+        self.assertEqual(grade_prep.sliced_lens_file(text, ['L16']), text)
+
+    def test_a_skill_lens_heading_inside_a_fence_gives_none(self) -> None:
+        # The lens-id regex reads the fenced heading as a lens; the slicer cannot say where its text is.
+        text = '## 3. Lenses\n\n### L1. A\n\n```md\n### L2. B\n```\n\nb\n\n## 4. F\n\nf\n\n## 5. S\n\ns\n'
+        self.assertIsNone(grade_prep.skill_lens_text(text))
+
+    def test_a_skill_text_missing_a_section_gives_none(self) -> None:
+        self.assertIsNone(grade_prep.skill_lens_text('## 3. Lenses\n\n### L1. A\n\na\n\n## 4. Finding\n\nb\n'))
+
+
+class LensSliceCliTest(unittest.TestCase):
+    """CliTest's repository with prompt files on: each grader's file carries its lens text after the dispatch."""
+
+    setUp, tearDown, prep, prep_with, run_cli = (CliTest.setUp, CliTest.tearDown, CliTest.prep, CliTest.prep_with,
+                                                 CliTest.run_cli)
+    SKILL_L9 = '*Examples, from EngOS:* PR #900'
+    SKILL_L16 = 'What does the change assume about the world outside the process'
+
+    def commit(self, config: str, lenses: str | None) -> None:
+        (self.repo / '.claude/pr-grade.json').write_text(config)
+        path = self.repo / '.claude/pr-grade-lenses.md'
+        if lenses is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(lenses)
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'config')
+
+    def prompts(self, out: str) -> dict[str, str]:
+        return {Path(path).parent.name: Path(path).read_text() for path in PromptFilesTest.DISPATCH.findall(out)}
+
+    def test_each_grader_gets_both_texts_of_the_lenses_it_holds_and_every_other_piece(self) -> None:
+        self.commit('{"silent": ["store.py"]}\n', FS_SHAPED)
+        files = self.prompts(self.prep('--groups', 'a=L9,L15', '--groups', 'b=L16,L17'))
+        a, b = files['a'], files['b']
+        for text in (a, b):
+            for piece in ('## 3. The fourteen lenses', '## 4. What a finding must carry', '## 5. Score it', 'mode text',
+                          'lens intro', 'ranking text', 'proof text'):
+                self.assertIn(piece, text)
+            self.assertNotIn('## 6. Report it', text)
+            self.assertNotIn('### L1. Abandoned work', text)
+        # A held lens the skill defines: both texts. L17, which only the repository defines: its section alone.
+        for piece in (self.SKILL_L9, '### L15. Promised coverage\n', 'nine deeper', 'fifteen text'):
+            self.assertIn(piece, a)
+        for piece in (self.SKILL_L16, 'sixteen tail', 'seventeen text'):
+            self.assertIn(piece, b)
+            self.assertNotIn(piece, a)
+        for piece in (self.SKILL_L9, 'nine text', 'fifteen text'):
+            self.assertNotIn(piece, b)
+
+    def test_without_a_lens_file_the_skills_sections_go_in_alone(self) -> None:
+        self.commit('{"silent": ["store.py"]}\n', None)
+        files = self.prompts(self.prep('--groups', 'a=L9'))
+        self.assertIn(self.SKILL_L9, files['a'])
+        self.assertNotIn(self.SKILL_L16, files['a'])
+        self.assertIn(self.SKILL_L16, files['other-lenses'])
+        self.assertIn('No lens file', files['a'])
+
+    def test_a_lens_file_with_no_lens_headings_goes_in_whole(self) -> None:
+        self.commit('{"silent": ["store.py"]}\n', '# lenses\n\n## Proof\n\nrun pytest here\n')
+        files = self.prompts(self.prep('--groups', 'a=L9'))
+        for text in files.values():
+            self.assertIn('# lenses\n\n## Proof\n\nrun pytest here\n', text)
+        self.assertIn(self.SKILL_L9, files['a'])
+
+    def test_one_grader_holding_every_lens_gets_every_section_and_the_whole_lens_file(self) -> None:
+        self.commit('{"silent": ["store.py"]}\n', FS_SHAPED)
+        [text] = self.prompts(self.prep()).values()
+        self.assertIn(FS_SHAPED, text)
+        self.assertIn(self.SKILL_L9, text)
+        self.assertIn(self.SKILL_L16, text)
+
+    def test_slice_lenses_false_writes_the_dispatch_alone(self) -> None:
+        self.commit('{"silent": ["store.py"], "sliceLenses": false}\n', FS_SHAPED)
+        [text] = self.prompts(self.prep()).values()
+        self.assertNotIn('ranking text', text)
+        self.assertNotIn('## 4. What a finding must carry', text)
+        self.assertNotIn('===== lens text =====', text)
+
+    def test_prompt_files_false_prints_no_lens_text(self) -> None:
+        self.commit('{"silent": ["store.py"], "promptFiles": false}\n', FS_SHAPED)
+        out = self.prep()
+        self.assertIn('===== shared block =====', out)
+        self.assertNotIn('ranking text', out)
+        self.assertNotIn('## 4. What a finding must carry', out)
+
+    def test_a_slice_lenses_value_that_is_not_true_or_false_stops_the_run_before_any_copy(self) -> None:
+        self.commit('{"silent": ["store.py"], "sliceLenses": "false"}\n', FS_SHAPED)
+        run = self.run_cli()
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('sliceLenses', run.stderr)
+        self.assertEqual(list(self.proofs.iterdir()), [])
+
+    def test_skill_names_the_copy_to_slice(self) -> None:
+        # The nightly replays slice a copy with the pool's pull request numbers stripped.
+        self.commit('{"silent": ["store.py"]}\n', FS_SHAPED)
+        blinded = Path(self.tmp.name) / 'blinded.md'
+        blinded.write_text((SCRIPTS.parent / 'SKILL.md').read_text().replace('PR #900', 'PR #<n>'))
+        [text] = self.prompts(self.prep('--skill', str(blinded))).values()
+        self.assertIn('*Examples, from EngOS:* PR #<n>', text)
+        self.assertNotIn('PR #900', text)
+        self.assertIn(str(blinded), text)
+
+    def test_a_skill_that_is_missing_or_cannot_be_sliced_stops_the_run_before_any_copy(self) -> None:
+        self.commit('{"silent": ["store.py"]}\n', FS_SHAPED)
+        odd = Path(self.tmp.name) / 'odd.md'
+        odd.write_text('# no sections here\n')
+        for given in (str(Path(self.tmp.name) / 'absent.md'), str(odd)):
+            with self.subTest(skill=given):
+                run = self.run_cli('--skill', given)
+                self.assertNotEqual(run.returncode, 0)
+                self.assertIn(given, run.stderr)
+                self.assertEqual(list(self.proofs.iterdir()), [])
+
+    def test_with_no_skill_beside_the_scripts_the_lens_file_is_sliced_alone_and_the_notice_says_so(self) -> None:
+        # forgesmith-os vendors the scripts without SKILL.md.
+        self.commit('{"silent": ["store.py"]}\n', FS_SHAPED)
+        vendored = Path(self.tmp.name) / 'vendor/scripts'
+        shutil.copytree(SCRIPTS, vendored, ignore=shutil.ignore_patterns('__pycache__'))
+        out = self.prep_with('--base', 'main', '--groups', 'a=L9,L15', '--groups', 'b=L16,L17', script=vendored)
+        self.assertRegex(out, r'(?m)^notice: no SKILL\.md beside .*, so each prompt file carries the lens file alone')
+        a = self.prompts(out)['a']
+        self.assertIn('ranking text', a)
+        self.assertNotIn('sixteen text', a)
+        self.assertNotIn(self.SKILL_L9, a)
+        self.assertNotIn('## 4. What a finding must carry', a)
+        self.assertIn('sections 3 to 5', a)
 
 
 class SurfaceTest(unittest.TestCase):

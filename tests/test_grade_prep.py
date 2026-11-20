@@ -699,6 +699,17 @@ class LensSliceCliTest(unittest.TestCase):
         self.assertNotIn('PR #900', text)
         self.assertIn(str(blinded), text)
 
+    def test_a_non_lens_section_between_the_skills_lenses_reaches_every_grader(self) -> None:
+        # Issue #81: a grader loses only the lens sections of lenses it does not hold, as in the lens file.
+        self.commit('{"silent": ["store.py"]}\n', FS_SHAPED)
+        noted = Path(self.tmp.name) / 'noted.md'
+        noted.write_text('## 3. Lenses\n\nopen\n\n### L9. A\n\nnine skill\n\n### Note on ranking\n\nranking prose\n\n'
+                         '### L16. B\n\nsixteen skill\n\n## 4. F\n\nf\n\n## 5. S\n\ns\n')
+        files = self.prompts(self.prep('--skill', str(noted), '--groups', 'a=L9,L15', '--groups', 'b=L16,L17'))
+        for text in files.values():
+            self.assertIn('### Note on ranking\n\nranking prose\n\n', text)
+        self.assertNotIn('nine skill', files['b'])
+
     def test_a_skill_that_is_missing_or_cannot_be_sliced_stops_the_run_before_any_copy(self) -> None:
         self.commit('{"silent": ["store.py"]}\n', FS_SHAPED)
         odd = Path(self.tmp.name) / 'odd.md'

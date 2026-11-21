@@ -33,7 +33,15 @@ Grade after a correctness review, never alongside one. Run the review the reposi
 
 ## 2. Pick the mode and prepare the graders
 
-Commit the change, then run the prep from inside the repository, with this skill's base directory in place of `<base>`:
+Commit the change. Then, from inside the repository and with this skill's base directory in place of `<base>`, ask whether a first read runs, passing the `--base`, `--branch-base`, and `--exclude-path` you will give the prep:
+
+```sh
+python3 <base>/scripts/grade_mode.py --scan
+```
+
+It prints `scan: yes` or `scan: no` with its reason, and a re-grade always gets a no. Never decide it yourself. On `scan: yes`, dispatch one `pr-grade:scan` agent at once, with the line it prints as the Agent prompt, unchanged, and run the prep below while the scan reads, adding the `--suspects <dir>` it prints. The prep then holds back the dispatch line of the grader the first read goes to and prints an `attach:` line in its place; dispatch the other graders as usual. When the scan returns, whatever it returns, run the `attach:` line and dispatch the line it prints. The attach moves the scan's report into that grader's prompt file as numbered suspects, so never read the report or type any of it. When `pr-grade:scan` cannot be dispatched, as with agents older than 0.19.0, or the scan writes nothing, run the `attach:` line all the same: that grader goes with no suspects, and the merge prints `first read: did not run`, which you say below the block. A surface grade, section 9, has no branch to scan and skips this step.
+
+Then run the prep:
 
 ```sh
 python3 <base>/scripts/grade_prep.py --settled '<each check that passed at the head, with its result>' --declined '<each finding you declined, with its reason>'

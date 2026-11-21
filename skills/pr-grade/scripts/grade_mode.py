@@ -50,6 +50,7 @@ import importlib.util
 import json
 import posixpath
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -401,22 +402,32 @@ def scan(root: Path, base: str, branch_base: str, config: dict, kept: tuple[str,
         # A scan with no copy still reads; the grade never waits on a copy. A malformed proofDir exits in make.
         why = str(getattr(failed, 'stderr', None) or getattr(failed, 'code', None) or failed).strip()
         print(f'notice: no proof copy for the scan, so it reads with git alone: {why}')
-        where = Path(tempfile.mkdtemp(prefix='pr-grade-scan-'))
-    else:
-        fields = dict(made_line.split(': ', 1) for made_line in made if ': ' in made_line)
-        record['proof'] = fields['root']
-        where = Path(fields['root']) / 'first-read'
-        where.mkdir()
-        if copying:
-            copy = (f" Your proof copy: {fields['copy scan']} (a clone of {head} outside the repository, yours alone)."
-                    f" Your scratch directory: {fields['scratch scan']}.")
-            # The scan installs nothing, so it is told which dependency it will not find there, and why.
-            refused = [made_line for made_line in made if made_line.startswith(('not linked', 'missing'))]
-            if refused:
-                copy += f" In your copy: {'; '.join(refused)}."
+        made = None
+    # Until scan.json names it, nothing else names the directory this makes, so a failure here removes it.
+    owned = Path(tempfile.mkdtemp(prefix='pr-grade-scan-')) if made is None else None
+    try:
+        if made is not None:
+            fields = dict(made_line.split(': ', 1) for made_line in made if ': ' in made_line)
+            owned = Path(fields['root'])
+            record['proof'] = fields['root']
+            where = owned / 'first-read'
+            where.mkdir()
+            if copying:
+                copy = (f" Your proof copy: {fields['copy scan']} (a clone of {head} outside the repository, yours "
+                        f"alone). Your scratch directory: {fields['scratch scan']}.")
+                # The scan installs nothing, so it is told which dependency it will not find there, and why.
+                refused = [made_line for made_line in made if made_line.startswith(('not linked', 'missing'))]
+                if refused:
+                    copy += f" In your copy: {'; '.join(refused)}."
+        else:
+            where = owned
+        (where / 'scan.json').write_text(json.dumps(record) + '\n')
+    except OSError as failed:
+        shutil.rmtree(owned, ignore_errors=True)
+        sys.exit(f"grade_mode: could not write the scan's directory, so {owned} is removed and no scan is "
+                 f'dispatched: {failed}')
     line = (SCAN_PROMPT.format(base=fork, head=head) + f' Write the report to {where / SCAN_REPORT} with the Write tool.'
             + copy)
-    (where / 'scan.json').write_text(json.dumps(record) + '\n')
     print('Dispatch one pr-grade:scan agent now, with this line as its prompt, unchanged:')
     print(line)
     print('Then run the prep while it reads, with this option added:')

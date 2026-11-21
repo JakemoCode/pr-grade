@@ -1,0 +1,37 @@
+I found two real defects and two minor ones. The biggest problem is that the new auto-merge gate can never count anything, because the label it reads doesn't exist.
+
+## 1. The `auto-merged` label is never applied, so the auto-merge column never shows a value
+**Where:** `scripts/escape_ledger.py:34-35` (docstring), `scripts/escape_ledger.py:91` and `scripts/escape_ledger.py:122-124` (`auto_merged`)
+
+- The docstring says "scripts/auto_merge.py labels each pull request its train merged `auto-merged`". It doesn't.
+- I searched `scripts/auto_merge.py`, `scripts/batch_land.py`, `scripts/merge_plan.py` and `.claude/skills/wave/*.py`. None of them adds a label (no `add-label` or `--label` call).
+- Elsewhere in the repo, "auto-merged" only appears as prose in the wave report and `SKILL.md`, never as a GitHub label.
+
+**What goes wrong:**
+- On real GitHub data, `auto_merged()` returns `False` for every pull request.
+- `passed(..., 'auto-merge', False)` is therefore never true, and the auto-merge column prints `-` every week.
+- That is exactly the failure the new mutation guarantee `escape-ledger-auto-merge-gate-reads-the-label` describes.
+- The new test only passes because its fixture adds `labels=('auto-merged',)` by hand. So the guarantee proves the reader against a label nothing produces.
+
+**Fix:** either change `auto_merge.py` (or `batch_land`) to add the label when the train merges, and derive it for PRs it merged before this change, or detect auto-merges from evidence that actually exists. Until then, the docstring is wrong about how the repo works.
+
+## 2. A revert of a revert is counted as a fix and blamed on the first revert
+**Where:** `scripts/escape_ledger.py:90` (`REVERT`) and `scripts/escape_ledger.py:129` (`is_fix`)
+
+- The pattern `Revert "` matches any revert title, including GitHub's `Revert "Revert "feat: x""`, which is a re-land.
+- A re-land deletes the lines the first revert put back, so blame charges the first revert as the introducer, with status `escape`.
+
+**What goes wrong:** re-landing a feature records a false escape against the revert PR and against every gate that revert passed (including auto-merge, if it was auto-merged). That inflates the rates. Excluding titles that start with `Revert "Revert ` would avoid it.
+
+## 3. Minor: `autoMerged` only appears on some rows
+**Where:** `scripts/escape_ledger.py:208-211` and `scripts/escape_ledger.py:225-226`
+
+`autoMerged` is set only in the branch that finds an introducer. It is missing from the starting row dict, so rows in `--json` output have inconsistent keys: unattributed rows lack the field. `render` works around this with `row.get('autoMerged', False)`, but anything else reading the JSON (for example `weekly_review_report` or ad-hoc tooling) has to do the same. Adding `'autoMerged': None` (or `False`) to the starting dict fixes it.
+
+## 4. Minor: reverts never get a lens
+**Where:** `scripts/escape_ledger.py:207` and `scripts/escape_ledger.py:267`
+
+- Reverts now count as "fixes" in the ledger and in its header ("fix PRs merged …").
+- But `review_records.FIX_TITLE` (`scripts/review_records.py:134`, used at `:308`) still only asks `fix:` PRs for an `Escaped:` line.
+- So a revert escape gets a lens only when some record happens to route to it. Usually its lens is empty, and those escapes drop out of any per-lens accounting.
+- Conventional `revert:` titles aren't matched by `REVERT` at all.

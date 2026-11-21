@@ -1,0 +1,19 @@
+I found one real defect and one cosmetic one. I couldn't run the new tests or a check script because those commands were denied permission, so both findings come from reading the code.
+
+**1. A real `## Loose ends` section can be reported as missing** — `.claude/skills/wave/wave_report.py:78`
+
+`read_pr` runs `loose_ends.SECTION.search(...)` directly on the PR body from `gh pr view`. The pattern is `(?msi)^##[ \t]+Loose ends[ \t]*$...`. In Python, `$` in multiline mode only matches before `\n`, so it fails when the heading line ends in `\r\n`. GitHub stores bodies with `\r\n` when someone edits them in the web UI. The repo's own wrapper, `loose_ends._section_text` (`scripts/loose_ends.py:244`), handles this with `body.replace('\r\n', '\n')` before searching, but `read_pr` skips that step.
+
+- **What goes wrong:** take a PR body `"...\r\n## Loose ends\r\n\r\n- issue #995 (deferred)\r\n..."`. Section 5 ("Awaiting merge") prints `no \`## Loose ends\` section`, and the real loose-end lines never reach Jake. That is exactly the silent "reported as none" failure this PR is meant to prevent (issue #982).
+- **Fix:** call `loose_ends._section_text(view.get('body') or '')`, or make that helper public, or normalise `\r\n` before searching. Add a test with a `\r\n` body.
+
+**2. Stray double space in "In progress" lines** — `.claude/skills/wave/wave_report.py:139-140`
+
+The `inProgress` line is `f"- {unit}: {command or ''}"` followed by `f" PR #{number}"`. A draft held only by a live worktree has a PR number but no command, so it prints `- WP-33.1:  PR #990`. `frontier.py`'s own report (`scripts/frontier.py:319`) prints `PR #<n>` as the label in that case. This is cosmetic, and only the report text is affected.
+
+The rest of the diff checks out:
+- The section order matches the list in `SKILL.md`.
+- `checkpoints.py findings` treats exit code 1 as findings, but exit 1 with stderr output as a crash.
+- Each failed read prints `UNREAD` only in the sections it feeds.
+- The Dependabot jq string matches the old one exactly.
+- The `settings.json` permission entry is fine.

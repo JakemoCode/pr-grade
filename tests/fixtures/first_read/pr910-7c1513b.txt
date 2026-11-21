@@ -1,0 +1,29 @@
+I found four defects in the correction feature, none of which stop the main path from working. I couldn't run the test suites: the permission prompt for `.venv/bin/python -m unittest …` wasn't approved in this session, so nothing below is backed by a test run.
+
+**1. The two reports count "N hit ruled by hand" differently** — `scripts/review_overlap.py:234` and `:265` against `scripts/canary_scoring.py:252`
+- `canary_scoring.overlap` counts every ruled record: it sums over each pair and each reviewer.
+- `review_overlap.canaries` marks a canary as ruled with `any(...)` across both reviewers, and `report` then counts canaries.
+- **Example:** Jake rules both the code-review and the pr-grade hit on one canary. The `/wave` summary says "2 hit ruled by hand", but the weekly `review_overlap` line says "1 hit ruled by hand".
+- **Fix:** count `sum('ruling' in scored[r] for r in REVIEWERS)` per canary.
+
+**2. `correct` will rule on a record that has no `hit`, and that quietly adds it to the experiment** — `scripts/grader_canaries.py:556-563` and `scripts/canary_scoring.py:197-199`
+- A record scored before the experiment's first arm has no `hit` field. `review_overlap.canaries` (`scripts/review_overlap.py:228`) leaves such records out on purpose, because they were scored by a different rule.
+- `cmd_correct` only checks `targets[0].get('hit') == hit`. For a record with no `hit`, `get` returns `None`, so both `--hit true` and `--hit false` are accepted.
+- `apply_corrections` then writes a `hit` key into the record, and from then on `review_overlap` pairs and counts it under a scoring rule it never had. The `ruling` it stores holds `scoredHit: None`.
+- **Fix:** have `cmd_correct` refuse a target with no `hit`, and have `apply_corrections` ignore one too.
+
+**3. A ruling that goes back to the scorer's verdict still counts as ruled by hand** — `scripts/grader_canaries.py:561` and `scripts/canary_scoring.py:196-200`
+- The "already reads hit=" check compares against the record as already ruled, not as scored. So after one correction, a second correction back to the original value is accepted.
+- The latest correction wins, which leaves `hit` equal to `scoredHit`, but the record still carries a `ruling` key.
+- Both reports keep showing "1 hit ruled by hand" for a record whose hit nobody actually overrode in the end.
+- **Fix:** drop the `ruling` (or skip the record in the count) when the ruled hit equals the scored one, or refuse a ruling that matches the scored value.
+
+**4. `correct` can't target a record without a `ran` field** — `scripts/grader_canaries.py:555-556` and `scripts/canary_scoring.py:180-182`
+- `correction_key` uses `record.get('ran')`, which is `None` when the field is missing. But `--ran` is a required string, so the keys never match.
+- `cmd_correct` then reports "no scored … record" for a record that is in the ledger.
+- `review_overlap.canaries` treats a missing `ran` as `''`, so the two modules don't agree on the key.
+- This only matters if older records lack `ran`; if every record has it, ignore this.
+
+**One thing to check, not a confirmed defect:** `cmd_correct` (`scripts/grader_canaries.py:556-569`) reads the ledger, checks that exactly one record matches, then appends. That is a check-then-act window with no `# engos: atomic -- <reason>` marker. `scripts/check_then_act.py` may fail it in `npm run gate`/CI; running that check will tell you.
+
+The new mutation guarantee in `scripts/canary_scoring.mutations.yaml` looks right. Its `find` string appears once in the file, and with the reviewer dropped from the key, `test_a_correction_of_one_reviewers_record_leaves_the_others_alone` would fail as it should.

@@ -1,0 +1,47 @@
+I found seven defects: the two main ones are in `scripts/review_responses.py`, three are in `scripts/review_packet_folders.py`, and two are minor. I couldn't run the new unit tests here because running them needed permission I didn't have, so everything below comes from reading the diff, the packet builder and the existing review files.
+
+### Main findings
+
+**1. The check skips the case it was written for** (`scripts/review_responses.py:48-56` and `:61-63`)
+- `problems()` only looks at a round when the pull request itself adds or changes that round's ledger or one of its reviews (`rounds_touched`).
+- The docstring accepts the other workflow, where the reviews and ledger land alone first (as PR #822 did for round 8). In that case the later correction-pass pull request edits only Runtime, Plan or verification files, so `rounds_touched` finds nothing and the check passes.
+- The likely mistake is a correction pass that forgets to append the `## Response` tables, and that pass never touches the reviews. It merges green, and the gap still surfaces only at the next packet build, which is what issue #797 was meant to stop.
+- **Possible fix:** for every round whose ledger exists at the head, run the check on any pull request that changes files outside the review records, whether or not it touches that round's reviews.
+
+**2. The check and the packet builder disagree on what counts as a Response heading** (`scripts/review_responses.py:38` against `scripts/review_packet.py:233`)
+- `has_response_table` accepts `^## Response[ \t]*$`, so trailing spaces or tabs pass.
+- `review_packet.record` needs a line exactly equal to `'## Response'`.
+- A review headed `## Response ` (with a trailing space) passes Check PR, then the next round's build refuses it with "carries no `## Response` table". That is the late failure this pull request exists to prevent.
+- **Possible fix:** share one predicate between the two, or make both use the same rule.
+
+### `scripts/review_packet_folders.py`
+
+**3. The same folder given twice is not refused** (line 85)
+- `build` checks each `--out` on its own, so `--out ~/r9-a --out ~/r9-a`, or two paths that resolve to one folder, is accepted.
+- Both reviewers then work in one directory and can each read the other's `REVIEW.md`, which breaks the blind review.
+- The new template's step 5 even shows the same placeholder twice (`--out ~/r<R>-<reviewer> --out ~/r<R>-<reviewer>`), which invites the mistake.
+- **Possible fix:** refuse duplicate resolved folders.
+
+**4. `check --against` doesn't expand `~`, but `build` does** (line 112)
+- `build` calls `folder.expanduser().resolve()`. `check` reads `against / name` as given.
+- When `~` is not expanded by the shell, for example inside quotes or when called through Python, `check --against '~/r9-astra'` reports a missing file for a folder that `build` wrote to without trouble.
+
+**5. Hidden files such as `.DS_Store` block a rebuild** (line 71)
+- Any entry other than the two packet files blocks the build, hidden files included.
+- On macOS, opening a reviewer folder in Finder creates `.DS_Store`, and the rebuild that the template asks for "before a review starts" is then refused as if a review had begun.
+- It errs on the safe side, but the error message blames a started review that never happened.
+
+### Minor
+
+**6. Non-ASCII file names slip through** (`scripts/review_responses.py:84-85`)
+- `git diff --name-only` and `git ls-tree --name-only` quote such names by default (`core.quotePath`), so a review named `round-2-review-é.md` comes back as `"docs/…\303\251.md"`.
+- The `REVIEW` pattern then doesn't match it and the review is silently skipped. The docstring says an unforeseen name should cause a failure instead.
+- **Possible fix:** use `-z` or `-c core.quotePath=false`.
+
+**7. A duplicated digest line is accepted** (`scripts/review_packet_folders.py:57`)
+- `read_record` stores digest lines in a dict. A record with two `PACKET.md` lines keeps the last one without complaint and still passes the name check.
+
+### Not code defects, but worth knowing
+
+- **An old review would fail the new check.** `docs/slices/slice-002/reviews/round-2-review-astra-revised.md` has no `## Response` section, and `round-2-dispositions.md` exists. Any future pull request that touches slice 002 round 2 reviews or its ledger, plus any file outside the review records, will fail Check PR on that file. The cause is the deliberate rule that unforeseen review names should fail, not anything that pull request did. It needs a Response table or an explicit exemption.
+- **Test nit:** in `scripts/test/test_review_packet_folders.py:26`, `self.spec = self.spec('delta')` replaces the fixture's `spec()` method with its result. Any later `self.spec(...)` call in a subclass would fail.

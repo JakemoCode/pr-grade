@@ -1,0 +1,40 @@
+I found four problems in the change; one matters and three are minor.
+
+The one that matters is in `scripts/review_packet_ledger.py:72`. The parser only treats a `- ID:` line as starting a new finding when the id has the plain question form, like `Q1-02`. An `- ID: O-01` line doesn't end the finding before it. Neither does an id with trailing text like `Q1-08 (new)`. So that finding's `Related prior finding` line gets credited to the previous question finding. In a Fable-style review, where findings have no heading of their own, this can wrongly accept a Verdict line that names an earlier-round id.
+
+The minor ones:
+- **Roster wording (line 163):** the delta roster's opening sentence contradicts its own table. It says a below-major finding like F2-Q1-06 is not a row in the roster, but that row is still listed because it shares a ledger row with a major finding. The new test locks this wording in.
+- **Fences (line 68):** quoted templates are only skipped when fenced with an unindented triple backtick. A `~~~` or indented fence is read as a real finding.
+- **Formatting (line 22):** `TAGGED_ID =re.compile` is missing the space after `=`.
+
+I didn't run the tests: the command needed approval in this session.
+
+## Findings reported through the findings tool
+
+### Non-Q `- ID:` line doesn't end the previous finding
+`scripts/review_packet_ledger.py:72` (important)
+
+`related_findings` sets `current` only when a `- ID:` line matches `FINDING_ID` (`Q\d+-\d+` with nothing after it). It clears `current` only on a heading or a fence. So an `- ID: O-03` line, or `- ID: Q1-08 (new)`, does not end the finding before it. That new finding's `- Related prior finding:` line is then credited to the previous Q finding. Fable's style puts no heading on each finding (only `**Q1-01**`), so this happens whenever an O finding or an oddly written ID line follows a Q finding without a heading between them. Any `- ID:` line should reset `current`, and set it only when the id is a question id.
+
+Failure scenario: In a Fable-style review, `- ID: Q1-02`/`- Related prior finding: NEW` is followed, with no heading, by `- ID: O-01`/`- Related prior finding: F1-Q3-01`. `related_findings` maps F1-Q3-01 → [F2-Q1-02]. A Verdict line naming F1-Q3-01 is accepted and counted as reaching F2-Q1-02. The check meant to refuse an outside-the-delta route (the property in `test_an_outside_the_delta_finding_is_never_reached`) passes silently, and F2-Q1-02 is wrongly treated as named by the Verdict.
+
+### Delta intro says reached minors are not roster rows
+`scripts/review_packet_ledger.py:163` (nit)
+
+In the delta roster the sentence reads 'Every id in a Verdict line is a row here, but X, a finding below major...'. That says X has no row in the roster. But `below` is worked out per id. A below-major id that shares a ledger row with a material id (F2-Q1-06 in `F2-Q1-06, A2-Q1-05`) is still listed, because `listed = material` keeps whole rows. So the generated packet contradicts its own table. Both the full intro ('Every id in a Verdict line is a blocker or major row here') and the delta intro also still claim this for every id. But the Verdict line now holds earlier-round ids such as F1-Q3-04, which are never rows of this ledger.
+
+Failure scenario: In the round 2 fixture the roster says 'Every id in a Verdict line is a row here, but F2-Q1-06, F2-Q1-07, findings below major'. Yet the table below it has the row `F2-Q1-06, A2-Q1-05`. The test at scripts/test/test_review_packet_ledger.py:105 locks this wording in.
+
+### Fence detection misses indented or `~~~` fences
+`scripts/review_packet_ledger.py:68` (nit)
+
+Fences are detected only by `line.startswith('```')`. A template fenced with `~~~`, or indented (for example inside a list item), is not skipped. Its `- ID:` and `- Related prior finding:` lines then count as a real finding and can satisfy a Verdict's earlier-round id. The docstring promises that 'a quoted template names no finding'.
+
+Failure scenario: A review quotes the finding template inside `~~~text` … `~~~`, with `- ID: Q1-09` and `- Related prior finding: A1-Q7-09`. A Verdict line naming A1-Q7-09 is then accepted as reaching A2-Q1-09. It should be refused.
+
+### Missing space after `=` in TAGGED_ID
+`scripts/review_packet_ledger.py:22` (nit)
+
+`TAGGED_ID =re.compile(...)` is missing the space after `=`. Every other assignment in the module has it. The repo's ruff rules leave E225 off, so no check catches this.
+
+Failure scenario: No runtime effect. It is just inconsistent formatting in new code.

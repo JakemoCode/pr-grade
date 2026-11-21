@@ -1,0 +1,24 @@
+I found no correctness bugs in the main logic. There are two minor issues, described below. I couldn't run the tests: running them needed approval, which this non-interactive session couldn't get. So everything here comes from reading the code.
+
+**1. The withdrawn-marker check accepts more than the documented marker** (nit), `scripts/pr_plan.py:9` and `:59`
+
+`pr-plan.md` §3 says a row is withdrawn when its Scope cell opens with `**Withdrawn.**`. The check actually accepts any Scope cell whose opening bold text starts with the word "withdrawn". So a real row whose scope is about a "withdrawn" concept counts as withdrawn too, for example `**Withdrawn-session reaper:** add the sweep` or `**Withdrawn grants** table`.
+
+When that happens, the row is quietly marked as finished in three places:
+- `task-map.py` marks it done, so `frontier.py` never offers it to run.
+- `planMerged` counts it, so the work package can reach "finish" without that work ever being built.
+- `record-merges.py` skips it.
+
+**Fix:** only accept the word followed by punctuation and then the closing `**`, e.g. `\*\*\s*withdrawn\s*[.:]?\s*\*\*`, which still matches `**Withdrawn**.`. Add a test row along the lines of `**Withdrawn-session store**`.
+
+**2. An open pull request on a withdrawn row no longer appears anywhere** (nit), `scripts/task-map.py:193-195`
+
+If a pull request is still open on a withdrawn row, its node now has status `done` but still carries that pull request's number and link. In `frontier.py`, `visit_pr` ignores `done` nodes. The pull request is also already attached to that node, so it never becomes a separate `PR-<n>` node either.
+
+The result is that `/wave` stops listing it. It's not under awaiting merge, waiting, in progress or failing. That's the stated aim ("not offered for merge"), but nothing ever prompts anyone to close it, so it sits open unseen. It can still be merged by hand, and `record-merges.py` would then ignore that merge (`record-merges.py:103`).
+
+**Fix:** report it as needing to be closed rather than counting it as settled.
+
+The rest checks out:
+- In `record-merges.py`, skipping withdrawn rows, leaving their branches out of the record, and the new `default=None` return for "every row withdrawn" are all consistent.
+- `task-map.py` counts withdrawn rows in `planMerged`, which `frontier.py` compares against `plan`, so that also lines up.

@@ -1,0 +1,32 @@
+I found one bug in the code and one missing process item. I couldn't run the test suite: `node_modules` isn't installed, and running a small semver script needed a permission I don't have. The prerelease finding below comes from how semver's ordering works, not from a run.
+
+### 1. A prerelease of a later Runtime gets through — `src/project/identity/project-yaml.ts:73-75`
+
+```ts
+const nextMinor = `${semver.major(CURRENT_RUNTIME_VERSION)}.${semver.minor(CURRENT_RUNTIME_VERSION) + 1}.0`;
+if (semver.gte(lowest, nextMinor)) { throw ... }
+```
+
+In semver, a prerelease sorts below its release, so `0.4.0-rc.1` counts as less than `0.4.0`. Some ranges therefore open on the 0.3.0 build even though they name 0.4:
+
+- `^0.4.0-rc.1`: lowest version is `0.4.0-rc.1`, and `gte(0.4.0-rc.1, 0.4.0)` is false.
+- `>=0.4.0-0`, `~0.4.0-alpha.1`, `0.4.0-beta`, `^1.0.0-0` fail the same way.
+
+A project written by a 0.4 pre-release build would be opened by this build, which is exactly what Runtime §10 refuses ("a range naming a later minor version than the build implements is refused").
+
+**Fix:** compare `major.minor` of `lowest` against the next minor and ignore the prerelease part. For example, test `semver.gte(\`${lowest.major}.${lowest.minor}.0\`, nextMinor)`, or compare against `${nextMinor}-0`. Add a prerelease case to the `later` list in `tests/unit/project-yaml-runtime-range.test.ts:36`. None of the 12 cases there has a prerelease tag, so the tests don't catch this.
+
+### 2. `project-bootstrap.ts` reaches the 10-guarantee cap with no split issue cited — `src/project/bootstrap/project-bootstrap.mutations.yaml:142-155`
+
+On `main` this file has 9 guarantees. The new `bootstrap-live-claimant-reads-identity-whatever-runtime` guarantee brings `project-bootstrap.ts` to 10. AGENTS.md §5 says a PR that brings a file to 10 must cite an open split issue naming it under `## Loose ends`, routed to the next WP that touches the file or marked `deferred` (`scripts/cap_splits.py`).
+
+The commit message, which serves as the PR description here, is only the subject line: no `## Loose ends`, no split issue. `scripts/cap_splits.py` will report `project-bootstrap.ts` as owing a split issue.
+
+The same empty message also has no `Red-proof:` trailer. The new `refuses a project declaring %s` cases aren't marked `red-exempt`, so `npm run red:check` has no commit to replay them against. You need to supply that proof before WP-25 can be closed.
+
+### Checked and fine
+
+- `liveClaimant` switching to `readProjectIdentity` is correct. Its mutation guarantee and test would catch a revert: the claimant would wrongly be treated as stale, and the ambiguity refusal wouldn't happen.
+- The other cases behave as intended: `^0.2.x`, `<0.5.0`, `^0.2.9 || ^0.4.0` and `*` open; `^0.4.0`, `>0.3`, `1.x` and `2` are refused; `latest`, `^O.4.0` and `>1 <0` are reported as malformed.
+- The two files moved in the citation pins only cite sections that now have pins (§9.3, §10, §12.1, §12.2, §17, §43.5). The §12.3 mention in `project-bootstrap.ts` isn't a `Runtime §N` citation, so it needs no pin.
+- No other file in `src/` reads `project.yaml` without going through these two functions.

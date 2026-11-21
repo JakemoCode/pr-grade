@@ -1,0 +1,27 @@
+I found five problems in this change: three in the hook and two in the wave skill doc. I couldn't run the unit tests because running them needed approval, and `~/.claude/scripts/` (`dispatch.py`, `reap.py`) is outside the folders I'm allowed to read. So the ledger's key format and locking are checked only against what the diff says about them.
+
+1. **The lock wait has no time limit, and a hook timeout lets the command run.** `.claude/hooks/guard-session-removal.py:139`
+   - `fcntl.flock(handle, fcntl.LOCK_SH)` blocks with no limit. It runs only after `claude agents --json --all`, which may already have used up to 20 s of the hook's 30 s budget (`LIST_TIMEOUT_S`).
+   - If `dispatch.py` or `reap.py` holds the exclusive lock, or a holder hangs, the hook never returns. Claude Code then kills it, and a killed hook is a non-blocking error, so the `claude rm` runs. That is the fail-open case the module docstring and `main()` say they prevent.
+   - **Fix:** use `LOCK_SH | LOCK_NB` and retry until a deadline that fits inside the remaining budget, then refuse.
+
+2. **An id is accepted on a guess the code's own comment contradicts.** `.claude/hooks/guard-session-removal.py:161-162`
+   - The comment says the ledger keys a child by the listing's `id`. The code also accepts `sessionId[:8]`, the first 8 characters of the session's UUID.
+   - Nothing shows that the job id equals that prefix. If it doesn't, a wave-named session can pass on another session's ledger record whenever its UUID prefix matches that record's id, or when it has no `id` field.
+   - No test covers this path.
+   - **Fix:** drop the prefix, or document and test that job id equals the `sessionId` prefix.
+
+3. **The wave skill still says to `claude rm` sessions the hook now refuses.** `.claude/skills/wave/SKILL.md:168-171`
+   - The old text explained `no live ledger entry` as "a `claude --bg` fallback session". The change removed that explanation but kept the instruction to remove such sessions with `claude rm <id>`.
+   - Two sentences later it says a session with no ledger record, such as a `claude --bg` fallback, needs Jake's yes. If `reap.py`'s `no live ledger entry` still means "no record", the hook refuses every one of them, and an orchestrator following line 168 hits a denial.
+   - **Fix:** say which case `no live ledger entry` means, and send the no-record case to AskUserQuestion.
+
+4. **The same paragraph contradicts itself.** `.claude/skills/wave/SKILL.md:154-156`
+   - These lines still let the orchestrator remove "a `claude --bg` fallback this orchestrator started" without asking Jake. The hook now always refuses those, since they have no ledger record.
+   - Where `dispatch.py` doesn't exist there is probably no ledger file at all. Then every removal is refused as a "missing ledger". Neither step 2.3 nor step 3.3, which sets up the fallback, mentions this.
+
+5. **Nit: a reworded line runs far longer than its neighbours.** `.claude/hooks/guard-session-removal.py:192-193`
+   - The edit pushed line 193 to about 140 characters; the rest of the file wraps near 110.
+   - ruff doesn't flag it (E501 isn't selected), so this is consistency only.
+
+On the tests: the commit adds tests that would fail under the old code but has no `Red-proof:` trailer, so `npm run red:check` won't replay them.

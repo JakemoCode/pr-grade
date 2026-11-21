@@ -1,0 +1,36 @@
+I found no serious bugs in this change. The two new checks do what the PR describes. What I did find is six minor defects, ranked below, mostly gaps between what the code promises and what it does in edge cases.
+
+I reviewed by reading the code only. Running the new unit tests (`test_review_packet_folders`, `test_review_responses`, `test_review_packet_records`) needed permission and was declined, so none of them were run. I did check that every existing committed review whose round has a ledger already has a `## Response` table, so the new CI step won't fail older rounds when a PR touches them.
+
+### Findings
+
+1. **`scripts/review_responses.py:326`: the CI check accepts a heading the packet builder rejects.**
+   - The CI regex `^## Response[ \t]*$` accepts `## Response ` with trailing spaces or tabs.
+   - The builder's gate (`review_packet.record`, `scripts/review_packet.py:233`) requires a line that is exactly `## Response`.
+   - **Failure:** a correction pass that writes `## Response ` with a table under it passes Check PR, then the next round's build refuses it with "carries no `## Response` table". That is the late failure this check exists to prevent.
+   - **Fix:** match the exact line, or loosen both checks the same way.
+
+2. **`scripts/review_packet_folders.py:207-212`: a failed write can leave some folders written, despite the "into none" promise.**
+   - `folder_problem` only checks that a path exists and is a directory.
+   - Some paths pass that check but still fail on write: a path whose parent is a regular file, or a folder holding a *directory* named `PACKET.md`. These raise `NotADirectoryError` or `IsADirectoryError`.
+   - `main` catches only `FileNotFoundError`, `CalledProcessError` and `ValueError`.
+   - **Failure:** folders earlier in the `--out` list are already written, the record is not, and the user gets a raw traceback instead of "nothing was written". The two reviewers can end up with different packets.
+
+3. **`scripts/review_packet_folders.py:190`: macOS `.DS_Store` files block a rebuild.**
+   - Any file other than `PACKET.md` and `RUN-INSTRUCTION.txt` counts as a started review, hidden files included.
+   - On macOS, opening a reviewer folder in Finder creates `.DS_Store`.
+   - **Failure:** the rebuild that `review-packet-brief.md` requires when `check origin/main` lists a moved line is refused with "holds .DS_Store", though no review has started. Ignoring dotfiles, or keying on `REVIEW.md`, would fix it.
+
+4. **`scripts/review_packet_folders.py:228-230`: `check --against` blames the folder for changes that aren't in it.**
+   - It compares the folder's copy with a fresh rebuild at the recorded commit, not with the digests in the record.
+   - **Failure:** if `BRIEF.md`, the spec or the builder changed after the build, every changed line is reported as `<folder>/PACKET.md line N: ... != ...` against "the recorded build", even though the folder's bytes match `build-record.txt`.
+   - **Fix:** compare `digest(folder copy)` with `digests[name]` first, and list lines only when that fails.
+
+5. **`docs/templates/review-packet-brief.md:68-77`: the marker skeleton is only right for a delta packet.**
+   - It says hand-written text goes "after the first and third" marker, and it lists `# Part 2. Round <R-1> record`.
+   - In a full packet, `check_hand_written` and `render` read the brief from `# Part 1. Brief` to `# Part 2. Review questions` and the questions up to the roster. So the text goes after the first and *second* markers, and no record marker belongs in the brief (the record renders as Appendix A).
+   - **Failure:** someone following the template for a full round could place the text wrongly.
+
+6. **`scripts/test/test_review_packet_folders.py:408`: a test overwrites an inherited helper.**
+   - `self.spec = self.spec('delta')` replaces the inherited `Fixture.spec(kind, ...)` method with a `Spec` instance.
+   - **Failure:** any later test in this class that calls an inherited helper such as `self.build(kind)` or `self.spec('full')` crashes with `'Spec' object is not callable`. A separate attribute name such as `self.delta_spec` avoids this.

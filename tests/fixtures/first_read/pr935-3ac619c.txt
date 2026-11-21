@@ -1,0 +1,22 @@
+I found no blocking bug in this change. The main fixes look correct: gate-slot holds a signal that arrives while the command is starting and passes it on, and run-parallel stops the whole process tree before signalling it. I found four defects, all in edge cases or failure paths, plus one weak test assertion.
+
+I couldn't run the tests: the permission prompt for `python3 -m unittest` was refused in this session. The findings below come from reading the code only.
+
+1. **`scripts/run-parallel.py:97-101`: a stop that is cut short leaves the tree frozen for good.** `stop()` sends SIGSTOP to every descendant and only sends SIGCONT after the whole `freeze()` loop and the signal loop finish. Each pass of that loop runs `ps`, which may take up to 5 s.
+   - If run-parallel is killed in that window (for example a supervisor or CI step that follows SIGTERM with SIGKILL to the main pid only), nothing ever sends SIGCONT.
+   - Under `npm run gate` the children share npm's process group, and npm's parent is in another group of the same session. The group is therefore not orphaned, so the kernel never sends SIGHUP+SIGCONT either.
+   - The stopped processes then hang forever, still holding the output pipes and the inherited gate-slot flock. Every later gate run waits on that slot.
+   - Before this change, the same kill left children running and finishing, not stopped indefinitely.
+
+2. **`scripts/run-parallel.py:126` with `131-135`: a failed SIGSTOP is counted as a success.** `send()` swallows every `OSError` as "already gone", including `EPERM`. A descendant that can't be signalled (a setuid helper such as `sudo`, or a different uid) is still added to `frozen`.
+   - That process keeps running and can keep forking. The docstring's claim that "a stopped process cannot fork, so listing again… catches it" doesn't hold for it.
+   - The loop keeps finding new processes for as long as it forks. The process itself never gets the signal, so it can keep the pipe open, which is the hang this PR set out to remove.
+   - Only `ProcessLookupError` should be treated as "gone".
+
+3. **`scripts/run-parallel.py:99-101`: SIGCONT can reach an unrelated process.** On a second signal, `sent` is SIGKILL, so frozen processes die at once. Worker threads in `proc.communicate()` reap them, and the PID can be reused before the SIGCONT loop runs over the same `tree` list. The SIGCONT then goes to whatever process now has that PID. It's usually harmless, but it's an avoidable signal to an unrelated process. Skipping SIGCONT when `sent` is SIGKILL would remove it.
+
+4. **`scripts/gate-slot.py:149-152`: a held signal is dropped when the command fails to start.** If a SIGTERM or SIGINT lands while `starting` is set and `Popen` then raises `OSError`, the function returns 127 and never looks at `held`.
+   - The wrapper reports "could not start" and exits 127, not 128+signum.
+   - A caller that sent the stop can't see that its signal was received, which is inconsistent with the pre-start path at line 135.
+
+5. **`scripts/test/test_run_parallel.py`, `test_a_process_forked_after_the_stop_lists_the_tree_is_stopped_too` (minor, test strength).** The test writes the forked `sleep`'s pid to `forked` but never checks that the process was signalled or is gone. It relies only on the pipe keeping `communicate` open for 10 s. A direct check that the pid is dead, as the grandchild test above it does, would state the guarantee rather than infer it from timing.

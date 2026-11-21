@@ -1,0 +1,36 @@
+I found two real defects and two smaller ones. I couldn't run ESLint or the tests because `node_modules` isn't installed here (no `npm ci`) and the permission mode wouldn't let me run `npx eslint`. Everything below comes from reading the diff and the code around it.
+
+### 1. Dynamic `import()` of `tests/` is no longer caught by anything
+**`eslint.config.js:106-108`**, and the removed check at **`scripts/code-health/checks.ts:299`**
+
+The code-health check that was deleted counted every import that `importRefs` (`scripts/code-health/source.ts:157-182`) collects. That includes dynamic `import()` calls (`ts.isCallExpression(node) && node.expression.kind === ImportKeyword`). The new gate is `no-restricted-imports`, which only sees static `import` and `export … from`. The config comment even says so ("A dynamic import() passes it"). So something like `await import('../tests/helpers/sqlite.js')` in a script now passes lint and is no longer measured either. The PR swaps a measurement for a gate that catches less. Either keep a dynamic-import half in check 10 or add a rule for `ImportExpression`.
+
+### 2. Allowlist entries can go stale unnoticed, and the remaining debt is no longer measured
+**`eslint.config.js:9-22`**, **`scripts/code-health/checks.ts:299`**, **`.claude/skills/code-health/checks.md:16`**
+
+`SCRIPTS_IMPORT_FROM_TESTS` relies on "delete its entries then" when a module moves to `scripts/lib/`, but nothing checks that:
+- If a script stops importing a listed helper, the exception stays, and that script can quietly start importing it again.
+- The one test of the list's reach (`tests/tooling/eslint-scripts-imports.test.ts:44-48`) only fails when the list is missing an import a script still has. It never fails when the list names an import that no longer exists.
+- The `scripts importing tests` metric is gone, so the 12 files / 14 modules of debt no longer show up as a trend in code-health reports. The baseline at `docs/slices/slice-002/verification/code-health/baseline.json:161` will just stop matching.
+
+Stale `eslint-disable` comments, by contrast, fail lint. This allowlist has no equivalent.
+
+### 3. The regex matches the specifier text, not the resolved path
+**`eslint.config.js:32`**
+
+`^(?:\.\./)+tests/` replaces the old `posix.join(dirname(path), specifier).startsWith('tests/')` resolution, and loses accuracy both ways:
+- **Misses:** an import that doesn't start with `../`, such as `./../tests/helpers/x.js`, gets past the gate.
+- **False positives:** in a nested file like `scripts/code-health/foo.ts`, `../tests/x.js` points to `scripts/tests/x.js` but is still refused.
+
+The exception lookahead also accepts the allowed name at any depth.
+
+### 4. Un-ignoring every `.mjs` file under `scripts/` (unverified risk)
+**`eslint.config.js:47`**
+
+`scripts/*.mjs` and `scripts/test/*.mjs` are no longer ignored. That puts about 750 lines of code that was never linted (for example `docs-gate-report.mjs` and `test/docs-gate-report.test.mjs`) under `recommended` and `tseslint strict` with `--max-warnings 0`. The new import rule only needed `files: ['scripts/**/*.mjs']`, not removing the ignore for every rule. Run `npm run lint` to confirm these files come out clean; if they don't, the PR breaks the gate.
+
+Things I checked that are fine:
+- The 12 allowlist entries match the actual static `tests/` imports in `scripts/` exactly.
+- The "14 modules" count in `checks.md` is correct.
+- `posix` has no other uses in `checks.ts`, so dropping its import is safe.
+- ESLint 10 supports `regex` patterns in `no-restricted-imports`.

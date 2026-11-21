@@ -1,0 +1,20 @@
+I found one real defect and two minor issues. The rest of the change looks correct. I couldn't run anything: the sandbox refused both the test command and a one-line `git merge-tree` probe. So these findings come from reading the code and from what I know of git's source, not from test output.
+
+## Findings
+
+### 1. A conflicted merge that lists no files is treated as clean — `scripts/git_common.py:84-85`
+`conflicts()` treats exit code 1 plus a tree id on the first line as a conflict, then returns `lines[1:]`. git exits 1 whenever the merge is unclean. But some unclean merges, such as the path-level conflicts merge-ort reports only as messages, may leave no file with conflict stages. `--name-only` then prints nothing after the tree id. In that case `conflicts()` returns `[]`, which the docstring defines as "a clean merge," and `refuse_conflict` lets grade-prep go ahead on a head whose merge with main needs fixing by hand.
+
+The commit's own guarantee text describes this failure: "A conflict read as no files passes every caller's conflict check." Yet the code still produces it whenever git names no file. **Fix:** when the exit code is 1 and nothing follows the tree id, treat it as a conflict. Either raise, or rerun without `--no-messages` and report the CONFLICT messages instead of returning `[]`.
+
+### 2. A file name can come back in git's quoted form — `scripts/git_common.py:81`
+The command uses `--name-only` without `-z`. `core.quotePath=false` stops git quoting non-ASCII names, but git still quotes and escapes a name containing `"`, `\`, a tab or a newline. `conflicts()` would then return the escaped, quoted string rather than the real path. Today only the refusal message shows these names, but callers will read the documented return value as real paths. **Fix:** pass `-z` and split on `\0`.
+
+### 3. The "only behind main" test builds a diverged head — `scripts/test/test_check_receipt.py:303`
+`test_a_head_only_behind_origin_main_is_not_refused` points origin/main at `base + three.txt` while HEAD is `base + two.txt`. That makes HEAD diverged from main, not behind it. The test does show that a diverged head which merges cleanly is not refused. But the case the new module docstring promises ("A HEAD only behind main is not refused") is never tested. **Fix:** rename the test, or set origin/main to a descendant of HEAD.
+
+## Checked and fine
+- **Missing ref:** `merge-tree` exits 1 with nothing on stdout, because `help_unknown_ref` calls `exit(1)`. The tree-id check therefore correctly separates it from a conflict and raises `GitError`, which `main` turns into exit 64.
+- **Failed fetch:** both a fetch error and a timeout fall back to the local origin/main. If that ref doesn't exist, the command stops with an error instead of passing (exit 64).
+- **Mutation guarantees:** each `find:` string occurs exactly once, the named tests would kill both mutants, and every new id has a line in `guarantee_lenses.tsv`, in sorted order.
+- **Test fixture:** setting `refs/remotes/origin/main` in setUp doesn't change the existing tests, which pass `--since` or set the ref themselves.

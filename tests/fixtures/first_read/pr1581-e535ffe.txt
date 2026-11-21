@@ -1,0 +1,53 @@
+I found six problems in this change. None of them breaks a WP-48 done criterion, but each leaves a gap that would fail quietly. I couldn't run anything to confirm them: `node_modules` isn't installed, and a quick `sqlite3` test of how SQLite orders its unique-constraint checks needed approval I didn't have. Everything below comes from reading the code.
+
+### 1. The new v0.4.0 citations are pinned to v0.3.0 text
+**Files:** `src/core/schemas/run/reason-code.ts:24`, `src/core/schemas/run/terminal-evaluation.ts:22`, `src/runtime/terminal-evaluation-store-schema.ts:96`
+
+- These comments now cite "Runtime §33, v0.4.0" and "Runtime v0.4.0 §32".
+- All three files stay bound to slice `'002'` in `docs/runtime/citation-pins.yaml`, and that slice uses Runtime 0.3.0.
+- The pin generator reads only the slice binding, not the version written in the comment. So it hashes §32 and §33 from the v0.3.0 Runtime, which has no `effect` namespace or phase.
+- The only binding check (`runtime-citation-pins.test.ts`) only verifies that a file naming v0.3.0 is bound to a 0.3.0 slice. A file naming v0.4.0 is never checked.
+- **Result:** if v0.4.0 §32 or §33 changes (say, a code is added to or renamed in the `effect` list), `npm test` won't flag these files. That defeats the purpose of the pins.
+
+### 2. A PatchArtifact can be tombstoned
+**File:** `src/runtime/effect/workspace-effect-store.ts:151`
+
+- The Runtime calls the PatchArtifact immutable, and says recovery reads it and never re-plans it.
+- The new triggers protect only the `patch_artifacts` index row. The payload is an ordinary ArtifactStore artifact, so `artifacts.tombstone(ref)` and the blob sweep can still remove it.
+- The test at `workspace-effect-store.test.ts` "refuses to read a PatchArtifact whose payload is gone" tombstones one successfully.
+- **Result:** after that, recovery can't read the plan, and `patchArtifact()` throws `patch_artifact_unavailable`. The guarantee `workspace-effect-patch-artifact-immutable` claims more than it covers.
+
+### 3. `insertPatchArtifact` takes `projectId` from the caller
+**File:** `src/runtime/effect/workspace-effect-store.ts:128`
+
+- The PatchArtifact has no `projectId` field, and the store never checks the argument against the invocation's lease or its Run.
+- AGENTS.md §7 ("Derive identity inputs; do not accept them") forbids this pattern.
+- **Result:** a caller passing the wrong project files the artifact under another project, and nothing refuses it. The lease row already holds `projectId` for this `capabilityInvocationId`, so the store could read it from there.
+
+### 4. `patchArtifact()` trusts the payload it reads back
+**File:** `src/runtime/effect/workspace-effect-store.ts:155`
+
+- It casts `read.envelope.payload as PatchArtifact` without checking:
+  - that the artifact's kind or schema is `patch-artifact`;
+  - that its content hash matches the stored `content_hash`, even though the table holds that column for exactly this check;
+  - that the payload's `capabilityInvocationId` and `workspaceId` match the row.
+- **Result:** if the row points at the wrong or a replaced artifact, recovery gets some other Run's or other kind's data, typed as this invocation's plan.
+
+### 5. Lease refusal is identified from the error message (possible)
+**File:** `src/runtime/effect/workspace-effect-store.ts:73`
+
+- `refusedByLeaseIndex` treats any unique-constraint error whose message names `workspace_leases.workspace_id` as "another Run holds the Workspace".
+- An insert can conflict on the workspace index and on the `id` primary key or the `capability_invocation_id` key at the same time. Examples: the same invocation retrying, or a duplicate lease id while that lease is held.
+- I believe SQLite checks the most recently created index first, which here is the partial workspace index. If so, it reports `workspace_id`, and the store returns `{status:'unavailable'}` instead of rethrowing.
+- **Result:** a Run that already holds the lease would be told `effect.lease_unavailable`. The comment says the store can tell these cases apart, but no test covers a double conflict. Checking `heldLease(...).capabilityInvocationId` before returning `unavailable` would settle it.
+
+### 6. `targetPath` accepts absolute and parent-escaping paths (minor)
+**File:** `src/core/schemas/effect/workspace-effect.ts:161`
+
+- The schema only requires a non-empty string, so `/etc/x` or `../../x` passes validation and is stored.
+- The Runtime says `targetPath` is workspace-relative. Only the later write step's real-path check stops an escape, so the plan record can still claim a path outside the Workspace.
+
+### Process note
+- **File:** `docs/slices/slice-001/decisions/wp-35.yaml:88`
+- This rewrites WP-35's past decision (PR 1092) to describe migration 0004. WP-35's own record of making `unique (run_id)` explicit is lost, and WP-48's new choice isn't recorded as a WP-48 decision.
+- The ledger is the repo's ADR record, so this should be a new WP-48 entry instead.

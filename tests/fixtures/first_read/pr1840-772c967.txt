@@ -1,0 +1,34 @@
+I found five problems in this change: one real defect, two path-handling flaws in `graphPathIn`, and two smaller items. I didn't run anything, because `node_modules` isn't installed in this checkout, so the type check and the two new test files are unverified. Most likely first.
+
+### 1. The cancel-wait object is created fresh for every Run, and nothing else can reach it
+**`src/cli/slice-graph-path.ts:102`, called from `src/cli/composition-root.ts:215-233`**
+
+- **What happens:** each `startGraphProjection` call runs `composeSliceGraphPath`. That builds a new `EffectCheckpointWait`, along with new copies of the effect runtime, the Evidence builder, the result service and the gate.
+- **Why it matters:** `EffectCheckpointWait` keeps its list of waiting callers in memory on that one object, and its own docstring calls it "§26c.6's wait, for this process". This new object is handed only to the Run and isn't exposed on `EngineeringOs`. Recovery can't reach it either.
+- **Result:** no cancel or interrupt resolution in this process can register on the object the Run settles. A cancel arriving during the effect stage is refused with `effect_checkpoint_pending`, nothing waits to commit it, and `deps.waits.settle(run.id)` never has anything to settle.
+- **Fix:** build the wait (and the effect owners) once per process, e.g. alongside `composeDeterministicPath`, and expose it where the cancel and recovery paths can use it.
+- **Comment is wrong too:** `src/cli/slice-graph-projection-run.ts:51` says `run` returns "The effect path's owners, opened once per process", but the composition root rebuilds them on every call. The `effectsRunning` claim set stays correct because it is keyed by database.
+
+### 2. `..` in the argument is collapsed as text, which can bypass the symbolic-link check
+**`src/cli/graph-project.ts:357`**
+
+- `resolve(realpathSync(cwd), graphFile)` simplifies `..` segments as plain text before anything checks the filesystem.
+- Example: with `docs/link -> /elsewhere/dir`, the argument `docs/link/../g.yaml` means `/elsewhere/g.yaml` to the operating system. The command turns it into `docs/g.yaml` inside the checkout and projects that file.
+- So a path that goes through a symbolic link is neither refused nor read as written. That contradicts the docstring ("a symbolic link inside the argument stays for the read to refuse") and the §19.3 rule against reaching the YAML through a symbolic link.
+
+### 3. The same file is accepted or refused depending on how the path is typed
+**`src/cli/graph-project.ts:356-360`**
+
+- Only `cwd` is resolved to its real path. Running from a symlinked directory with a relative argument works, even though the file is then reached through a symbolic link.
+- Typing the same file as an absolute path through that symlinked prefix is refused as `outside-workspace`. On macOS, for example, `/tmp/...` against a root of `/private/tmp/...`. That is the wrong reason code, and the error says the file isn't in the checkout when it is.
+
+### 4. Duplicated code that should be shared (AGENTS.md §3)
+- `writeGraphProjectOutcome` (`src/cli/graph-project.ts:376-388`) is a line-for-line copy of `writeCiteFreshnessOutcome` (`src/cli/cite-freshness.ts:169-181`). Only the label differs.
+- `failureText` (`src/cli/graph-project.ts:365-369`) copies `cite-freshness.ts:126-130`.
+- The PR already moved the output readers into `deterministic-command-output.ts`, but left these two writers duplicated.
+- The worktree loop in the new `workspaceRoots` (`src/project/identity/workspace-identity.ts:665-679`) repeats the one in `attachedWorkspaces` (same file, from line 690) with different handling for unreadable checkouts.
+
+### 5. A missing working directory crashes instead of being refused (minor)
+**`src/cli/graph-project.ts:357`**
+
+`realpathSync(cwd)` throws a raw `ENOENT` when the working directory has been deleted. That error isn't in the command's refusal list, so it surfaces as an unhandled crash rather than a "did not report" message with exit 1.

@@ -1,0 +1,36 @@
+I found five issues in this change. I read the diff and the surrounding tests, but couldn't run anything: there is no `node_modules`, so I also couldn't check vitest's internals. The point that matters most is the first one: the change misses several integration tests, including some of the slowest.
+
+### 1. Explicit timeouts in integration files are now below the new 120s default (main issue)
+- **Where:** `tests/setup/integration-timeout.ts:5`, together with the existing overrides below.
+- **The problem:** `vi.setConfig` only changes the *default* timeout. A test or `describe` that passes its own `timeout` keeps it. Those overrides were added to raise the limit above the old 5s/30s default. Under this change they cut the limit below 120s instead:
+  - `tests/integration/cli-help.test.ts:7` sets 30s.
+  - `tests/integration/authored-graph-cli.test.ts:18` sets 30s.
+  - `tests/integration/init-cli.test.ts:44` sets 60s.
+  - `tests/integration/project-home-lease.test.ts:288`, `:328` and `:344` set 60s.
+  - `tests/integration/cite-freshness-command-policy.test.ts:21` sets 60s.
+  - `metrics-command.test.ts` and `cite-freshness-command.test.ts` define a 60s `COMMAND_TIMEOUT_MS`.
+- **Why it matters:** these are the tests that spawn the CLI and do the most git work. Under the "two gates" load from #1386 they will still time out at 30s or 60s. WP-24-D179's claim that "Files under tests/integration get 120s" is therefore false for them.
+- **Fix:** remove those overrides, or raise them to at least `INTEGRATION_TEST_TIMEOUT_MS`.
+
+### 2. The path check matches the absolute path, so it can catch the wrong files
+- **Where:** `tests/setup/integration-timeout.ts:5`.
+- **The problem:** `testPath` is absolute. If the checkout, a worktree, or a scratch copy used by mutation replay or red-proof sits anywhere under a directory containing `/tests/integration/`, every test gets 120s. The nested case also counts, e.g. `tests/tooling/x/tests/integration/`.
+- **Effect:** the guarantee that a hung unit test fails in 30s silently stops holding, and `tests/tooling/integration-timeout.test.ts` then fails.
+- **Fix:** compare the path relative to the vitest root, for example with `path.relative(config.root, testPath).startsWith('tests/integration/')`.
+
+### 3. Hook timeouts are not raised
+- **Where:** `tests/setup/integration-timeout.ts:5`.
+- **The problem:** only `testTimeout` changes. About 26 integration files use `beforeAll`/`beforeEach`, and many do heavy git work there, such as `materializeGitFixture()` in `orchestration-runtime`, `agent-runtime` and `mission-*`. Those hooks keep vitest's default `hookTimeout` of 10s, which is tighter than the old 30s test limit.
+- **Effect:** the slowdown #1386 describes (git spawns slowing as machine load rises) will still fail these files during setup. This predates the change, but the change claims to address that slowdown and leaves this path open.
+- **Fix:** set `hookTimeout` alongside `testTimeout` in the same `vi.setConfig` call.
+
+### 4. A command-line `--testTimeout` no longer applies to integration files (minor)
+- **Where:** `tests/setup/integration-timeout.ts:5`.
+- **The problem:** `vi.setConfig` overwrites whatever the command line supplied, so `vitest run --testTimeout=…` is ignored for every integration file.
+- **Effect:** the same flag still applies to other files, so `tests/tooling/integration-timeout.test.ts:6` fails under any non-default `--testTimeout`. A user trying to debug with a different timeout would see confusing behaviour.
+
+### 5. The decision entry's `affects` names its own WP (nit)
+- **Where:** `docs/slices/slice-001/decisions/wp-24.yaml:1080`.
+- **The problem:** `affects: [WP-24]` passes `verify-decisions.py` because that check only requires the list to be non-empty. Its documented rule (`/wp` step 6.2, `scripts/verify-decisions.py:375`) says `affects` should name the later WP that depends on the choice, not the entry's own WP. WP-24 is the WP that owns this ledger file, so the field records no real dependency.
+
+**Checked and fine:** WP-24-D01 is correctly marked superseded by D179. No D179 entry already exists in `codified/wp-24.yaml`, which runs only to D178. The `red-exempt` marker on the 30s test is justified.

@@ -1,0 +1,26 @@
+I found one problem that will fail CI. The rest are lower-severity gaps or latent bugs that today's inputs don't trigger.
+
+I couldn't run anything here: Python and `git -C` both need approval in this session, and this clone has none of the history the corpus reads (the freeze ref `188a7a0…` doesn't resolve). So `build_corpus.py check` and `scripts/test/test_slice_003_corpus.py` are unverified. What I did check by hand: the `build_corpus.py` condition logic against Runtime §26b.1 (condition order, prerequisites, verdict precedence, and the YAML 1.2 core reading), and the synthesized graphs against their bases by diff. I found no defect in either.
+
+## Bugs
+
+1. **New tests have neither a red proof nor an exemption — `scripts/test/test_slice_003_corpus.py:54` onward.** The commit carries no `Red-proof:` trailer, and no test has a `# engos: red-exempt -- <reason>` line above it. CI's "Red proof" step (`.github/workflows/ci.yml:436`, `scripts/check-red-proof.ts`) refuses any new unittest test that has neither, so this PR fails that step. Many of these tests check frozen committed data (coverage, refusals, outcomes, independence) and can't fail against a skeleton, so they need the exemption marker.
+
+## Lower-severity gaps and latent bugs
+
+2. **`check` doesn't use the freeze ref beyond confirming it exists — `build_corpus.py:401`.** It never checks that each `git:` source commit is on the freeze ref's first-parent history, or that it is the first commit holding that blob. A `corpus.yaml` entry pointing at a commit on a side branch would pass `check`. Only `CoverageTest` catches part of this, and it compares blobs only, never the commit.
+
+3. **The fixture name is the whole `generatedFrom` value, not its basename — `build_corpus.py:334`.** Acceptance §1 and the README both say the case is committed at `docs/slices/slice-900/<basename>`. If a `generatedFrom` ever held a directory (say `dir/graph.yaml`), `graphPath` would gain that directory. `generated-from-self` compares the full value against the last path segment, so an eligible case would fail it and be recorded wrongly. Today every value is a bare filename.
+
+4. **The synthesis helpers assume a fixed file layout — `build_corpus.py:303`, `:314`, `:277`.**
+   - `duplicate-edge-tuple` and `two-documents` drop `lines[-1]` and append. That assumes the file ends in LF and that `edges:` is the last top-level section; otherwise they delete real content or append into the wrong section.
+   - `_add_node` assumes the node list sits directly above `edges:`.
+   - When a pattern is missing, `synthesize` (`:363`) crashes with a `StopIteration` or `ValueError` traceback instead of adding to `errors`.
+
+   Both current bases fit these assumptions.
+
+5. **The test and the README disagree on what counts as a revision — `test_slice_003_corpus.py:102`.** `source_revisions` drops only a blob identical to the one just before it. The README and `corpus.yaml` define a revision as a *distinct* blob. If a revert brought back an earlier blob, the test would demand a second case that the stated rule forbids.
+
+6. **Misleading error for a path that isn't a repository — `build_corpus.py:84`.** If `--repo` doesn't point at a repository, `rev-parse` fails and prints nothing, so `clone_problems` says the clone is shallow and suggests `git fetch --unshallow`.
+
+7. **Nit — `build_corpus.py:249-251`.** `propagation_well_formed` is defined after `evaluate`, which uses it, with three blank lines before it. Moving it beside `items()` would read better.

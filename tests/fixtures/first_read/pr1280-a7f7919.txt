@@ -1,0 +1,32 @@
+I found one real bug and two minor issues in the change from `main` to `HEAD`. I read the code; I didn't run the tests or the gate.
+
+1. **Bug — a missing gate record is hidden (`src/reports/deterministic-run-report.ts:149`).** The report picks the gate with `gates.find(id === terminal.gateEvaluationId) ?? gates.at(-1)`. The fallback is meant only for a cancelled Run, which names no gate (issue #1204). It also kicks in when the Run's final evaluation names a gate that can't be read. The report then copies another gate's timings, or none, instead of failing with `record_unavailable`. The non-deterministic report path (`finalSnapshotId`, `run-report-service.ts:302`) treats the same situation as `record_contradictory`. The fix is to fall back only when `gateEvaluationId` is undefined.
+
+2. **Minor — the store's checks miss some bad input (`src/reports/run-report-store.ts:292`).** `validateTelemetry` never requires the `checker` stage, and it doesn't reject a null `deterministicStages` or a null stage. Saving `{ gate: {...} }` with no `checker` passes the checks and then crashes inside `stageFields` with a `TypeError`, not the store's usual `run_report_invalid` error. The null cases crash the same way.
+
+3. **Minor — a lost execution record drops the later stages (`src/reports/deterministic-run-report.ts:142`).** When the deterministic execution record can't be read, `stagesOf` returns just the checker stage and never looks at the gates. A gate can only exist after the execution ran, so for a Run cancelled after its gate was saved, this hides a lost record instead of reporting it.
+
+I also checked the new mutation guarantees against their tests, the per-file guarantee counts (4 and 6, under the cap of 10), and the restart test helper's cleanup; none of them had problems.
+
+## Findings reported through the findings tool
+
+### Cited-but-missing gate silently falls back to gates.at(-1)
+`src/reports/deterministic-run-report.ts:149` (important)
+
+The gate whose stage is copied is `gates.find(id === terminal.gateEvaluationId) ?? gates.at(-1)`. The fallback is meant only for a cancel, whose TerminalEvaluation cites no gate (issue #1204). But it also runs when the TerminalEvaluation does cite a gate that is not among the Run's GateEvaluations, which means the record is lost or contradictory. In that case the report quietly copies another gate's telemetry, or none. `occurrenceOf` catches this only for `succeed`, and `finalSnapshotId` in run-report-service.ts:302 treats the same situation as record_contradictory. The fallback should apply only when `terminal.gateEvaluationId === undefined`, and a cited id that cannot be found should fail the report.
+
+Failure scenario: A Run fails at phase gate with a FAIL GateEvaluation G, and its TerminalEvaluation cites G. If G's row is later unreadable, `gates` is [], so `gate` is undefined. The immutable RunReport then persists with no gate stage instead of failing with record_unavailable or record_contradictory (WP-39-D11). If an earlier gate row exists, its stage telemetry gets attributed to the cited gate.
+
+### Stage validation skips required checker and null entries
+`src/reports/run-report-store.ts:292` (nit)
+
+`validateTelemetry` only checks the stage entries that are present. It never requires `checker`, which `RunDeterministicStages` declares as required. It also never rejects a null `deterministicStages` or a null stage. `canonicalize` → `stageFields` then calls `measurement(checker)` or destructures null, which throws a TypeError rather than the store's `run_report_invalid` RunReportStoreError. Every other malformed telemetry field returns that error.
+
+Failure scenario: `ensureRunReport` is given `telemetrySummary: { evidenceCount: 0, transitionCount: 0, deterministicStages: { gate: { wallTimeMs: 1, gitSubprocessCount: 0 } } }`. Validation passes, and then `measurement(undefined)` throws `TypeError: Cannot read properties of undefined (reading 'wallTimeMs')`. `deterministicStages: null`, or `{ checker: null }` (which fails inside the validation loop), also throw TypeErrors instead of run_report_invalid.
+
+### Missing execution drops an existing gate's stage silently
+`src/reports/deterministic-run-report.ts:142` (nit)
+
+`stagesOf` returns right after the checker stage when the DeterministicExecution is undefined, before it looks at gates. A GateEvaluation can exist only after the execution ran. So a Run that holds a gate but whose execution cannot be read is a lost record, yet it reports only the checker stage. `deriveDeterministicReport` flags a missing execution only for PAST_IMPLEMENTATION phases, so a cancelled Run in this state passes unflagged.
+
+Failure scenario: A Run is cancelled after its gate persisted (phase user-cancel, issue #1204), and its DeterministicExecution row is then unreadable. The report persists `deterministicStages: { checker }` with no implementation, evidence or gate stage, and the failure stays hidden instead of surfacing as record_unavailable.

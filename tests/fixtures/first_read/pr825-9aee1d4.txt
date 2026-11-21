@@ -1,0 +1,39 @@
+I found two real defects, plus three smaller issues. I couldn't run the tests: the sandbox wanted approval for `.venv/bin/python`. Everything below comes from reading the diff and the code it calls.
+
+### 1. The guard pass accepts findings it should refuse, which can retire the guard early
+**`scripts/review_records.py:139-147`** (with `scripts/review_overlap.py:103-106`)
+
+The docs say a guard-pass finding is `guard: record only`, unless it is a proven miss recorded `fixed in <sha>, red <sha>` (review_records.py docstring, wp-ship 5.1). The checker doesn't enforce that. When `guard=True`, a finding that isn't `guard: record only` goes through the normal validation, so a guard pass also accepts:
+- `fixed in <sha>, red-exempt: <reason>`
+- `declined: …`
+- `issue #N`
+- `follow-up PR #N`
+
+`proven()` only counts a finding as a miss when it has a red commit (`fixed.group(2) is not None`). So a code-review-only P1 that gets fixed and recorded `fixed in abc1234, red-exempt: …` passes `check-pr`, but never counts as a miss and never restarts the run. The guard can then retire over a defect only `/code-review high` caught, which is the silent failure the new mutation set says it guards against.
+
+**Fix:** under a guard pass, allow only `GUARD` or a `FIXED` match whose red group is set, and refuse everything else.
+
+### 2. The escape ledger's review gate now counts record-only guard passes
+**`scripts/escape_ledger.py:170-182`** (a consumer the change didn't update)
+
+`gates()` and `passed()` still treat any `## Review passes` record at depth `high` or above as a passed review. After this change:
+- Only sampled PRs carry a pass at all.
+- That pass is "a record, never a review to act on."
+
+So the `review` and `both` rates now credit a review gate to the one PR in five whose review findings were deliberately never acted on, and show `none` for every other PR. The module docstring (lines 19-21) still describes the old meaning. Escape rates per gate become misleading and nothing flags it.
+
+**Fix:** exclude passes tagged `overlap-arm-2` from the review gate, or retire the `review` and `both` gates for PRs merged after the fold.
+
+### 3. Some skipped guards go unreported
+**`scripts/review_overlap.py:135-139`**
+
+`_graded_code` lists a sampled PR as missed only if it has a grade round that isn't `in-thread`, or a pass. But the guard applies to any change that isn't docs-only, and "docs-only" needs both `mode: in-thread` and every path being `*.md` or under `docs/`. A sampled PR graded in-thread that touches a non-docs path, and skipped the guard, is therefore neither compared nor listed as missed. That breaks the "listed as missed, never dropped" promise.
+
+### 4. In-flight sampled PRs will now fail `check-pr`
+**`scripts/review_records.py:495-497`**
+
+A pass tagged `overlap-arm-2` without `| claude-code <version>` is now refused. Any open sampled PR (number ≥ 816, divisible by 5) that recorded its pass under the old format fails `check-pr` on its next push or ready event, and nothing tells its author or offers a migration. This PR, #825, is itself a sampled number.
+
+### 5. Nits
+- **`scripts/review_overlap.py:34`**: the module docstring line starting "caught every one `/code-review high` caught. After retirement…" wasn't rewrapped and is far longer than the lines around it.
+- **`scripts/grader_canaries.py:443`**: `claude_code_version()` runs `claude --version` on every canary, dry runs included, even though a dry run otherwise avoids calling the CLI.

@@ -1,0 +1,37 @@
+I reviewed `main...HEAD` (one commit, `feat(wp-43.1)`) by reading the code. This checkout has no `node_modules` and my scratch scripts weren't approved, so I ran no tests. I spot-checked the new case map's test names, row values and `[fixture]` prefixes against the test sources, and the ones I checked matched. These are the problems I found, most important first.
+
+### 1. WP-43 reruns only WP-23's case map, so part of Slice 001's suite never reruns
+`src/cli/pre-completion-suite.ts:66` sets `reruns: [WP_23_PRE_COMPLETION]`.
+
+The Slice 002 Plan's Regression section for WP-43 requires the "Slice 001 pre-completion suite (Runtime §47.1 to §47.49, without §47.32) under the v0.3.0 build". WP-23's map (`docs/slices/slice-001/validation/runtime-47-case-map.yaml`) marks §47.39, §47.43 and §47.47 as `partial` with `owner: WP-24`. The rest of those three cases is proven only by `docs/slices/slice-001/validation/wp-24-case-map.yaml`.
+
+- **Failure:** under v0.3.0, a regression in a test that only WP-24's map names (for example the evaluator half of §47.43) leaves `wp-43-pre-completion` at `pass`. That is the Done criterion "Slice 001's pre-completion suite passes under the v0.3.0 build", so it gets reported as met when it isn't.
+- **Fix:** also rerun WP-24's map. Its only excluded case is §47.32, which the Plan already leaves out.
+- **Related:** WP-23's run also records the Slice 001 package verification. WP-43's run only runs Slice 002's verifier, so the Slice 001 package check isn't rerun either.
+
+### 2. The owner-map writer detector can miss real writes, so the check can pass silently
+`tests/helpers/owner-map.ts:216` (`findArtifactKindWriters`) counts a write only when one object literal has both `kind` and `schemaId` as plain `PropertyAssignment`s, and `kind` is the exact constant name or string literal. It misses:
+- shorthand `{ kind, schemaId, ... }`;
+- `{ ...base, kind: FINDING_SNAPSHOT_KIND }` where `schemaId` comes from the spread;
+- an aliased import (`import { FINDING_SNAPSHOT_KIND as K }`);
+- `kind: input.kind`.
+
+A second module writing a Slice 002 kind in any of these shapes isn't reported. Because the test only asserts that the named producer *is* found, it stays green. This is the ownership gate WP-43's Done criterion relies on, so a miss is a silent pass.
+
+In the other direction, a module that only recomputes a content hash from `{ kind, schemaId, ... }` would be flagged as a writer. `cite-freshness-result.ts:132` already does this, which is harmless today only because it's in the producer itself.
+
+### 3. The §47.53 `clone_incomplete` case is mapped under §47.52 and missing from §47.53
+`docs/slices/slice-002/validation/runtime-47-case-map.yaml:156` maps the test "a $clone clone fails capability.clone_incomplete" under `"47.52"` (Refusal path). Runtime §47.52 says a shallow or partial clone "is not a refusal: it fails … (§47.53)", and §47.53 lists `capability.clone_incomplete` as one of its own failure cases.
+
+The `"47.53"` entry (line 161) doesn't map this test, and its `partial` reason doesn't record the gap. So dropping or breaking the clone test wouldn't make §47.53 unmet. The test should be mapped under §47.53, or §47.53's reason should name the gap.
+
+### 4. The fixture claims to match the real manifest but doesn't, which hides a class of bug
+At `tests/helpers/pre-completion-suite.ts:110`, the comment says Slice 002 "shares the Architecture and the current Runtime with Slice 001, as the real manifest does". In the real `docs/manifest.yaml`, Slice 001 pins Runtime 0.2.11 (`runtime/history/runtime-spec-v0.2.11.md`), while Slice 002 uses the current 0.3.0.
+
+Because the fixture gives both slices the same Runtime document, `SLICE_002_HASHES.runtimeSpecContentHash` in `tests/integration/wp-43-pre-completion-suite.test.ts` equals Slice 001's. A recorder that took the Runtime identity from Slice 001's package would still pass. The fixture should give Slice 001 its own `runtime` pin, as the real manifest does.
+
+### 5. The helper-module filter checks path segments anywhere in the absolute path
+At `tests/architecture/pre-completion-case-maps.test.ts:67`, `valueSources` keeps an import when its absolute path contains a `helpers` segment and a `tests` segment anywhere. It doesn't check for an adjacent `tests/helpers` under the repo root. So a checkout under a directory named `tests` (for example a CI workspace) counts any `src/**/helpers/*` import as a row-value source. That loosens the rule the docstring states: "a src module's list is the code under test, not the test's table". Checking the repo-relative prefix `tests/helpers/` would fix it.
+
+### Minor
+- `docs/slices/slice-001/decisions/wp-43.yaml`: WP-43-D01 lists `WP-44` in its `basis` and D08 lists `WP-43`. These are affected work packages, not authority; they belong in `affects`.

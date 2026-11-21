@@ -94,8 +94,11 @@ FIELD = re.compile(rf'(?m)^({FIELD_NAMES}):[ \t]*(.*?)[ \t]*$')
 # A finding's line the merge prints into the block that `parse` would read as one of the block's fields.
 FIELD_LEAD = re.compile(rf'^({FIELD_NAMES}):')
 HEADING_LEAD = re.compile(r'^#')
-# A fence as `without_code` reads one: at the start of the line, closed by a line that starts with the same run.
+# A fence opener at the start of a line. `without_code` and the merge's printer close one at a line that starts with
+# the same run, which `parse` agrees with; a report's readers close one as `fence_after` says.
 FENCE = re.compile(r'^(`{3,}|~{3,})')
+# A suspect's fence may also open after `Output:` on its line, as in `Output: ```.
+OUTPUT_FENCE = re.compile(r'\bOutput:[ \t]*(`{3,}|~{3,})')
 SURFACE_REFUSED = 'a surface grade is not a pull request grade'
 LENS_HEADING = re.compile(r'(?m)^###[ \t]+(L\d+)\.')
 LENS_ID = re.compile(r'L\d+\b')
@@ -342,6 +345,16 @@ def is_run(command: str) -> bool:
     return False
 
 
+def fence_after(line: str, fence: str | None, output: bool = False) -> str | None:
+    """The fence still open after the stripped `line`, given `fence`, the one open before it. A fence opens at a line's
+    start, or with `output` after `Output:` on the line too, and closes only at a line that holds a run of its marker
+    at least as long and nothing else, as CommonMark has it, so a ```` ```python ```` line inside output is output."""
+    if fence:
+        return None if re.fullmatch(re.escape(fence[0]) + '{%d,}' % len(fence), line) else fence
+    opens = FENCE.match(line) or (OUTPUT_FENCE.search(line) if output else None)
+    return opens[1] if opens else None
+
+
 def _suspects(items: list[str]) -> list[dict]:
     """The `Suspects:` field's items as `id`, `number`, `verdict` (`proven`, `refuted`, `could not verify`, or None
     for a line naming none of them), `rank` (the first `P<n>` on the line, or None), `text` (the words after the
@@ -360,8 +373,14 @@ def _suspects(items: list[str]) -> list[dict]:
         for command, after in zip(found, found[1:] + [None]):
             span = item[command.end():after.start() if after else len(item)]
             said = OUTPUT.search(span)
-            lines = (said[1] if said else span).splitlines()
-            output = '\n'.join(line for line in lines if line.strip() and not FENCE.match(line.strip())).strip() or None
+            # A fence's opening and closing lines are not output, and every line between them is, as in read_report.
+            kept, fence = [], None
+            for line in (said[1] if said else span).splitlines():
+                after = fence_after(line.strip(), fence)
+                if line.strip() and bool(fence) == bool(after):
+                    kept.append(line)
+                fence = after
+            output = '\n'.join(kept).strip() or None
             runs.append({'command': command[1].strip().strip('`').strip(), 'output': output})
         rank = RANK.search(first)
         read.append({'id': f'S{int(head[1])}', 'number': int(head[1]),
@@ -391,24 +410,17 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
         depth = len(raw) - len(raw.lstrip())
         in_body = current is None and last_finding is not None
         body_line = raw.rstrip()[min(depth, finding_depth):]
-        opens = FENCE.match(line)
-        if in_body and (fence or opens):
+        if in_body and (fence or FENCE.match(line)):
             # Inside a finding's fence every line is its output, never a field or a finding. A fence left open
             # holds the rest of the report, so its lenses read unaccounted: the merge fails closed.
             last_finding['body'].append(body_line)
-            if not fence:
-                fence = opens[1]
-            elif line.startswith(fence):
-                fence = None
+            fence = fence_after(line, fence)
             continue
         joins_suspect = current == 'Suspects' and bool(fields[current]) and bool(line) and not SUSPECT.match(line)
-        if joins_suspect and (fence or opens):
+        if joins_suspect and (fence or fence_after(line, None, output=True)):
             # A suspect's output, fenced, is part of it, even a line shaped like a field.
             fields[current][-1] += '\n' + line
-            if not fence:
-                fence = opens[1]
-            elif line.startswith(fence):
-                fence = None
+            fence = fence_after(line, fence, output=True)
             continue
         if line.startswith('```'):
             continue
@@ -446,6 +458,10 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
         elif current and line:
             fields[current].append(line)
             indent = depth if indent is None else indent
+        if current == 'Suspects' and not fence and (SUSPECT.match(line) or field):
+            # A suspect's own line, or one written on the field's line, may open its output's fence after `Output:`,
+            # as `_suspects` reads it.
+            fence = fence_after(line, None, output=True)
     return {'fields': fields, 'findings': findings, 'suspects': _suspects(fields.get('Suspects', []))}
 
 

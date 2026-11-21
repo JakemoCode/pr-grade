@@ -52,6 +52,17 @@ class ScanCopyTest(Repo):
         self.assertTrue(link.is_symlink())
         self.assertEqual(link.resolve(), (self.repo / '.venv').resolve())
 
+    def test_the_dispatch_says_which_links_were_refused(self) -> None:
+        # A branch that changed a pin gets no link, and a scan told to install nothing should know why it is missing.
+        (self.repo / '.venv').mkdir()
+        (self.repo / '.git/info/exclude').write_text('.claude/\n.venv/\n')
+        self.configure(proofDir=[{'path': '.venv', 'pinnedBy': ['pyproject.toml'], 'install': 'uv sync'}])
+        (self.repo / 'pyproject.toml').write_text('[project]\nname = "x"\n')
+        git(self.repo, 'add', 'pyproject.toml')
+        git(self.repo, 'commit', '-q', '-m', 'pin')
+        line = self.dispatch(self.scan())
+        self.assertIn('not linked .venv: pins differ from the graded commit (pyproject.toml)', line)
+
     def test_scan_proof_copy_false_makes_no_copy_and_names_none(self) -> None:
         self.configure(scanProofCopy=False)
         out = self.scan()

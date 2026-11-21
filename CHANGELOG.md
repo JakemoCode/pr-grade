@@ -7,6 +7,24 @@
 
 Each entry says what changed, where, and why. Under it, **Before** is the old behavior and **Seen on** is the grade that exposed it.
 
+## 0.20.0
+
+- `skills/pr-grade/scripts/grade_mode.py`: added a proof copy for the first read. On `scan: yes`, `--scan` makes one with `proof_dir.make`, linked as a grader's copy is, names it and its scratch directory in the scan's dispatch line after the unchanged question, and records its root as `scan.json`'s `proof`, so the scan can run inputs without touching the author's checkout. A copy that cannot be made prints a `notice:` and the scan goes git-only.
+  - **Before:** the scan had no copy and ran nothing but git.
+  - **Seen on:** issue #89. On PR #73, across three scans each, the scan that ran inputs raised 7 of issue #75's nine and the git-only scan 5, at a median wall clock of 361 s against 366 s.
+- `agents/scan.md`: changed the run rule, so the scan may run a test, a script or an interpreter in the proof copy its prompt names and installs nothing there. In the repository it still runs nothing but git, and with no copy named, as a 0.19.0 `grade_mode.py` dispatches it, it runs nothing but git anywhere.
+  - **Before:** the scan ran nothing but git, wherever it was.
+  - **Seen on:** issue #89, where the two findings the git-only scan missed were the two reached by running an input.
+- `skills/pr-grade/scripts/grade_prep.py`: changed the `remove:` line to name the scan's copy after the graders' root when `scan.json` holds one, to remove it with the grade's other copies once the attach has run.
+  - **Before:** the `remove:` line named one root.
+  - **Seen on:** issue #89.
+- `skills/pr-grade/scripts/proof_dir.py`: changed `remove` to take several roots, removing each it can and exiting non-zero naming the ones it refused, so one `remove:` line covers the graders' copies and the scan's.
+  - **Before:** `remove` took one root.
+  - **Seen on:** issue #89.
+- `skills/pr-grade/templates/pr-grade.json`: added `"scanProofCopy": true`, the key that turns the scan's copy off, so the template still shows every key. `false` keeps the 0.19.0 git-only scan, and anything but true or false stops `--scan`.
+  - **Before:** nothing configured the scan's copy.
+  - **Seen on:** issue #89.
+
 ## 0.19.0
 
 - `agents/grade.md`: added the `Suspects from a first read:` hand-off and a `Suspects:` report field, with one line per suspect as `proven`, `refuted` with a `Command:` and its `Output:`, or `could not verify` with a rank. A dropped suspicion of the grader's own is now closed by a run or listed, never argued away.

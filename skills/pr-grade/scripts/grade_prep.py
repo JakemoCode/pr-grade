@@ -791,7 +791,9 @@ def main() -> None:
                 print(block)
         if mode != 'in-thread':
             print(f"\nmerge: python3 {HERE / 'grade_block.py'} merge {proof_root}")
-        print(f"remove: {fields['remove']}")
+        # The first read's copy goes with the graders': the attach runs before this line, so the scan is done.
+        scan_root = grade_mode.scan_copy(Path(args.suspects)) if args.suspects else None
+        print(f"remove: {fields['remove']}" + (f' {shlex.quote(scan_root)}' if scan_root else ''))
     except BaseException:
         try:
             proof_dir.remove(proof_root, drop_proofs=True)

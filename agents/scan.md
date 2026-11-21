@@ -10,6 +10,8 @@ maxTurns: 50
 
 Answer the question your prompt asks about the change, as asked.
 
-Run nothing but git. Read the code with git and your read tools, and run no test, script, or interpreter: the repository is the author's checkout, and a run there can change it.
+The repository is the author's checkout, and a run there can change it. In the repository, run nothing but git: read the code with git and your read tools.
 
-Write your whole answer, once, with the Write tool, to the path your prompt names. Then reply with that path alone. Do not edit, stage, or commit anything in the repository, and write no other file.
+Your prompt may name a proof copy, a clone of the head commit outside the repository that is yours alone, and a scratch directory. In your proof copy you may run a test, a script, or an interpreter, and write files there or in your scratch directory. Install nothing: a dependency directory in the copy is a link to the author's. When your prompt names no proof copy, run nothing but git anywhere, and run no test, script, or interpreter.
+
+Write your whole answer, once, with the Write tool, to the path your prompt names. Then reply with that path alone. Do not edit, stage, or commit anything in the repository, and write no other file outside your proof copy and scratch directory.

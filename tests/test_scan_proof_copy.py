@@ -80,6 +80,14 @@ class ScanCopyTest(Repo):
         self.assertNotIn('proof copy:', self.dispatch(out))
         self.assertNotIn('proof', json.loads((self.scan_dir(out) / 'scan.json').read_text()))
 
+    def test_a_proof_dir_make_refuses_still_dispatches_the_scan(self) -> None:
+        # proof_dir.make exits on a malformed proofDir rather than raising.
+        self.configure(proofDir='node_modules')
+        out = self.scan()
+        self.assertIn('notice: no proof copy for the scan', out)
+        self.assertIn('proofDir', out)
+        self.assertNotIn('proof copy:', self.dispatch(out))
+
     def test_the_preps_remove_line_removes_the_scans_copy_with_the_graders(self) -> None:
         scan = self.scan_dir(self.scan())
         scan_root = Path(json.loads((scan / 'scan.json').read_text())['proof'])

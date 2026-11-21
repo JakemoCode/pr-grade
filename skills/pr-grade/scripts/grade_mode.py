@@ -36,13 +36,16 @@ HEAD, with lock files and each `--exclude-path` prefix left out, a binary file c
 by its edits. A round is round 1 when the commit it starts from is a commit of `--branch-base` (default origin/main,
 else a local main or master, else `--base`), or the commit where HEAD left that branch's local copy, so a local main
 ahead of a stale origin/main is still round 1. Any other start is a re-grade. A `--branch-base` git cannot read stops
-the run. On a yes it makes a directory for the report and prints the scan's
-prompt and the `--suspects <dir>` to pass the prep.
+the run. On a yes it makes a directory for the report, and a proof copy of the head for the scan to run inputs in, with
+the dependency links a grader's copy gets, and prints the scan's prompt, naming the copy, and the `--suspects <dir>` to
+pass the prep. The prep's `remove:` line removes that copy with the graders'. `scanProofCopy: false` makes no copy, and
+the scan reads with git alone. A copy that cannot be made gets a `notice:` line, and the scan goes without one.
 """
 from __future__ import annotations
 
 import argparse
 import fnmatch
+import importlib.util
 import json
 import posixpath
 import re
@@ -70,6 +73,8 @@ DEFAULTS = {
 LOCKS = ('package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lock', 'bun.lockb',
          'poetry.lock', 'uv.lock', 'Pipfile.lock', 'Cargo.lock', 'go.sum', 'composer.lock', 'Gemfile.lock')
 SCAN_ABOVE = 150
+# Whether the scan gets a proof copy to run inputs in; `scanProofCopy: false` keeps it git-only, as in 0.19.0.
+SCAN_PROOF_COPY = True
 # The prompt the scan-then-proof test gave Opus, word for word: anything added to it is untested.
 SCAN_PROMPT = ('Review the change between {base} and {head} in this repository. Use git to read it. Report every bug or '
                'defect you find in the changed code, giving the file path and line for each.')
@@ -255,6 +260,23 @@ def scan_above(config: dict) -> int | None:
     return value
 
 
+def scan_proof_copy(config: dict) -> bool:
+    """`scanProofCopy` from the config. Anything but true or false stops the run, as a mistyped `scanAbove` does."""
+    value = config.get('scanProofCopy', SCAN_PROOF_COPY)
+    if not isinstance(value, bool):
+        sys.exit(f'scanProofCopy in {CONFIG} must be true or false, not {json.dumps(value)}')
+    return value
+
+
+def proof_copies():
+    """proof_dir.py, loaded by path when a scan needs a copy. It loads this file, so it cannot load at the top."""
+    spec = importlib.util.spec_from_file_location('_pr_grade_proof_dir', Path(__file__).resolve().parent / 'proof_dir.py')
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def graded_lines(root: Path, fork: str, head: str, kept: tuple[str, ...] = ()) -> int:
     """Additions plus deletions from `fork` to `head`, as the graders' diff holds them: lock files and the `kept`
     prefixes left out, a binary file counted as none, and a rename counted by its edits alone."""
@@ -287,6 +309,15 @@ def scanned_head(where: Path) -> str | None:
     except (OSError, ValueError, AttributeError):
         return None
     return head if isinstance(head, str) else None
+
+
+def scan_copy(where: Path) -> str | None:
+    """The root of the scan's proof copy `scan.json` names, or None when it names none, as a 0.19.0 one never does."""
+    try:
+        root = json.loads((where / 'scan.json').read_text()).get('proof')
+    except (OSError, ValueError, AttributeError):
+        return None
+    return root if isinstance(root, str) else None
 
 
 def round_one(root: Path, fork: str, branch_base: str) -> bool:
@@ -341,14 +372,30 @@ def scan(root: Path, base: str, branch_base: str, config: dict, kept: tuple[str,
         sys.exit('grade_mode: the change has uncommitted edits. The scan and the graders see commits only; commit, '
                  'then run this again.')
     yes, why, fork = scan_decision(root, base, branch_base, config, kept)
+    copying = scan_proof_copy(config)
     print(f"scan: {'yes' if yes else 'no'} ({why})")
     if not yes:
         return
     head = _git(root, 'rev-parse', 'HEAD').strip()
     where = Path(tempfile.mkdtemp(prefix='pr-grade-scan-'))
-    (where / 'scan.json').write_text(json.dumps({'repository': str(root), 'base': fork, 'head': head}) + '\n')
+    record = {'repository': str(root), 'base': fork, 'head': head}
+    line = SCAN_PROMPT.format(base=fork, head=head) + f' Write the report to {where / SCAN_REPORT} with the Write tool.'
+    if copying:
+        # A grader's copy, linked the same way, under a root of its own that the prep's remove: line also removes.
+        try:
+            made = proof_copies().make(root, head, ['scan'], config, Path(tempfile.gettempdir()), since=fork)
+        except (subprocess.CalledProcessError, OSError, SystemExit) as failed:
+            # A scan with no copy still reads; the grade never waits on a copy. A malformed proofDir exits in make.
+            why = str(getattr(failed, 'stderr', None) or getattr(failed, 'code', None) or failed).strip()
+            print(f'notice: no proof copy for the scan, so it reads with git alone: {why}')
+        else:
+            fields = dict(made_line.split(': ', 1) for made_line in made if ': ' in made_line)
+            record['proof'] = fields['root']
+            line += (f" Your proof copy: {fields['copy scan']} (a clone of {head} outside the repository, yours alone)."
+                     f" Your scratch directory: {fields['scratch scan']}.")
+    (where / 'scan.json').write_text(json.dumps(record) + '\n')
     print('Dispatch one pr-grade:scan agent now, with this line as its prompt, unchanged:')
-    print(SCAN_PROMPT.format(base=fork, head=head) + f' Write the report to {where / SCAN_REPORT} with the Write tool.')
+    print(line)
     print('Then run the prep while it reads, with this option added:')
     print(f'--suspects {where}')
 

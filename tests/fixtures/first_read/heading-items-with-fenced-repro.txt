@@ -1,0 +1,23 @@
+One real problem and one missing note. The test suite was not run.
+
+### 1. The date filter drops the whole last day of a range: `src/reports/date_range.ts:73-75`
+
+```ts
+const end = new Date(`${range.to}T00:00:00Z`);
+rows = rows.filter((row) => row.createdAt < end);
+```
+
+`to` is a calendar day, but the filter treats it as midnight at the start of that day, so every row created on `to` itself is left out.
+
+- `from=2026-03-01&to=2026-03-31`: no row from 31 March appears.
+- `from=2026-03-31&to=2026-03-31`: the report is empty.
+
+A month-end report silently loses its busiest day.
+
+### 2. `date_range.ts` is over the size limit with no plan to split it: `src/reports/date_range.ts:1`
+
+It is now 410 lines, past the 400 the contributing guide allows, and nothing records why.
+
+### No problem found
+- **Empty range:** `to` before `from` is refused with a message.
+- **One-day range on a timezone boundary:** handled by the UTC parse.

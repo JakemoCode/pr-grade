@@ -1,0 +1,25 @@
+Four problems, the last two small.
+
+## 1. Tax is charged on the undiscounted price
+**Where:** `src/orders/pricing.py:77` and `src/orders/pricing.py:91`
+
+`total()` now applies tax to the list price and takes the discount off at the end. On 100 with a 10 discount at 20% tax the customer pays 110, not 108.
+
+The suite misses it because its one discount case uses a zero tax rate.
+
+## 2. Yesterday's coupons still work today
+**Where:** `src/orders/coupons.py:22`
+
+`expires >= today` compares a date with a datetime, which lets a coupon that lapsed at midnight run until the day ends.
+
+## 3. Small: `discount_reason` is missing from most exported rows
+**Where:** `src/orders/pricing.py:104`
+
+It is written only when a coupon applies, so the JSON rows carry different keys, and the report reading them has to fall back with `.get`.
+
+## 4. Small: cents are rounded at two levels
+**Where:** `src/orders/pricing.py:80` and `src/orders/pricing.py:95`
+
+- Line totals are rounded.
+- The order total is rounded again after the sum.
+- On big orders that can leave the shop's invoice one cent off the payment provider's.

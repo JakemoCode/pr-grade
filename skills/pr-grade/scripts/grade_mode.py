@@ -2,6 +2,7 @@
 """How /pr-grade runs over a branch: in the author's thread, in one subagent, or fanned out by lens group.
 
     python3 grade_mode.py [--base origin/main]
+    python3 grade_mode.py --scan [--base origin/main] [--branch-base REF] [--exclude-path PREFIX ...]
 
 Run it from inside the repository being graded. It reads `.claude/pr-grade.json` there when present
 (every key optional, defaults below) and prints the mode, the code file count, and each silent-failure
@@ -25,6 +26,18 @@ name in every folder under docs/.
 Patterns are fnmatch globs. One with a `/` matches the whole path, and its `*` crosses directories;
 one without matches the file name. The branch's files include uncommitted and untracked work. Both
 sides of a rename count, so a rename can raise the mode but never lowers it.
+
+`--scan` also says whether a first read runs before the graders: one `pr-grade:scan` agent, Opus with a bare question
+and no lenses, whose report grade_prep.py hands one grader as numbered suspects. It prints `scan: yes` or `scan: no`
+with the reason. A first read runs in round 1 of a `subagent` or `fan-out` grade with prompt files, on a change of
+more than `scanAbove` changed lines (default 150; `false` turns it off, and 0 scans every change). Changed lines are
+the additions plus the deletions in the diff the graders read: committed, from where the branch left `--base` to
+HEAD, with lock files and each `--exclude-path` prefix left out, a binary file counted as none, and a rename counted
+by its edits. A round is round 1 when the commit it starts from is a commit of `--branch-base` (default origin/main,
+else a local main or master, else `--base`), or the commit where HEAD left that branch's local copy, so a local main
+ahead of a stale origin/main is still round 1. Any other start is a re-grade. A `--branch-base` git cannot read stops
+the run. On a yes it makes a directory for the report and prints the scan's
+prompt and the `--suspects <dir>` to pass the prep.
 """
 from __future__ import annotations
 
@@ -35,6 +48,7 @@ import posixpath
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 MODES = ('in-thread', 'subagent', 'fan-out')
@@ -53,6 +67,14 @@ DEFAULTS = {
     'notCode': ['*.md', 'docs/*', 'LICENSE', 'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '*.lock', 'go.sum'],
     'countAsCode': [],
 }
+LOCKS = ('package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lock', 'bun.lockb',
+         'poetry.lock', 'uv.lock', 'Pipfile.lock', 'Cargo.lock', 'go.sum', 'composer.lock', 'Gemfile.lock')
+SCAN_ABOVE = 150
+# The prompt the scan-then-proof test gave Opus, word for word: anything added to it is untested.
+SCAN_PROMPT = ('Review the change between {base} and {head} in this repository. Use git to read it. Report every bug or '
+               'defect you find in the changed code, giving the file path and line for each.')
+# Claude Code refuses a subagent's Write to report*.md, summary*.md, findings*.md and analysis*.md.
+SCAN_REPORT = 'first-read.md'
 # A string where a list belongs is read one character at a time, and a lone `*` matches every file:
 # under `ordinary` that grades everything in-thread.
 LIST_KEYS = ('silent', 'ordinary', 'tests', 'notCode', 'countAsCode')
@@ -222,9 +244,123 @@ def changed_lines(base: str, root: Path, head: str | None = None) -> dict[str, l
     return ranges
 
 
+def scan_above(config: dict) -> int | None:
+    """`scanAbove` from the config: a count of changed lines, or None when it is false. Anything else stops the run,
+    since `"150"` or `true` read as a count would scan by a rule nobody wrote."""
+    value = config.get('scanAbove', SCAN_ABOVE)
+    if value is False:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        sys.exit(f'scanAbove in {CONFIG} must be false or a whole number of changed lines, not {json.dumps(value)}')
+    return value
+
+
+def graded_lines(root: Path, fork: str, head: str, kept: tuple[str, ...] = ()) -> int:
+    """Additions plus deletions from `fork` to `head`, as the graders' diff holds them: lock files and the `kept`
+    prefixes left out, a binary file counted as none, and a rename counted by its edits alone."""
+    tokens = _git(root, '-c', 'core.quotePath=false', 'diff', '--numstat', '-z', '--find-renames', fork, head).split('\0')
+    total, at = 0, 0
+    while at < len(tokens):
+        added, deleted, path = (tokens[at].split('\t', 2) + ['', '', ''])[:3]
+        # A rename's record leaves its path empty, and the old and new paths follow as tokens of their own.
+        paths = [path] if path else tokens[at + 1:at + 3]
+        at += 1 if path else 3
+        if not added or added == '-' or any(posixpath.basename(p) in LOCKS or p.startswith(kept) for p in paths):
+            continue
+        total += int(added) + int(deleted)
+    return total
+
+
+def default_branch_base(root: Path, base: str) -> str:
+    """Where the whole branch began, when no `--branch-base` is given: origin/main, else a local main or master, else
+    `base`. The scan and the prep both read it, so they agree on the round."""
+    for ref in ('refs/remotes/origin/main', 'refs/heads/main', 'refs/heads/master'):
+        if subprocess.run(['git', 'show-ref', '--verify', '--quiet', ref], cwd=root).returncode == 0:
+            return ref.split('/', 2)[2]
+    return base
+
+
+def scanned_head(where: Path) -> str | None:
+    """The head `scan.json` in a scan's directory names, or None when the file is missing or holds no head."""
+    try:
+        head = json.loads((where / 'scan.json').read_text()).get('head')
+    except (OSError, ValueError, AttributeError):
+        return None
+    return head if isinstance(head, str) else None
+
+
+def round_one(root: Path, fork: str, branch_base: str) -> bool:
+    """Whether the round starting at `fork` is the branch's first. A re-grade starts at the last commit graded, which is
+    on the branch, however it is written: a SHA, `topic~1`, or the pushed `origin/topic`. So round 1 is a fork that is a
+    commit of `branch_base`, or the very commit where HEAD left the local branch of the same name, such as a local main
+    a fetch has not yet brought origin/main up to. Any later commit of that branch is a re-grade's, including one on
+    HEAD when the work is on that local branch itself. A `branch_base` git cannot read stops the run: it says nothing
+    about the round."""
+    on_main = subprocess.run(['git', 'merge-base', '--is-ancestor', fork, branch_base], cwd=root, capture_output=True,
+                             text=True)
+    if on_main.returncode not in (0, 1):
+        sys.exit(f'grade_mode: cannot tell a re-grade from round 1 against --branch-base {branch_base}: '
+                 f'{on_main.stderr.strip()}')
+    if on_main.returncode == 0:
+        return True
+    # origin/main's local branch is main: the exact ref, so no revision suffix can stand in for it.
+    local = f"refs/heads/{branch_base.split('/', 1)[1]}" if '/' in branch_base else None
+    if not local or subprocess.run(['git', 'show-ref', '--verify', '--quiet', local], cwd=root).returncode != 0:
+        return False
+    return fork == _git(root, 'merge-base', local, 'HEAD').strip()
+
+
+def scan_decision(root: Path, base: str, branch_base: str, config: dict,
+                  kept: tuple[str, ...] = ()) -> tuple[bool, str, str]:
+    """Whether a first read runs before this round's graders, why, as `--scan` prints it, and where HEAD left `base`.
+    The tree is clean, so the committed files are the change."""
+    fork = _git(root, 'merge-base', base, 'HEAD').strip()
+    above = scan_above(config)
+    if above is None:
+        return False, f'scanAbove is false in {CONFIG}', fork
+    committed = [path for path in _git(root, '-c', 'core.quotePath=false', 'diff', '--name-only', '--no-renames', fork,
+                                       'HEAD').split('\n') if path]
+    mode = assess(committed, root, config)[0]
+    if mode == MODES[0]:
+        return False, 'an in-thread grade', fork
+    if config.get('promptFiles', True) is False:
+        return False, 'promptFiles is false, and the first read reaches a grader only through its prompt file', fork
+    if not round_one(root, fork, branch_base):
+        return False, f'a re-grade: {base} is after where the branch left {branch_base}', fork
+    lines = graded_lines(root, fork, 'HEAD', kept)
+    if above == 0:
+        return True, f'{lines} changed lines, scanAbove 0 scans every change, in round 1 of a {mode} grade', fork
+    if lines <= above:
+        return False, f'{lines} changed lines, not over scanAbove {above}', fork
+    return True, f'{lines} changed lines, over scanAbove {above}, in round 1 of a {mode} grade', fork
+
+
+def scan(root: Path, base: str, branch_base: str, config: dict, kept: tuple[str, ...]) -> None:
+    """Print the decision. On a yes, make the report's directory and print the scan's prompt and the prep's option."""
+    if _git(root, 'status', '--porcelain', '--untracked-files=no').strip():
+        sys.exit('grade_mode: the change has uncommitted edits. The scan and the graders see commits only; commit, '
+                 'then run this again.')
+    yes, why, fork = scan_decision(root, base, branch_base, config, kept)
+    print(f"scan: {'yes' if yes else 'no'} ({why})")
+    if not yes:
+        return
+    head = _git(root, 'rev-parse', 'HEAD').strip()
+    where = Path(tempfile.mkdtemp(prefix='pr-grade-scan-'))
+    (where / 'scan.json').write_text(json.dumps({'repository': str(root), 'base': fork, 'head': head}) + '\n')
+    print('Dispatch one pr-grade:scan agent now, with this line as its prompt, unchanged:')
+    print(SCAN_PROMPT.format(base=fork, head=head) + f' Write the report to {where / SCAN_REPORT} with the Write tool.')
+    print('Then run the prep while it reads, with this option added:')
+    print(f'--suspects {where}')
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--base', default='origin/main')
+    ap.add_argument('--scan', action='store_true', help='also say whether a first read runs, and print its dispatch')
+    ap.add_argument('--branch-base', help='where the whole branch began, to tell a re-grade from round 1 '
+                                           '(default origin/main, else a local main or master, else --base)')
+    ap.add_argument('--exclude-path', action='append', default=[], metavar='PREFIX',
+                    help='leave paths starting with PREFIX out of the changed lines, as the prep does; repeats')
     args = ap.parse_args()
     root = repo_root()
     config = load_config(root)
@@ -240,6 +376,9 @@ def main() -> None:
     print('silent-failure and unclassified files:' if reasons else 'silent-failure and unclassified files: none')
     for path, reason in sorted(reasons.items()):
         print(f'  {path}: {reason}')
+    if args.scan:
+        branch_base = args.branch_base or default_branch_base(root, args.base)
+        scan(root, args.base, branch_base, config, tuple(args.exclude_path))
 
 
 if __name__ == '__main__':

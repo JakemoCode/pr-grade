@@ -7,6 +7,39 @@
 
 Each entry says what changed, where, and why. Under it, **Before** is the old behavior and **Seen on** is the grade that exposed it.
 
+## 0.19.0
+
+- `agents/grade.md`: added the `Suspects from a first read:` hand-off and a `Suspects:` report field, with one line per suspect as `proven`, `refuted` with a `Command:` and its `Output:`, or `could not verify` with a rank. A dropped suspicion of the grader's own is now closed by a run or listed, never argued away.
+  - **Before:** suspects reached a grader as free text, and it wrote them up in whatever shape it chose, including "refuted ... Not run as a test".
+  - **Seen on:** the scan-then-proof test, ForgeSmith-OS PR 1435.
+- `skills/pr-grade/scripts/grade_block.py`: added `Suspects:` to `read_report` and a check to `merge`. A refutation whose commands run no code, each with its own output, moves to `Could not verify`. A handed suspect with no line, or a proven one naming no finding, stays on the list left to the coordinator.
+  - **Before:** nothing read the suspects a grader answered, so an argued-away suspect closed silently.
+  - **Seen on:** the scan-then-proof test, ForgeSmith-OS PR 1435.
+- `skills/pr-grade/scoring.md`: added to section 5 what the merge prints for each kind of suspect line, and what the coordinator does with each.
+  - **Before:** section 5 had no rule for suspects.
+  - **Seen on:** the scan-then-proof test, ForgeSmith-OS PR 910, whose proven suspect was ranked P3 for a reason about today's callers.
+- `agents/scan.md`: added the first read, an Opus agent at effort `high` with 50 turns, no `CLAUDE.md` and no lens or skill text, given the scan-then-proof test's bare prompt and told to run nothing but git and to write its report to one file, to put an Opus reading of a large change in front of the graders.
+  - **Before:** only the Sonnet graders read a change, and on 27 recorded escapes the grader alone expects 8.3 catches a pass.
+  - **Seen on:** the scan-then-proof test, where the read then the grader proved 13 of the 27 at P2 or higher.
+- `skills/pr-grade/scripts/grade_mode.py`: added `--scan`, which prints `scan: yes` or `scan: no` with its reason, from the mode, the round and `scanAbove` (default 150 changed lines), and on a yes prints the scan's prompt and the prep's `--suspects <dir>`, to start the scan before the prep with no judgment left to the coordinator.
+  - **Before:** there was no first read to decide.
+  - **Seen on:** ForgeSmith-OS's escape ledger, where changes over 150 lines are 35% of graded changes and 60% of escapes.
+- `skills/pr-grade/scripts/grade_prep.py`: added `--suspects <dir>`, which holds back the prompt file and dispatch line of the grader holding L9, and `--attach <proof root>`, which numbers the scan's report into that file as `S1`, `S2` and on, writes `grade.json`'s `suspects` count, and prints the line, to keep every grader waiting on no other and the coordinator from typing the report. A report with no numbered items goes whole as `S1` with a `notice:`. With no report, the grader goes with no suspects and `grade.json`'s `firstRead` says the first read did not run.
+  - **Before:** nothing wrote the `Suspects from a first read:` section or `grade.json`'s `suspects`.
+  - **Seen on:** PR #85's round 1, P3 L15.
+- `skills/pr-grade/scripts/grade_block.py`: added a `first read:` line to `merge`, from `grade.json`'s `firstRead`, to show in every grade whether the first read ran.
+  - **Before:** a grade had no first read to report.
+  - **Seen on:** the brief for this release, which requires a scan that fails never to block a grade and never to pass unreported.
+- `SKILL.md`: changed section 2 to run `grade_mode.py --scan` first, dispatch the scan with the line it prints, add `--suspects` to the prep, and run the `attach:` line before the withheld grader.
+  - **Before:** section 2 began with the prep.
+  - **Seen on:** the scan-then-proof test.
+- `skills/pr-grade/scripts/grade_prep.py`: changed the default `--branch-base` to origin/main, else a local main or master, else `--base`, the same default `grade_mode.py --scan` reads, to keep a re-grade's Mode and its scan decision on the whole branch in a repository with no origin/main. `fix-and-regrade.md` says so.
+  - **Before:** with no origin/main the branch base was `--base`, so a re-grade's block kept only the fix commits' mode.
+  - **Seen on:** this release's grade, round 1, P3 L8.
+- `skills/pr-grade/templates/pr-grade.json`: added `"scanAbove": 150`, so that the template still shows every key.
+  - **Before:** the template had no key for the first read.
+  - **Seen on:** the scan-then-proof test.
+
 ## 0.18.0
 
 - `grade_prep.py`: added prompt files, one `<proof root>/<group>/prompt.md` per grader holding its shared block and its own block, with one printed line per grader naming the file in place of the blocks, so that the coordinator passes a line as the Agent prompt instead of retyping the blocks. `"promptFiles": false` prints the blocks as before.

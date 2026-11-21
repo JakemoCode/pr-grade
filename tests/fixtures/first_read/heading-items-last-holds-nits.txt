@@ -1,0 +1,19 @@
+Four findings and a set of nits on the change to the supplier sync.
+
+### 1. Bad supplier rows now get through and replace good prices
+The new validator checks that `price` parses as a number. A negative price parses, so a supplier file with `-1.00` replaces the stored price.
+
+The old check refused anything below zero. The new one dropped that clause when it moved to the shared validator.
+
+### 2. The sync's summary counts skipped rows as updated
+`tools/supplier_sync.py:140` adds every row it reads to `updated`, including the ones the validator refused.
+
+### 3. Some refused rows go unreported
+A row refused for a missing SKU is dropped before the report is built, so the report says nothing about it.
+
+### 4. In-flight syncs will now fail the schema check
+The schema gained a required `currency` column, and a sync started before the deploy still writes rows without it.
+
+### 5. Nits
+- **`tools/supplier_sync.py:34`**: the module docstring still names the old file format.
+- **`tools/supplier_sync.py:210`**: the HTTP client is built on every row, which is slow.

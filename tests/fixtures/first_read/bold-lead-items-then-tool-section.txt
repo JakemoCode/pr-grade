@@ -1,0 +1,26 @@
+Three problems turned up: a real one and two small ones. This is from reading alone; nothing was executed.
+
+1. **Bug: a partial refund closes an order whose other lines are unshipped (`src/orders/refund.py:64`).** `close_if_settled` asks whether refunded plus shipped equals paid. Refund one line in part and another in full, and the sums can match while a third line still waits in the warehouse. The order closes, and that line never gets picked.
+
+2. **Small: the export renames a column the importer still expects (`tools/export_csv.py:12`).** `qty_on_hand` became `on_hand` on the way out. `tools/import_csv.py` reads the old name, so exporting and importing again loses the column.
+
+3. **Small: a refund line can be counted twice (`src/orders/refund.py:71`).** The payment webhook retries on a slow reply. Each retry adds the refund amount again, since the handler keeps no record of the refund ids it has seen.
+
+The new migration and both edited tests looked right to me.
+
+## Findings filed with the tool
+
+### Partial refunds close orders early
+`src/orders/refund.py:64` (important)
+
+Comparing sums is not the same as asking whether each line is settled.
+
+### Export column renamed
+`tools/export_csv.py:12` (nit)
+
+The importer reads a header the exporter no longer writes.
+
+### Webhook retries double a refund
+`src/orders/refund.py:71` (nit)
+
+No dedupe by refund id.

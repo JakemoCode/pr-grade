@@ -1,0 +1,28 @@
+Five findings on the change to the label printer queue.
+
+### 1. A job that times out is printed again on retry (main issue)
+- **Where:** `src/labels/queue.py:58`.
+- **The problem:** the retry re-enqueues the job after the timeout, but the first send may already have reached the printer. Nothing records that it was sent.
+- **Why it matters:** a slow printer prints every label twice, and the packers ship two labels on one box.
+- **Fix:** mark the job sent before the send, and skip a retry for a job marked sent.
+
+### 2. The queue length check counts finished jobs
+- **Where:** `src/labels/queue.py:31`.
+- **The problem:** `len(self.jobs)` includes jobs in the `done` state, which are never removed.
+- **Effect:** after a few hundred labels the queue reports itself full and refuses new work.
+- **Fix:** count only pending jobs, or remove a job when it finishes.
+
+### 3. The printer name is matched case-sensitively
+- **Where:** `src/labels/printers.py:19`.
+- **The problem:** names come from the config in upper case and from the OS in lower case.
+- **Effect:** no printer is found on a fresh install.
+- **Fix:** compare with `casefold()` on both sides.
+
+### 4. A blank label template is accepted (minor)
+- **Where:** `src/labels/templates.py:44`.
+- **The problem:** the validator checks the template parses, and an empty string parses.
+- **Effect:** a blank label prints with no error.
+
+### 5. The changelog entry names the wrong module (nit)
+- **Where:** `CHANGELOG.md:9`.
+- **The problem:** it says `printers.py` where the change is in `queue.py`.

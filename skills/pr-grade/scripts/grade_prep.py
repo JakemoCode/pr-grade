@@ -2,8 +2,9 @@
 """Everything a /pr-grade coordinator hands its graders, in one call.
 
     python3 grade_prep.py [--base origin/main] [--groups NAME=L1,L2 ...] [--skip L2,L3] [--settled TEXT]
-                          [--declined TEXT] [--callers TEXT]
+                          [--declined TEXT] [--callers TEXT] [--suspects DIR]
     python3 grade_prep.py --surface PATH [PATH ...] [the options above except --base]
+    python3 grade_prep.py --attach PROOF_ROOT
 
 Run it from inside the repository once the change is committed. It picks the mode as grade_mode.py
 does, splits the lenses among graders (the lens file's `## Fan-out groups` table, or correctness, timing, and
@@ -22,6 +23,14 @@ With no skill beside this directory, the files carry the lens file alone and a `
 `"sliceLenses": false` leaves the lens text out. In-thread, or with `"promptFiles": false` in the config, it prints
 the blocks instead.
 It ends with the command that merges the graders' reports and the one that removes the proof copies.
+
+`--suspects DIR` names the directory `grade_mode.py --scan` printed, where the first read writes its report. The grader
+holding L9, or the first grader when none does, gets its prompt file under another name and no dispatch line, and an
+`attach:` line prints in its place. Run that line, `--attach PROOF_ROOT`, once the scan returns: it numbers the
+report's items into that grader's prompt file as `S1`, `S2` and on, under `Suspects from a first read:`, writes the
+count to `grade.json`'s `suspects`, removes the scan's directory, and prints the grader's line. A report that numbers
+nothing goes whole as `S1`. With no report, or one of another head, the grader goes with no suspects, and
+`grade.json`'s `firstRead`, which the merge prints, says the first read did not run.
 
 `--base` is where the branch left, or the last commit graded for a re-grade. `--settled` names the
 checks that already passed at the head, with their results, and `--declined` the review findings the
@@ -87,8 +96,7 @@ NEAR_MISS_LENS = 'L9'
 # The proof copy the env sweep perturbs, beside the graders' own.
 SWEEP_COPY = 'env-sweep'
 GROUP_ROW = re.compile(r'(?m)^\|\s*([^|]*?[A-Za-z][^|]*?)\s*\|\s*(L\d+(?:\s*,\s*L\d+)*)\s*\|')
-LOCKS = ('package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lock', 'bun.lockb',
-         'poetry.lock', 'uv.lock', 'Pipfile.lock', 'Cargo.lock', 'go.sum', 'composer.lock', 'Gemfile.lock')
+LOCKS = grade_mode.LOCKS
 VENDORED_DIRS = ('vendor/', 'third_party/', 'node_modules/')
 VENDORED = tuple(f':(exclude){d}*' for d in VENDORED_DIRS)
 # A surface has no parent commit to diff against, so the diff is against git's empty tree.
@@ -103,25 +111,141 @@ HEADING = re.compile(r'(#{1,6})[ \t]')
 FENCE = re.compile(r' {0,3}(`{3,}|~{3,})(.*)')
 
 
-def headings(text: str) -> list[tuple[int, int, str]]:
-    """Each Markdown heading outside a code fence, as its offset, its level, and its line: a `# comment` in a
-    fenced shell block is not a heading."""
+def fenced_lines(text: str) -> list[tuple[int, str, bool]]:
+    """Each line with its offset, and whether a code fence holds it, its own opening and closing lines included."""
     found, fence, offset = [], '', 0
     for line in text.splitlines(keepends=True):
         mark = FENCE.match(line)
+        held = bool(fence)
         if fence:
             # As CommonMark has it: only a run of the opener's character, as long or longer, with nothing after it.
             if mark and mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence) and not mark.group(2).strip():
                 fence = ''
         elif mark and not (mark.group(1)[0] == '`' and '`' in mark.group(2)):
             # A backtick in the info string makes the line an inline code span, not a fence.
-            fence = mark.group(1)
-        else:
-            heading = HEADING.match(line)
-            if heading:
-                found.append((offset, len(heading.group(1)), line))
+            fence, held = mark.group(1), True
+        found.append((offset, line, held))
         offset += len(line)
     return found
+
+
+def headings(text: str) -> list[tuple[int, int, str]]:
+    """Each Markdown heading outside a code fence, as its offset, its level, and its line: a `# comment` in a
+    fenced shell block is not a heading."""
+    return [(offset, len(heading.group(1)), line) for offset, line, held in fenced_lines(text)
+            if not held and (heading := HEADING.match(line))]
+
+
+# A numbered item at the margin: `1. text`, `**1. text**`, `**1.** text`, or `### 1. text`.
+ITEM = re.compile(r'(#{1,6}[ \t]+)?(\*\*)?(\d{1,3})[.)](\*\*)?[ \t]+(.*)')
+
+
+def suspect_items(text: str) -> tuple[list[str], str]:
+    """The scan's report as suspects `S1 ...` to `S<n> ...`, and the rest of it, which numbers none. An item opens on a
+    line at the margin and outside a fence that numbers `1.`, then `2.`, and on in order, as a list item, a bold lead, or
+    a heading; a number out of order stays in the item above it. Each item runs to the next. The last runs to the next
+    heading, or for a heading item the next of its level or higher, and what follows it is the rest, with what came
+    before the first. A report that numbers nothing is one suspect, whole, and an empty one is none."""
+    if not text.strip():
+        return [], ''
+    lines = fenced_lines(text)
+    starts: list[tuple[int, int, str]] = []
+    for index, (_, line, held) in enumerate(lines):
+        item = None if held else ITEM.match(line.rstrip('\r\n'))
+        if item and int(item.group(3)) == len(starts) + 1:
+            level = len(item.group(1).strip()) if item.group(1) else 0
+            # A bold lead keeps its opening `**`; bold around the number alone goes with the number.
+            bold = '**' if item.group(2) and not item.group(4) else ''
+            starts.append((index, level, f'S{len(starts) + 1} {bold}{item.group(5)}'))
+    if not starts:
+        return ['S1 ' + text.strip()], ''
+    last, level, _ = starts[-1]
+    end = next((index for index in range(last + 1, len(lines)) if not lines[index][2]
+                and (heading := HEADING.match(lines[index][1])) and (not level or len(heading.group(1)) <= level)),
+               len(lines))
+    stops = [index for index, _, _ in starts[1:]] + [end]
+    items = [(first + '\n' + ''.join(line for _, line, _ in lines[index + 1:stop])).rstrip()
+             for (index, _, first), stop in zip(starts, stops)]
+    rest = ''.join(line for _, line, _ in lines[:starts[0][0]] + lines[end:])
+    return items, rest.strip()
+
+
+def suspects_section(items: list[str], rest: str, whole: bool) -> str:
+    """The `Suspects from a first read:` section a grader's prompt file carries, as agents/grade.md reads it."""
+    how = ('It numbers no items, so all of it is S1.' if whole
+           else 'Each of its numbered items is a suspect, numbered as it numbered them.')
+    parts = ['', 'Suspects from a first read:', '',
+             'A first reader went through this change before you with a bare question, no lenses, and nothing run, and '
+             f'its report is below. {how} Give each suspect its line under `Suspects:`.', '', '\n\n'.join(items)]
+    if rest:
+        parts += ['', 'The rest of its report, which numbers no suspect:', '', rest]
+    return '\n'.join(parts) + '\n'
+
+
+def attach(proof_root: Path) -> None:
+    """Put the first read's report into the waiting grader's prompt file as numbered suspects, with the count in
+    `grade.json`, and print that grader's dispatch line. Without a report the grader goes with none, and a notice and
+    `grade.json`'s `firstRead` say the first read did not run. Run twice, it prints the line again and changes nothing."""
+    try:
+        meta = json.loads((proof_root / 'grade.json').read_text())
+    except (OSError, ValueError) as failed:
+        sys.exit(f'grade_prep: --attach {proof_root}: no grade.json the prep wrote there: {failed}')
+    waiting = meta.get('scan')
+    if not waiting:
+        sys.exit(f'grade_prep: --attach {proof_root}: no grader there waits for a first read')
+    group = waiting['group']
+    prompt, pending = proof_root / group / 'prompt.md', proof_root / group / 'prompt-pending.md'
+    if not pending.is_file():
+        if not prompt.is_file():
+            sys.exit(f'grade_prep: --attach {proof_root}: {group} has no prompt file, attached or waiting')
+        print(f"first read: {meta.get('firstRead')}; attached before")
+        print(f"\n===== dispatch =====\n\n{waiting['dispatch']}")
+        return
+    where = Path(waiting['dir'])
+    report = where / grade_mode.SCAN_REPORT
+    scanned = grade_mode.scanned_head(where)
+    try:
+        found = report.read_text(encoding='utf-8')
+        why = f'the report at {report} is empty'
+    except FileNotFoundError:
+        found, why = None, f'no report at {report}'
+    except (OSError, UnicodeDecodeError) as failed:
+        found, why = None, f'the report at {report} could not be read: {failed}'
+    if found is not None and scanned != meta['head']:
+        # A commit landed between the scan and the prep: its lines name another head's code.
+        found, why = None, f"it read {scanned or 'a head its scan.json does not name'}, and the head is {meta['head']}"
+    items, rest = suspect_items(found) if found else ([], '')
+    whole = bool(found) and items == ['S1 ' + found.strip()]
+    # Bytes, so the offset the prep measured is the offset read back, whatever line endings the blocks hold.
+    text = pending.read_bytes()
+    at = waiting['at']
+    prompt.write_bytes(text[:at] + suspects_section(items, rest, whole).encode('utf-8') + text[at:] if items else text)
+    if items:
+        meta['suspects'] = {group: len(items)}
+        meta['firstRead'] = f"{len(items)} suspect{'s' if len(items) != 1 else ''} attached to {group}"
+    else:
+        meta['firstRead'] = f'did not run: {why}, so {group} grades with no suspects'
+    (proof_root / 'grade.json').write_text(json.dumps(meta, indent=1) + '\n')
+    pending.unlink()
+    # The report stays with the grade's records, and the scan's directory goes.
+    if found is not None:
+        (proof_root / grade_mode.SCAN_REPORT).write_text(found, encoding='utf-8')
+    for path in (report, where / 'scan.json'):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+    try:
+        where.rmdir()
+    except OSError:
+        pass
+    if items:
+        print(f"first read: {meta['firstRead']}")
+        if whole:
+            print(f'notice: the first read numbers no items, so {group} gets it whole as S1')
+    else:
+        print(f"notice: the first read {meta['firstRead']}")
+    print(f"\n===== dispatch =====\n\n{waiting['dispatch']}")
 
 
 def every_lens_found(text: str, pieces: list[tuple[str | None, str]]) -> bool:
@@ -401,7 +525,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--base')
     ap.add_argument('--branch-base', help='on a re-grade, where the whole branch began, for the Mode the grade '
-                                           'block keeps (default origin/main, or --base when that is not given)')
+                                           'block keeps (default origin/main, else a local main or master, else --base)')
     ap.add_argument('--surface', nargs='+', action='extend', metavar='PATH',
                     help='grade the code under these paths as it stands at HEAD, not a branch diff')
     ap.add_argument('--groups', action='append', default=[], metavar='NAME=L1,L2')
@@ -415,7 +539,14 @@ def main() -> None:
     ap.add_argument('--skill', metavar='PATH', help="the skill's directory, or one file holding its sections 3 to 5, "
                                                      'whose lens text the prompt files carry (default: the skill '
                                                      'beside this script)')
+    ap.add_argument('--suspects', metavar='DIR', help='the directory `grade_mode.py --scan` printed: the grader holding '
+                                                      'L9 waits for its report, and the prep prints an attach: line')
+    ap.add_argument('--attach', metavar='PROOF_ROOT', help='once the scan returns, put its report in the waiting '
+                                                           "grader's prompt file and print that grader's line")
     args = ap.parse_args()
+    if args.attach:
+        attach(Path(args.attach))
+        return
     surface = args.surface is not None
     if surface and (args.base is not None or args.branch_base is not None):
         sys.exit('grade_prep: a surface grade has no base; drop --base and --branch-base')
@@ -424,8 +555,7 @@ def main() -> None:
     if surface:
         args.branch_base = args.base
     elif args.branch_base is None:
-        has_main = git(root, 'rev-parse', '--verify', '--quiet', 'origin/main', check=False).returncode == 0
-        args.branch_base = 'origin/main' if has_main else args.base
+        args.branch_base = grade_mode.default_branch_base(root, args.base)
     if git(root, 'status', '--porcelain', '--untracked-files=no').stdout.strip():
         sys.exit('grade_prep: the change has uncommitted edits. Graders see commits only; commit, then run this again.')
     config = grade_mode.load_config(root)
@@ -493,6 +623,18 @@ def main() -> None:
     skipped = skipped_lenses(args.skip, lenses)
     groups = groups_for(mode, lenses, lens_text, args.groups, skipped)
     slicing = prompt_files and slice_lenses and mode != 'in-thread'
+    # The grader the first read goes to waits for it: the one holding the correctness lens, else the first.
+    waits, first_read = None, None
+    if args.suspects:
+        scanned = grade_mode.scanned_head(Path(args.suspects))
+        if mode == 'in-thread' or not prompt_files:
+            first_read = 'did not run: the first read reaches a grader only through its prompt file'
+        elif scanned is None:
+            first_read = f'did not run: {args.suspects} holds no scan.json from grade_mode.py --scan'
+        else:
+            # Even a scan of another head waits: it may still be writing, and the attach removes what it leaves.
+            waits = next((name for name, ids in groups.items() if 'L9' in ids), next(iter(groups)))
+            first_read = 'not attached: the attach: line never ran'
 
     # None means all of a file is new, which is what every file of a surface is.
     lines = ({path: None for path in changed} if surface else
@@ -529,10 +671,10 @@ def main() -> None:
         ambient_lines = (ambient.report(root, lines, changed, config, Path(fields[f'copy {SWEEP_COPY}']) if sweep_tests else None)
                          if ambient_graded else [])
         ambient_holder = next((name for name, ids in groups.items() if ambient_lens in ids), None)
-        (proof_root / 'grade.json').write_text(json.dumps(
-            {'repository': str(root), 'mode': branch_mode, 'roundMode': mode, 'base': fork, 'head': head, 'lenses': lenses,
-             'groups': groups, 'skipped': skipped, **({'surface': paths} if surface else {})},
-            indent=1) + '\n')
+        meta = {'repository': str(root), 'mode': branch_mode, 'roundMode': mode, 'base': fork, 'head': head,
+                'lenses': lenses, 'groups': groups, 'skipped': skipped, **({'surface': paths} if surface else {}),
+                **({'firstRead': first_read} if first_read else {})}
+        (proof_root / 'grade.json').write_text(json.dumps(meta, indent=1) + '\n')
 
         locks = sorted({path for path in (under if surface else changed) if path.rsplit('/', 1)[-1] in LOCKS})
         excludes = ''.join(f" ':!{path}'" for path in locks) + ''.join(' ' + shlex.quote(f':(exclude){p}*') for p in kept)
@@ -615,6 +757,8 @@ def main() -> None:
             if ambient_lines and name == ambient_holder:
                 block += ['', f'ambient.py at the head, for {ambient_lens}:', *ambient_lines]
             blocks[name] = '\n'.join(block)
+        if first_read and not waits:
+            print(f'notice: the first read {first_read}')
         if prompt_files and mode != 'in-thread':
             # Each prompt is the shared block and the grader's own, as a coordinator pasted them, so the grader is
             # told the same text and the coordinator retypes none of it. Then the lens text for its lenses, so it
@@ -623,9 +767,22 @@ def main() -> None:
             for name, block in blocks.items():
                 path = proof_root / name / 'prompt.md'
                 carried = prompt_lens_text(groups[name], skill, skill_path, lens_text, lens_path) if slicing else ''
+                line = (f'Read your pr-grade dispatch from {path} and run `{change}` in your first turn, in parallel, '
+                        'then grade exactly as it says.')
+                if name == waits:
+                    # Under another name until the attach, so no line typed early can reach a file without suspects.
+                    # In bytes, as the attach reads it back, so a CR in a block cannot move the offset.
+                    (proof_root / name / 'prompt-pending.md').write_bytes(f'{shared}\n\n{block}\n{carried}'.encode('utf-8'))
+                    meta['scan'] = {'dir': str(Path(args.suspects).resolve()), 'group': name,
+                                    'at': len(f'{shared}\n\n{block}\n'.encode('utf-8')), 'dispatch': line}
+                    continue
                 path.write_text(f'{shared}\n\n{block}\n{carried}')
-                print(f'Read your pr-grade dispatch from {path} and run `{change}` in your first turn, in parallel, '
-                      'then grade exactly as it says.')
+                print(line)
+            if waits:
+                (proof_root / 'grade.json').write_text(json.dumps(meta, indent=1) + '\n')
+                print(f'\nwithheld until the first read is attached: {waits}. When the scan returns, whatever it '
+                      'returns, run this and dispatch the line it prints:')
+                print(f"attach: python3 {HERE / 'grade_prep.py'} --attach {proof_root}")
         else:
             print('\n===== shared block =====\n')
             print(shared)

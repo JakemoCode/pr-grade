@@ -1,0 +1,23 @@
+Five items on the change that adds a pick reservation.
+
+### 1. Each request makes its own reservation table, so two picks never see each other
+- **Where:** `src/stock/reserve.py:22`
+- **What happens:** `handle_pick` constructs `Reservations()` per call, and the table lives in memory on that object.
+- **Why it matters:** the table exists to stop two pickers from taking the last unit.
+- **Result:** both reservations succeed and the shelf count reads minus one.
+- **Fix:** one table per process, passed in.
+
+### 2. Bin paths are tidied before the root check, so a link can lead outside the bins folder
+- **Where:** `src/stock/bins.py:71`
+- `normpath` rewrites the path first, and a symlinked segment is never resolved before the containment test.
+
+### 3. A bin path with a trailing slash is refused, the same path without one is accepted
+- **Where:** `src/stock/bins.py:66`
+
+### 4. The retry loop is copied in two modules
+- **Where:** `src/stock/reserve.py:40` and `src/orders/reserve.py:38`
+- Only one copy got the new back-off.
+
+### 5. No bins folder gives a bare traceback (minor)
+- **Where:** `src/stock/bins.py:12`
+- `os.listdir` raises with no hint about which setting is wrong.

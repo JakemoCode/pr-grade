@@ -1,0 +1,34 @@
+I reviewed `main...HEAD` (two commits, the reorder-point work). Five defects, then some minor notes.
+
+### 1. The reorder point uses last week's demand twice
+`src/stock/reorder.py:52`
+
+`weekly = demand[-1] + demand[-1]` where the comment says the last two weeks. A SKU whose demand doubled last week gets a reorder point twice as high as it should.
+
+- **Failure:** a SKU with weeks `[10, 40]` reorders at 80 instead of 50.
+- **Fix:** `demand[-2] + demand[-1]`.
+
+### 2. A SKU with no history raises instead of skipping
+`src/stock/reorder.py:47`
+
+`demand[-1]` on an empty list raises `IndexError`, and the nightly job stops at the first new SKU.
+
+### 3. Lead time is read in days and compared in hours
+`src/stock/reorder.py:60`
+
+`lead_time_days` is multiplied by the hourly rate without converting, so every reorder point is 24 times too small.
+
+### 4. The test fixture's supplier list does not match the real one
+`tests/fixtures/suppliers.json:3`
+
+The fixture names three suppliers with lead times the real file does not have, so the tests pass on values the code never sees.
+
+### 5. The warehouse filter matches a prefix
+`src/stock/reorder.py:33`
+
+`code.startswith(warehouse)` makes `W1` match `W10` and `W12`.
+
+### Minor
+
+- `src/stock/reorder.py:12`: the docstring still says the point is computed monthly.
+- `tests/test_reorder.py:88`: a test named for the empty case tests a one-week history.

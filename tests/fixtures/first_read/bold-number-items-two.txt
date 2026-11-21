@@ -1,0 +1,9 @@
+Two items.
+
+**1. Gift messages written on Windows are dropped**: `tools/order_summary.py:78`
+The summary cuts the order body at `\n## Gift message\n` with its own split, although `gift.message_text` exists for exactly this.
+- **Input:** a body saved with CRLF endings, `"...\r\n## Gift message\r\n\r\nHappy birthday\r\n..."`. The split finds nothing, and the packing slip prints no message.
+- **Fix:** use `gift.message_text(body)`, or normalise newlines before splitting.
+
+**2. Two spaces before the count on "Ready to ship" lines**: `tools/order_summary.py:139-140`
+The f-string has a doubled space.

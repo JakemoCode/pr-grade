@@ -1,0 +1,24 @@
+Four things came up. Only the first is serious.
+
+Moving stock between warehouses, `src/stock/transfer.py:72` takes it out of the source in one transaction and puts it into the destination in another. When the second commit fails the goods exist nowhere. The retry added here covers only the second step, so after a crash it can add the goods to the destination twice.
+
+Smaller things:
+- **Wrong noun in an error (line 120):** an unknown warehouse is reported as "unknown SKU".
+- **Mixed units (line 58):** the log line counts cases; the stored row counts units.
+- **Spacing (line 14):** `MAX_BATCH =200` wants a space after the `=`.
+
+Tests were not run, only read.
+
+## Findings filed with the tool
+
+### Transfer split across two transactions
+Debit and credit can come apart, and the retry adds a double credit.
+
+### Error names the wrong thing
+Warehouse versus SKU.
+
+### Log and record use different units
+Cases versus units.
+
+### Spacing around `=`
+Line 14.

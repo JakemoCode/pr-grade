@@ -791,7 +791,8 @@ def main() -> None:
                 print(block)
         if mode != 'in-thread':
             print(f"\nmerge: python3 {HERE / 'grade_block.py'} merge {proof_root}")
-        # The first read's copy goes with the graders': the attach runs before this line, so the scan is done.
+        # The first read's root goes with the graders'. Read now, since the attach deletes scan.json; the line runs once
+        # every grader has reported, and the withheld one is dispatched only after the attach, so the scan has returned.
         scan_root = grade_mode.scan_copy(Path(args.suspects)) if args.suspects else None
         print(f"remove: {fields['remove']}" + (f' {shlex.quote(scan_root)}' if scan_root else ''))
     except BaseException:

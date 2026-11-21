@@ -233,7 +233,10 @@ def make(repo: Path, sha: str, names: list[str], config: dict, parent: Path, sin
 def remove(root: Path, drop_proofs: bool = False) -> str:
     """Deletes a root `make` printed. A link inside it is unlinked, never followed. A proof test a grader
     kept under `<name>/proofs/` is the repair's starting point, so the root stays until each one is moved
-    out, unless `drop_proofs` says to delete them."""
+    out, unless `drop_proofs` says to delete them. A root that no longer exists was removed already: a second
+    run of a remove: line that refused one root finds the others gone."""
+    if not root.exists() and not root.is_symlink():
+        return f'already removed: {root}'
     if root.is_symlink() or not (root / MARKER).is_file():
         sys.exit(f'{root} holds no {MARKER}, so it is not a proof root; nothing was removed')
     kept = sorted(path for path in root.glob('*/proofs/**/*') if path.is_file() and not path.is_symlink())
@@ -266,6 +269,8 @@ def main() -> None:
                     print(remove(root, args.drop_proofs))
                 except SystemExit as refusal:
                     refused.append(str(refusal.code))
+                except OSError as failed:
+                    refused.append(f'{root}: not fully removed: {failed}')
             if refused:
                 sys.exit('\n'.join(refused))
             return

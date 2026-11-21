@@ -278,18 +278,22 @@ def sliced_lens_file(text: str, held: list[str]) -> str:
     return ''.join(piece for lens, piece in pieces if lens is None or lens in held)
 
 
-def skill_texts(path: Path) -> list[str]:
+def skill_texts(path: Path) -> tuple[list[str], list[Path]]:
     """The text of each file `--skill` can name: a directory's top-level Markdown files, as the skill ships them, or a
-    single file. A dotfile, such as the AppleDouble `._lenses.md` macOS writes on some disks, is not one. Empty when
-    the path is neither, or a file in it is not UTF-8 text, so the prep falls back as it does with no skill."""
+    single file. A dotfile, such as the AppleDouble `._lenses.md` macOS writes on some disks, is not one. Also each file
+    that could not be read as UTF-8 text, which the texts leave out: a stray one costs no other file its text, and the
+    sole holder of section 3, 4, or 5 leaves `skill_lens_text` with no skill. Both empty when the path is neither."""
     if path.is_dir():
         found = [file for file in sorted(path.glob('*.md')) if file.is_file() and not file.name.startswith('.')]
     else:
         found = [path] if path.is_file() else []
-    try:
-        return [file.read_text(encoding='utf-8') for file in found]
-    except (OSError, UnicodeDecodeError):
-        return []
+    texts, unread = [], []
+    for file in found:
+        try:
+            texts.append(file.read_text(encoding='utf-8'))
+        except (OSError, UnicodeDecodeError):
+            unread.append(file)
+    return texts, unread
 
 
 def skill_lens_text(texts: list[str]) -> tuple[str, str] | None:
@@ -567,13 +571,14 @@ def main() -> None:
     if not isinstance(slice_lenses, bool):
         sys.exit(f'grade_prep: sliceLenses in {grade_mode.CONFIG} must be true or false, not {json.dumps(slice_lenses)}')
     skill_path = Path(args.skill).resolve() if args.skill else SKILL
-    texts = skill_texts(skill_path)
+    texts, unread = skill_texts(skill_path)
     skill = skill_lens_text(texts) if texts else None
     if args.skill and skill is None:
         # A caller that names its own copy, such as one with the pool's pull request numbers stripped, must never
         # have its graders fall back to the installed text.
         sys.exit(f'grade_prep: --skill {args.skill} is not a skill directory or file whose sections 3 to 5 hold '
-                 '`### L<n>.` lenses, each section once')
+                 '`### L<n>.` lenses, each section once'
+                 + ''.join(f'; {file} could not be read, or is not UTF-8 text' for file in unread))
     notice = grade_mode.ordinary_notice(root)
     head = git(root, 'rev-parse', 'HEAD').stdout.strip()
     kept = tuple(args.exclude_path)
@@ -703,6 +708,8 @@ def main() -> None:
         if slicing and skill is None:
             print(f'notice: no skill beside {HERE} holds the lenses in sections 3 to 5, so each prompt file carries '
                   'the lens file alone and each grader reads sections 3 to 5 of its installed skill')
+        for file in unread if slicing else ():
+            print(f'notice: {file} could not be read, or is not UTF-8 text, so no prompt file carries its text')
         print('graders: ' + ', '.join(f"{name} ({', '.join(ids)})" for name, ids in groups.items()))
         if skipped:
             print(f"skipped: {', '.join(skipped)}, which no grader holds; the block clears each as "

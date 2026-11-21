@@ -2,8 +2,9 @@
 """Everything a /pr-grade coordinator hands its graders, in one call.
 
     python3 grade_prep.py [--base origin/main] [--groups NAME=L1,L2 ...] [--skip L2,L3] [--settled TEXT]
-                          [--declined TEXT] [--callers TEXT]
+                          [--declined TEXT] [--callers TEXT] [--suspects DIR]
     python3 grade_prep.py --surface PATH [PATH ...] [the options above except --base]
+    python3 grade_prep.py --attach PROOF_ROOT
 
 Run it from inside the repository once the change is committed. It picks the mode as grade_mode.py
 does, splits the lenses among graders (the lens file's `## Fan-out groups` table, or correctness, timing, and
@@ -22,6 +23,14 @@ With no skill beside this directory, the files carry the lens file alone and a `
 `"sliceLenses": false` leaves the lens text out. In-thread, or with `"promptFiles": false` in the config, it prints
 the blocks instead.
 It ends with the command that merges the graders' reports and the one that removes the proof copies.
+
+`--suspects DIR` names the directory `grade_mode.py --scan` printed, where the first read writes its report. The grader
+holding L9, or the first grader when none does, gets its prompt file under another name and no dispatch line, and an
+`attach:` line prints in its place. Run that line, `--attach PROOF_ROOT`, once the scan returns: it numbers the
+report's items into that grader's prompt file as `S1`, `S2` and on, under `Suspects from a first read:`, writes the
+count to `grade.json`'s `suspects`, removes the scan's directory, and prints the grader's line. A report that numbers
+nothing goes whole as `S1`. With no report, or one of another head, the grader goes with no suspects, and
+`grade.json`'s `firstRead`, which the merge prints, says the first read did not run.
 
 `--base` is where the branch left, or the last commit graded for a re-grade. `--settled` names the
 checks that already passed at the head, with their results, and `--declined` the review findings the
@@ -127,8 +136,8 @@ def headings(text: str) -> list[tuple[int, int, str]]:
             if not held and (heading := HEADING.match(line))]
 
 
-# A numbered item at the margin: `1. text`, `**1. text**`, or `### 1. text`.
-ITEM = re.compile(r'(#{1,6}[ \t]+)?(\*\*)?(\d{1,3})[.)][ \t]+(.*)')
+# A numbered item at the margin: `1. text`, `**1. text**`, `**1.** text`, or `### 1. text`.
+ITEM = re.compile(r'(#{1,6}[ \t]+)?(\*\*)?(\d{1,3})[.)](\*\*)?[ \t]+(.*)')
 
 
 def suspect_items(text: str) -> tuple[list[str], str]:
@@ -145,7 +154,9 @@ def suspect_items(text: str) -> tuple[list[str], str]:
         item = None if held else ITEM.match(line.rstrip('\r\n'))
         if item and int(item.group(3)) == len(starts) + 1:
             level = len(item.group(1).strip()) if item.group(1) else 0
-            starts.append((index, level, f'S{len(starts) + 1} {item.group(2) or ""}{item.group(4)}'))
+            # A bold lead keeps its opening `**`; bold around the number alone goes with the number.
+            bold = '**' if item.group(2) and not item.group(4) else ''
+            starts.append((index, level, f'S{len(starts) + 1} {bold}{item.group(5)}'))
     if not starts:
         return ['S1 ' + text.strip()], ''
     last, level, _ = starts[-1]
@@ -193,17 +204,25 @@ def attach(proof_root: Path) -> None:
     where = Path(waiting['dir'])
     report = where / grade_mode.SCAN_REPORT
     try:
+        scanned = json.loads((where / 'scan.json').read_text()).get('head')
+    except (OSError, ValueError, AttributeError):
+        scanned = None
+    try:
         found = report.read_text(encoding='utf-8')
         why = f'the report at {report} is empty'
     except FileNotFoundError:
         found, why = None, f'no report at {report}'
     except (OSError, UnicodeDecodeError) as failed:
         found, why = None, f'the report at {report} could not be read: {failed}'
+    if found is not None and scanned != meta['head']:
+        # A commit landed between the scan and the prep: its lines name another head's code.
+        found, why = None, f"it read {scanned or 'a head its scan.json does not name'}, and the head is {meta['head']}"
     items, rest = suspect_items(found) if found else ([], '')
     whole = bool(found) and items == ['S1 ' + found.strip()]
-    text = pending.read_text()
+    # Bytes, so the offset the prep measured is the offset read back, whatever line endings the blocks hold.
+    text = pending.read_bytes()
     at = waiting['at']
-    prompt.write_text(text[:at] + suspects_section(items, rest, whole) + text[at:] if items else text)
+    prompt.write_bytes(text[:at] + suspects_section(items, rest, whole).encode('utf-8') + text[at:] if items else text)
     if items:
         meta['suspects'] = {group: len(items)}
         meta['firstRead'] = f"{len(items)} suspect{'s' if len(items) != 1 else ''} attached to {group}"
@@ -619,9 +638,8 @@ def main() -> None:
             first_read = 'did not run: the first read reaches a grader only through its prompt file'
         elif scanned is None:
             first_read = f'did not run: {args.suspects} holds no scan.json from grade_mode.py --scan'
-        elif scanned != head:
-            first_read = f'did not run: it read {scanned}, and the head is {head}'
         else:
+            # Even a scan of another head waits: it may still be writing, and the attach removes what it leaves.
             waits = next((name for name, ids in groups.items() if 'L9' in ids), next(iter(groups)))
             first_read = 'not attached: the attach: line never ran'
 
@@ -760,9 +778,10 @@ def main() -> None:
                         'then grade exactly as it says.')
                 if name == waits:
                     # Under another name until the attach, so no line typed early can reach a file without suspects.
-                    (proof_root / name / 'prompt-pending.md').write_text(f'{shared}\n\n{block}\n{carried}')
-                    meta['scan'] = {'dir': str(Path(args.suspects).resolve()), 'group': name, 'at': len(f'{shared}\n\n{block}\n'),
-                                    'dispatch': line}
+                    # In bytes, as the attach reads it back, so a CR in a block cannot move the offset.
+                    (proof_root / name / 'prompt-pending.md').write_bytes(f'{shared}\n\n{block}\n{carried}'.encode('utf-8'))
+                    meta['scan'] = {'dir': str(Path(args.suspects).resolve()), 'group': name,
+                                    'at': len(f'{shared}\n\n{block}\n'.encode('utf-8')), 'dispatch': line}
                     continue
                 path.write_text(f'{shared}\n\n{block}\n{carried}')
                 print(line)

@@ -34,7 +34,8 @@ more than `scanAbove` changed lines (default 150; `false` turns it off, and 0 sc
 the additions plus the deletions in the diff the graders read: committed, from where the branch left `--base` to
 HEAD, with lock files and each `--exclude-path` prefix left out, and a binary file counted as none. A round is a
 re-grade when the commit it starts from is on the branch, after where the branch left `--branch-base` (default
-origin/main, or `--base` when there is none). On a yes it makes a directory for the report and prints the scan's
+origin/main, or `--base` when there is none), unless `--base` names a branch, such as a local main ahead of a stale
+origin/main. A `--branch-base` git cannot read stops the run. On a yes it makes a directory for the report and prints the scan's
 prompt and the `--suspects <dir>` to pass the prep.
 """
 from __future__ import annotations
@@ -266,31 +267,45 @@ def graded_lines(root: Path, fork: str, head: str, kept: tuple[str, ...] = ()) -
     return total
 
 
+def round_one(root: Path, base: str, fork: str, branch_base: str) -> bool:
+    """Whether the round starting at `fork`, where HEAD left `base`, is the branch's first. A re-grade's base is the
+    last commit graded, which is on the branch, so its fork is no commit of `branch_base`. A base that names a branch,
+    such as a local main a fetch has not yet brought origin/main up to, is round 1 too. A ref git cannot read stops the
+    run: it says nothing about the round."""
+    on_main = subprocess.run(['git', 'merge-base', '--is-ancestor', fork, branch_base], cwd=root, capture_output=True,
+                             text=True)
+    if on_main.returncode not in (0, 1):
+        sys.exit(f'grade_mode: cannot tell a re-grade from round 1 against --branch-base {branch_base}: '
+                 f'{on_main.stderr.strip()}')
+    if on_main.returncode == 0:
+        return True
+    return any(subprocess.run(['git', 'rev-parse', '--verify', '--quiet', ref], cwd=root,
+                              capture_output=True).returncode == 0 for ref in (f'refs/heads/{base}', f'refs/remotes/{base}'))
+
+
 def scan_decision(root: Path, base: str, branch_base: str, config: dict,
-                  kept: tuple[str, ...] = ()) -> tuple[bool, str]:
-    """Whether a first read runs before this round's graders, and why, as `--scan` prints it."""
+                  kept: tuple[str, ...] = ()) -> tuple[bool, str, str]:
+    """Whether a first read runs before this round's graders, why, as `--scan` prints it, and where HEAD left `base`.
+    The tree is clean, so the committed files are the change."""
+    fork = _git(root, 'merge-base', base, 'HEAD').strip()
     above = scan_above(config)
     if above is None:
-        return False, f'scanAbove is false in {CONFIG}'
-    fork = _git(root, 'merge-base', base, 'HEAD').strip()
-    # The mode the prep will print: it grades committed files only.
-    committed = set(_git(root, '-c', 'core.quotePath=false', 'diff', '--name-only', '--no-renames', fork,
-                         'HEAD').split('\n')) - {''}
-    mode = assess([path for path in changed_files(base, root) if path in committed], root, config)[0]
+        return False, f'scanAbove is false in {CONFIG}', fork
+    committed = [path for path in _git(root, '-c', 'core.quotePath=false', 'diff', '--name-only', '--no-renames', fork,
+                                       'HEAD').split('\n') if path]
+    mode = assess(committed, root, config)[0]
     if mode == MODES[0]:
-        return False, 'an in-thread grade'
+        return False, 'an in-thread grade', fork
     if config.get('promptFiles', True) is False:
-        return False, 'promptFiles is false, and the first read reaches a grader only through its prompt file'
-    # A re-grade starts at the last commit graded, which is on the branch; a stale main is still main.
-    on_main = subprocess.run(['git', 'merge-base', '--is-ancestor', fork, branch_base], cwd=root, capture_output=True)
-    if on_main.returncode != 0:
-        return False, f'a re-grade: {base} is after where the branch left {branch_base}'
+        return False, 'promptFiles is false, and the first read reaches a grader only through its prompt file', fork
+    if not round_one(root, base, fork, branch_base):
+        return False, f'a re-grade: {base} is after where the branch left {branch_base}', fork
     lines = graded_lines(root, fork, 'HEAD', kept)
     if above == 0:
-        return True, f'{lines} changed lines, scanAbove 0 scans every change, in round 1 of a {mode} grade'
+        return True, f'{lines} changed lines, scanAbove 0 scans every change, in round 1 of a {mode} grade', fork
     if lines <= above:
-        return False, f'{lines} changed lines, not over scanAbove {above}'
-    return True, f'{lines} changed lines, over scanAbove {above}, in round 1 of a {mode} grade'
+        return False, f'{lines} changed lines, not over scanAbove {above}', fork
+    return True, f'{lines} changed lines, over scanAbove {above}, in round 1 of a {mode} grade', fork
 
 
 def scan(root: Path, base: str, branch_base: str, config: dict, kept: tuple[str, ...]) -> None:
@@ -298,11 +313,11 @@ def scan(root: Path, base: str, branch_base: str, config: dict, kept: tuple[str,
     if _git(root, 'status', '--porcelain', '--untracked-files=no').strip():
         sys.exit('grade_mode: the change has uncommitted edits. The scan and the graders see commits only; commit, '
                  'then run this again.')
-    yes, why = scan_decision(root, base, branch_base, config, kept)
+    yes, why, fork = scan_decision(root, base, branch_base, config, kept)
     print(f"scan: {'yes' if yes else 'no'} ({why})")
     if not yes:
         return
-    fork, head = _git(root, 'merge-base', base, 'HEAD').strip(), _git(root, 'rev-parse', 'HEAD').strip()
+    head = _git(root, 'rev-parse', 'HEAD').strip()
     where = Path(tempfile.mkdtemp(prefix='pr-grade-scan-'))
     (where / 'scan.json').write_text(json.dumps({'repository': str(root), 'base': fork, 'head': head}) + '\n')
     print('Dispatch one pr-grade:scan agent now, with this line as its prompt, unchanged:')

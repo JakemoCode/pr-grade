@@ -265,6 +265,22 @@ class DecisionTest(Repo):
         self.assertEqual(grade_mode.graded_lines(self.repo, before, 'HEAD', ('src/',)), 200)
         self.assertEqual(grade_mode.graded_lines(self.repo, before, 'HEAD', ('docs/', 'src/')), 0)
 
+    def test_the_kept_side_of_a_rename_is_read_as_a_literal_path(self) -> None:
+        # Read as a pathspec, `:x.py` is magic and matches nothing, and `[ab].py` is a glob that also matches a.py.
+        (self.repo / 'docs').mkdir()
+        (self.repo / 'docs/x.py').write_text('Z = 0\n' * 200)
+        (self.repo / 'docs/y.py').write_text('W = 0\n' * 200)
+        (self.repo / 'a.py').write_text('A = 0\n')
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'docs')
+        before = git(self.repo, 'rev-parse', 'HEAD').strip()
+        git(self.repo, 'mv', 'docs/x.py', ':x.py')
+        git(self.repo, 'mv', 'docs/y.py', '[ab].py')
+        (self.repo / 'a.py').write_text('A = 1\n' * 50)
+        git(self.repo, 'commit', '-q', '-am', 'move')
+        # 200 and 200 added by the two renames, and a.py's 1 deleted and 50 added.
+        self.assertEqual(grade_mode.graded_lines(self.repo, before, 'HEAD', ('docs/',)), 451)
+
     def test_a_local_branch_base_with_a_slash_is_not_read_as_a_remote(self) -> None:
         # `release/c0` is a local branch, so an unrelated local `c0` says nothing about where this branch began.
         git(self.repo, 'branch', 'release/c0', 'main')
@@ -274,6 +290,10 @@ class DecisionTest(Repo):
         (self.repo / 'store.py').write_text((self.repo / 'store.py').read_text() + 'Y = 2\n' * 200)
         git(self.repo, 'commit', '-q', '-am', 'fix')
         git(self.repo, 'branch', 'c0', graded)
+        out = self.ok('grade_mode.py', '--base', graded, '--branch-base', 'release/c0', '--scan')
+        self.assertIn(f'scan: no (a re-grade: {graded} is after where the branch left release/c0)', out)
+        # A remote named release with a branch c0 beside it changes nothing: git reads release/c0 as the local branch.
+        git(self.repo, 'update-ref', 'refs/remotes/release/c0', 'main')
         out = self.ok('grade_mode.py', '--base', graded, '--branch-base', 'release/c0', '--scan')
         self.assertIn(f'scan: no (a re-grade: {graded} is after where the branch left release/c0)', out)
 

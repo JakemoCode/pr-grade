@@ -140,6 +140,16 @@ SUBCOMMANDS = {'npm': {'run', 'run-script', 'test', 't', 'start', 'exec', 'x'},
                'docker': {'run', 'exec', 'compose run', 'compose exec'}, 'go': {'run', 'test'},
                'cargo': {'run', 'test', 'bench', 'nextest run'}, 'uv': {'run'}, 'poetry': {'run'}, 'pipenv': {'run'},
                'dotnet': {'run', 'test'}, 'swift': {'run', 'test'}}
+# A runner's options that take the next word as their value, so the subcommand or script is a word after it:
+# `npm --prefix web test`, `docker compose -f x.yml run`, `perl -I lib -ne`. An option missing here makes its value
+# read as the subcommand, which the runner's subcommands seldom hold, so the run fails closed.
+OPTION_VALUES = {'npm': {'--prefix', '-w', '--workspace'}, 'pnpm': {'--filter', '-F', '-C', '--dir'},
+                 'yarn': {'--cwd'}, 'bun': {'--cwd'}, 'go': {'-C'},
+                 'docker': {'-c', '--context', '-H', '--host', '--config', '-f', '--file', '-p', '--project-name',
+                            '--profile', '--env-file', '--project-directory'},
+                 'cargo': {'--manifest-path', '-Z', '--config', '-C', '-p', '--package'},
+                 'uv': {'--directory', '--project', '-p', '--python'}, 'poetry': {'-C', '--directory', '-P', '--project'},
+                 'perl': {'-I', '-M', '-m'}}
 # Package managers that run a package's bin by its name, as in `yarn jest`.
 PACKAGE_BINS = {'pnpm', 'yarn', 'bun'}
 # Words that hand the rest of a command to another runner: `python3 -m pytest`, `uv run pytest`.
@@ -372,25 +382,34 @@ def _runs(words: list[str]) -> bool:
             return False
         if name in SUBCOMMANDS:
             return _subcommand_runs(name, args)
-        switches = args[:next((i for i, arg in enumerate(args) if not arg.startswith('-')), len(args))]
-        return not (name == 'perl' and any(PERL_FILTER.fullmatch(arg) for arg in switches))
+        # perl's own switches come before its script or the first word its `-e` does not take.
+        first = next(iter(_positionals(name, args)), len(args))
+        return not (name == 'perl' and any(PERL_FILTER.fullmatch(arg) for arg in args[:first]))
     return _script(program)
 
 
+def _positionals(name: str, args: list[str]) -> list[int]:
+    """Where in `args` the words stand that are neither an option, the value OPTION_VALUES says the option takes,
+    nor a toolchain such as cargo's `+nightly`."""
+    found, i = [], 0
+    while i < len(args):
+        if args[i].startswith(('-', '+')):
+            i += 2 if args[i] in OPTION_VALUES.get(name, ()) else 1
+        else:
+            found.append(i)
+            i += 1
+    return found
+
+
 def _subcommand_runs(name: str, args: list[str]) -> bool:
-    """Whether a runner SUBCOMMANDS names is given a subcommand that runs code. The subcommand is the first word
-    past options and a toolchain such as cargo's `+nightly`, or the word after it when an option right before the
-    first may have taken that one as its value, as `--prefix` does in `npm --prefix web test`."""
-    words = [i for i, arg in enumerate(args) if not arg.startswith(('-', '+'))]
+    """Whether a runner SUBCOMMANDS names is given a subcommand that runs code: its first positional word, or that
+    and the next, as in `docker compose -f x.yml run`."""
+    words = [args[i] for i in _positionals(name, args)]
     if not words:
         return False
-    first = words[0]
-    taken = first > 0 and args[first - 1].startswith('-') and '=' not in args[first - 1]
-    for i in words[:2] if taken else words[:1]:
-        sub, after = args[i], args[i + 1] if i + 1 < len(args) else ''
-        if {sub, sub.partition(':')[0], f'{sub} {after}'} & SUBCOMMANDS[name]:
-            return True
-    sub = args[first]
+    sub, after = words[0], words[1] if len(words) > 1 else ''
+    if {sub, sub.partition(':')[0], f'{sub} {after}'} & SUBCOMMANDS[name]:
+        return True
     return (name in PACKAGE_BINS and bool(RUNNER.fullmatch(sub))) or bool(SCRIPT.search(sub))
 
 
@@ -439,9 +458,10 @@ def _suspects(items: list[str]) -> list[dict]:
         if not head:
             continue
         verdict = VERDICT.match(head[2])
-        # A fence opened under an `Output:` holds what the run printed, so a `Command:` line in it is output. Blanking
-        # those fences keeps every offset in place.
-        unfenced = re.sub(r'(?ms)(\bOutput:[ \t]*\n)([ \t]*(`{3,}|~{3,})[^`\n]*\n.*?^[ \t]*\3[ \t]*$)',
+        # A fence holds what a run printed, and a read can print a `Command:` line, so every `Command:` in a fence is
+        # output, one the grader fenced itself too. A fence opens at a line's start or after `Output:` on its line, and
+        # one left open runs to the item's end. Blanking the fences keeps every offset in place.
+        unfenced = re.sub(r'(?ms)(^[ \t]*|\bOutput:[ \t]*)((`{3,}|~{3,})[^`\n]*\n.*?(?:^[ \t]*\3[ \t]*$|\Z))',
                           lambda m: m[1] + re.sub(r'[^\n]', ' ', m[2]), item)
         found = list(COMMAND.finditer(unfenced))
         runs = []

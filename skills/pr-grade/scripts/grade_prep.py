@@ -281,8 +281,8 @@ def sliced_lens_file(text: str, held: list[str]) -> str:
 def skill_texts(path: Path) -> tuple[list[str], list[Path]]:
     """The text of each file `--skill` can name: a directory's top-level Markdown files, as the skill ships them, or a
     single file. A dotfile, such as the AppleDouble `._lenses.md` macOS writes on some disks, is not one. Also each file
-    that could not be read as UTF-8 text, which the texts leave out: a stray one costs no other file its text, and one
-    holding section 3, 4, or 5 leaves `skill_lens_text` with no skill. Both empty when the path is neither."""
+    that could not be read as UTF-8 text, which the texts leave out: a stray one costs no other file its text, and the
+    sole holder of section 3, 4, or 5 leaves `skill_lens_text` with no skill. Both empty when the path is neither."""
     if path.is_dir():
         found = [file for file in sorted(path.glob('*.md')) if file.is_file() and not file.name.startswith('.')]
     else:
@@ -578,7 +578,7 @@ def main() -> None:
         # have its graders fall back to the installed text.
         sys.exit(f'grade_prep: --skill {args.skill} is not a skill directory or file whose sections 3 to 5 hold '
                  '`### L<n>.` lenses, each section once'
-                 + ''.join(f'; {file} could not be read as UTF-8 text' for file in unread))
+                 + ''.join(f'; {file} could not be read, or is not UTF-8 text' for file in unread))
     notice = grade_mode.ordinary_notice(root)
     head = git(root, 'rev-parse', 'HEAD').stdout.strip()
     kept = tuple(args.exclude_path)
@@ -709,7 +709,7 @@ def main() -> None:
             print(f'notice: no skill beside {HERE} holds the lenses in sections 3 to 5, so each prompt file carries '
                   'the lens file alone and each grader reads sections 3 to 5 of its installed skill')
         for file in unread if slicing else ():
-            print(f'notice: {file} could not be read as UTF-8 text, so no grader reads it')
+            print(f'notice: {file} could not be read, or is not UTF-8 text, so no prompt file carries its text')
         print('graders: ' + ', '.join(f"{name} ({', '.join(ids)})" for name, ids in groups.items()))
         if skipped:
             print(f"skipped: {', '.join(skipped)}, which no grader holds; the block clears each as "

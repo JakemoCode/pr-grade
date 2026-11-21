@@ -33,8 +33,9 @@ with the reason. A first read runs in round 1 of a `subagent` or `fan-out` grade
 more than `scanAbove` changed lines (default 150; `false` turns it off, and 0 scans every change). Changed lines are
 the additions plus the deletions in the diff the graders read: committed, from where the branch left `--base` to
 HEAD, with lock files and each `--exclude-path` prefix left out, a binary file counted as none, and a rename counted
-by its edits, or whole when one side of it is left out. A round is round 1 when the commit it starts from is a commit of `--branch-base` (default origin/main,
-else a local main or master, else `--base`), or the commit where HEAD left that branch's local copy, so a local main
+by its edits, or whole when one side of it is left out. A round is round 1 when the commit it starts from is a commit
+of `--branch-base` (default origin/main, else a local main or master, else `--base`), or, for a remote-tracking
+`--branch-base`, the commit where HEAD left that branch's local copy, so a local main
 ahead of a stale origin/main is still round 1. Any other start is a re-grade. A `--branch-base` git cannot read stops
 the run. On a yes it makes a directory for the report and prints the scan's
 prompt and the `--suspects <dir>` to pass the prep.
@@ -269,8 +270,9 @@ def graded_lines(root: Path, fork: str, head: str, kept: tuple[str, ...] = ()) -
             at += 1 if path else 3
             out = [posixpath.basename(p) in LOCKS or p.startswith(kept) for p in paths]
             if len(paths) == 2 and out[0] != out[1]:
-                total += counted(_git(root, '-c', 'core.quotePath=false', 'diff', '--numstat', '-z', '--no-renames',
-                                      fork, head, '--', paths[out.index(False)]))
+                # Literal, so a kept path such as `:x.py` or `[ab].py` is no pathspec magic or glob.
+                total += counted(_git(root, '--literal-pathspecs', '-c', 'core.quotePath=false', 'diff', '--numstat',
+                                      '-z', '--no-renames', fork, head, '--', paths[out.index(False)]))
             elif added and added != '-' and not any(out):
                 total += int(added) + int(deleted)
         return total
@@ -310,11 +312,11 @@ def round_one(root: Path, fork: str, branch_base: str) -> bool:
                  f'{on_main.stderr.strip()}')
     if on_main.returncode == 0:
         return True
-    # origin/main's local branch is main: the exact ref, so no revision suffix can stand in for it. A local base such as
-    # release/c0 is no remote, and an unrelated local c0 says nothing about it.
-    remote = '/' in branch_base and subprocess.run(['git', 'show-ref', '--verify', '--quiet', f'refs/remotes/{branch_base}'],
-                                                   cwd=root).returncode == 0
-    local = f"refs/heads/{branch_base.split('/', 1)[1]}" if remote else None
+    # origin/main's local branch is main: the exact ref, so no revision suffix can stand in for it. Only a base git
+    # reads as a remote-tracking ref has one. A local release/c0 is no remote, even beside a refs/remotes/release/c0.
+    named = subprocess.run(['git', 'rev-parse', '--symbolic-full-name', branch_base], cwd=root, capture_output=True,
+                           text=True).stdout.strip()
+    local = f"refs/heads/{branch_base.split('/', 1)[1]}" if named == f'refs/remotes/{branch_base}' else None
     if not local or subprocess.run(['git', 'show-ref', '--verify', '--quiet', local], cwd=root).returncode != 0:
         return False
     return fork == _git(root, 'merge-base', local, 'HEAD').strip()

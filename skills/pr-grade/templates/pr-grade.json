@@ -32,6 +32,7 @@
   "promptFiles": true,
   "sliceLenses": true,
   "scanAbove": 150,
+  "scanProofCopy": true,
   "proofDir": [
     {"path": "node_modules", "pinnedBy": ["package.json", "package-lock.json"], "install": "npm ci"},
     {"path": ".venv", "pinnedBy": ["pyproject.toml", "uv.lock"], "install": "uv sync --frozen"},

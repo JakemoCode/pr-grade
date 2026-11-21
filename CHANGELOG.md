@@ -7,6 +7,36 @@
 
 Each entry says what changed, where, and why. Under it, **Before** is the old behavior and **Seen on** is the grade that exposed it.
 
+## 0.20.0
+
+- `skills/pr-grade/scripts/grade_mode.py`: added a proof copy for the first read. On `scan: yes`, `--scan` makes one with `proof_dir.make`, linked as a grader's copy is, names it, its scratch directory and any dependency it did not link in the scan's dispatch line after the unchanged question, and records its root as `scan.json`'s `proof`, so the scan can run inputs without running anything in the author's checkout. A copy that cannot be made prints a `notice:` and the scan goes git-only.
+  - **Before:** the scan had no copy and ran nothing but git.
+  - **Seen on:** issue #89. On PR #73, across three scans each, the scan that ran inputs raised 7 of issue #75's nine and the git-only scan 5, at a median wall clock of 361 s against 366 s.
+- `skills/pr-grade/scripts/grade_mode.py`: changed where `--scan` puts the report's directory, now `<proof root>/first-read/` under the scan's own root, made with or without a copy, so the prep's `remove:` line removes it and `proof_dir.make`'s sweep of an idle root reaches one no prep removed.
+  - **Before:** each yes made a `pr-grade-scan-*` directory in the temp directory that only the attach removed, so a second `--scan`, a prep that failed, or one that withheld no grader left it behind for good.
+  - **Seen on:** PR #88's round 1, a P3 that issue #86 carried and that moved to issue #89.
+- `agents/scan.md`: changed the run rule, so the scan may run a test, a script or an interpreter in the proof copy its prompt names and installs nothing there. In the repository it still runs nothing but git, and with no copy named, as a 0.19.0 `grade_mode.py` dispatches it, it runs nothing but git anywhere.
+  - **Before:** the scan ran nothing but git, wherever it was.
+  - **Seen on:** issue #89, where the two findings the git-only scan missed were the two reached by running an input.
+- `skills/pr-grade/scripts/grade_prep.py`: changed the `remove:` line to name the scan's root after the graders' when `scan.json` holds one, to remove it with the grade's other copies once every grader has reported.
+  - **Before:** the `remove:` line named one root.
+  - **Seen on:** issue #89.
+- `skills/pr-grade/scripts/proof_dir.py`: changed `remove` to take several roots, removing each it can and exiting non-zero naming the ones it refused, and to print `already removed: <root>` for a root that no longer exists, so one `remove:` line covers the graders' copies and the scan's and runs again cleanly after a kept proof test refused it once.
+  - **Before:** `remove` took one root, and refused a missing one as not a proof root.
+  - **Seen on:** issue #89, and this release's round 1, P2 L9: the second run of the two-root line exited 1 on the scan's root already gone.
+- `skills/pr-grade/templates/pr-grade.json`: added `"scanProofCopy": true`, the key that turns the scan's copy off, so the template still shows every key. `false` keeps the 0.19.0 git-only scan, and anything but true or false stops `--scan`.
+  - **Before:** nothing configured the scan's copy.
+  - **Seen on:** issue #89.
+- `skills/pr-grade/scripts/grade_prep.py`: fixed `skill_texts` with a per-file read that skips a file it cannot read as UTF-8 text and names it, in the `--skill` exit and in a `notice:` line, so one stray file no longer drops the skill's text and the messages point at the file instead of the sections.
+  - **Before:** one unreadable `*.md` beside the skill gave no skill text at all, and both messages blamed sections 3 to 5.
+  - **Seen on:** PR #83's round 2, P3 L8 (issue #82).
+- `skills/pr-grade/scripts/grade_mode.py`: fixed `round_one` with a check that git resolves `--branch-base` to `refs/remotes/<branch base>` before it reads the part after the slash as a local branch, so a local base such as `release/c0` no longer reads a re-grade as round 1. Its docstring now says the local-branch case is for a remote-tracking base (issue #91).
+  - **Before:** an unrelated local `c0` at the re-grade's fork made a re-grade against `release/c0` read as round 1 and scan again.
+  - **Seen on:** PR #88's grade, P3 L9 (issue #86).
+- `skills/pr-grade/scripts/grade_mode.py`: fixed `graded_lines` with a literal-path, whole-file count of the kept side of a rename whose other side is excluded, so the count matches the lines the graders' diff shows.
+  - **Before:** such a rename counted 0, so a round 1 over `scanAbove` could get no first read.
+  - **Seen on:** PR #88's grade, P3 L9 (issue #86).
+
 ## 0.19.0
 
 - `agents/grade.md`: added the `Suspects from a first read:` hand-off and a `Suspects:` report field, with one line per suspect as `proven`, `refuted` with a `Command:` and its `Output:`, or `could not verify` with a rank. A dropped suspicion of the grader's own is now closed by a run or listed, never argued away.
@@ -24,7 +54,7 @@ Each entry says what changed, where, and why. Under it, **Before** is the old be
 - `skills/pr-grade/scripts/grade_mode.py`: added `--scan`, which prints `scan: yes` or `scan: no` with its reason, from the mode, the round and `scanAbove` (default 150 changed lines), and on a yes prints the scan's prompt and the prep's `--suspects <dir>`, to start the scan before the prep with no judgment left to the coordinator.
   - **Before:** there was no first read to decide.
   - **Seen on:** ForgeSmith-OS's escape ledger, where changes over 150 lines are 35% of graded changes and 60% of escapes.
-- `skills/pr-grade/scripts/grade_prep.py`: added `--suspects <dir>`, which holds back the prompt file and dispatch line of the grader holding L9, and `--attach <proof root>`, which numbers the scan's report into that file as `S1`, `S2` and on, writes `grade.json`'s `suspects` count, and prints the line, to keep every grader waiting on no other and the coordinator from typing the report. A report with no numbered items goes whole as `S1` with a `notice:`. With no report, the grader goes with no suspects and `grade.json`'s `firstRead` says the first read did not run.
+- `skills/pr-grade/scripts/grade_prep.py`: added `--suspects <dir>`, which holds back the prompt file and dispatch line of the grader holding L9, and `--attach <proof root>`, which numbers the scan's report into that file as `S1`, `S2` and on, writes `grade.json`'s `suspects` count, and prints the line, to keep every grader waiting on no other and the coordinator from typing the report. A report with no numbered items goes whole as `S1` with a `notice:`. With no report, or a report of another head than the prep's, the grader goes with no suspects and `grade.json`'s `firstRead` says the first read did not run. Either way the attach then removes the scan's directory.
   - **Before:** nothing wrote the `Suspects from a first read:` section or `grade.json`'s `suspects`.
   - **Seen on:** PR #85's round 1, P3 L15.
 - `skills/pr-grade/scripts/grade_block.py`: added a `first read:` line to `merge`, from `grade.json`'s `firstRead`, to show in every grade whether the first read ran.

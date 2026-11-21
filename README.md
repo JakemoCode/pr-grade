@@ -103,6 +103,7 @@ Every key in `.claude/pr-grade.json` is optional. A key you set replaces its def
 | `promptFiles` | `true` | The prep writes each grader's prompt to `prompt.md` under its proof root and prints one line naming it. `false` prints the blocks for the coordinator to paste, as 0.17 did. |
 | `sliceLenses` | `true` | Each prompt file also carries the skill's and the lens file's text for the grader's lenses, and every other piece of both, so the grader reads neither file. `false` leaves the lens text out, and the grader reads both itself. Off whenever `promptFiles` is. |
 | `scanAbove` | `150` | A first read runs on round 1 of a `subagent` or `fan-out` grade of more than this many changed lines: the additions plus the deletions in the graders' diff, lock files and `--exclude-path` prefixes left out, a binary file counting none, and a rename counting its edits, or the whole file when one side of it is left out. `0` scans every such grade and `false` none. Off whenever `promptFiles` is. |
+| `scanProofCopy` | `true` | The first read gets a proof copy of the head, with the links a grader's copy gets, and may run a test, a script or an interpreter there. `false` makes no copy, and it reads with git alone, as in 0.19.0. In the repository it runs nothing but git either way. |
 | `proofDir` | `node_modules`, `.venv` | Installed dependencies to link into each proof clone, each with the files that pin it and the command that installs it. |
 | `requireGrade.branches` | every branch | A regex; the check only requires a grade on matching branches. |
 
@@ -216,7 +217,7 @@ All live in `skills/pr-grade/scripts/`. The skill calls them; you rarely run one
 | Script | What it does |
 |---|---|
 | `grade_prep.py` | Prepares a grade in one call: mode, lens groups (minus any `--skip`), callers, the L7 scan, the L9 near misses, the L14 replay, the L16 exit codes and env sweep, proof clones, and every grader's prompt. `--surface <path ...>` grades the code under paths with no diff (section 9, in `surface-grades.md`). With `--suspects <dir>` it holds back the line of the grader holding L9 and prints an `attach:` line, `--attach <proof root>`, which numbers the scan's report into that grader's prompt file and prints its line. |
-| `grade_mode.py` | Picks the mode alone and prints the files that decided it. `--scan` also says whether a first read runs, and on a yes prints the scan's prompt and the prep's `--suspects` option. |
+| `grade_mode.py` | Picks the mode alone and prints the files that decided it. `--scan` also says whether a first read runs, and on a yes makes the scan's proof copy and prints the scan's prompt, naming the copy, and the prep's `--suspects` option. |
 | `proof_dir.py` | Makes and removes the proof clones outside the repository, with dependencies linked in, and a `proofs` directory per grader for the tests that proved its findings. `remove` refuses while a kept test is still there. Nothing is registered in the repository. |
 | `check_then_act.py` | Lists check-then-act windows (L7) in the functions a branch changed: a check, then an `await`, transaction boundary, or external call, then the write the check guards. A grader clears each one or proves the race. It never gates anything, and an empty list clears nothing. |
 | `near_miss.py` | Runs every predicate a change adds or modifies, in Python, JavaScript, or TypeScript, against near misses of a string it accepts, and lists every other file that holds a parse anchor the change touches (L9). `near_misses()` is the generator, importable alone. |
@@ -227,7 +228,7 @@ All live in `skills/pr-grade/scripts/`. The skill calls them; you rarely run one
 
 `check_then_act.py --whole` scans every function in the changed files, and `--json` prints the list as data. `PR_GRADE_TYPESCRIPT` points the scanner at a `typescript` package when the repository has none.
 
-The `pr-grade:grade` agent runs on Sonnet at `high` effort with 50 turns, and is read-only on the repository: it proves findings in its own clone. The `pr-grade:scan` agent, the first read, runs on Opus at `high` with 50 turns and no `CLAUDE.md`, reads no lens and no skill text, runs nothing but git, and writes one file, its report.
+The `pr-grade:grade` agent runs on Sonnet at `high` effort with 50 turns, and is read-only on the repository: it proves findings in its own clone. The `pr-grade:scan` agent, the first read, runs on Opus at `high` with 50 turns and no `CLAUDE.md`, reads no lens and no skill text, and writes one file, its report. In the repository it runs nothing but git. In the proof copy its prompt names it may run a test, a script or an interpreter, and with no copy named it runs nothing but git anywhere.
 
 ### Embedding the checks
 

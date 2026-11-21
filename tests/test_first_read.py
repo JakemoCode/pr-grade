@@ -312,7 +312,8 @@ class DecisionTest(Repo):
         scan = Path(found.group(1))
         self.assertIn(PROMPT.format(base=fork, head=head)
                       + f' Write the report to {scan / "first-read.md"} with the Write tool.', out)
-        self.assertEqual(json.loads((scan / 'scan.json').read_text()),
+        record = json.loads((scan / 'scan.json').read_text())
+        self.assertEqual({key: record[key] for key in ('repository', 'base', 'head')},
                          {'repository': str(self.repo), 'base': fork, 'head': head})
         # Claude Code refuses a subagent's Write to report*.md, summary*.md, findings*.md and analysis*.md.
         self.assertIsNone(re.match(r'(report|summary|findings|analysis).*\.md$', 'first-read.md', re.I))
@@ -507,12 +508,6 @@ class AgentTest(unittest.TestCase):
         for word in ('lens', 'SKILL', 'L9', 'pr-grade-lenses'):
             with self.subTest(word=word):
                 self.assertNotIn(word, body)
-
-    def test_the_scan_runs_nothing_but_git(self) -> None:
-        # The test's reader ran nothing. Given auto mode, the 0.19.0 smoke grade's scan ran the suites and probe scripts
-        # in the author's checkout and took 453 s against the test's 150 s median.
-        body = self.AGENT.split('---\n', 2)[2]
-        self.assertIn('Run nothing but git', body)
 
     def test_the_prompt_the_scan_is_given_is_the_tested_one(self) -> None:
         self.assertEqual(grade_mode.SCAN_PROMPT, PROMPT)

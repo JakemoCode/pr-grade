@@ -4,7 +4,7 @@ with the repository's installed dependencies linked in, so a grader writes a fai
 without building anything first.
 
     python3 proof_dir.py make [--sha HEAD] [--since <ref>] [name ...]
-    python3 proof_dir.py remove [--drop-proofs] <root>
+    python3 proof_dir.py remove [--drop-proofs] <root> [<root> ...]
 
 Run `make` from inside the repository being graded, once per grade, with one name per grader, for
 example its fan-out group; with no name it makes one copy called `grade`. It prints each path absolute
@@ -12,6 +12,8 @@ and resolved, for the dispatch to carry as printed, and ends with the `remove` c
 every grader has reported. Copies go under the temp directory, or under TMPDIR when it is set. Beside
 each copy is a `proofs` directory for the tests that proved the grader's findings; `remove` refuses
 while one is still there, since the repair starts from it, unless `--drop-proofs` says to delete them.
+Given several roots, as the prep's `remove:` line gives the graders' and the first read's, it removes each one it
+can and exits non-zero naming the ones it refused.
 
 Each copy is a local clone of the repository, checked out detached at the graded commit. Git hardlinks
 a local clone's objects rather than borrowing them, so a reset and `gc` in the author's checkout while
@@ -231,7 +233,10 @@ def make(repo: Path, sha: str, names: list[str], config: dict, parent: Path, sin
 def remove(root: Path, drop_proofs: bool = False) -> str:
     """Deletes a root `make` printed. A link inside it is unlinked, never followed. A proof test a grader
     kept under `<name>/proofs/` is the repair's starting point, so the root stays until each one is moved
-    out, unless `drop_proofs` says to delete them."""
+    out, unless `drop_proofs` says to delete them. A root that no longer exists was removed already: a second
+    run of a remove: line that refused one root finds the others gone."""
+    if not root.exists() and not root.is_symlink():
+        return f'already removed: {root}'
     if root.is_symlink() or not (root / MARKER).is_file():
         sys.exit(f'{root} holds no {MARKER}, so it is not a proof root; nothing was removed')
     kept = sorted(path for path in root.glob('*/proofs/**/*') if path.is_file() and not path.is_symlink())
@@ -251,14 +256,23 @@ def main() -> None:
     make_ap.add_argument('--sha', default='HEAD', help='the graded commit (default HEAD)')
     make_ap.add_argument('--since', help='where the branch began; pins changed after it are not linked')
     make_ap.add_argument('names', nargs='*', help='one per grader, for example its fan-out group')
-    remove_ap = commands.add_parser('remove', help='remove a root make printed')
-    remove_ap.add_argument('root', type=Path)
+    remove_ap = commands.add_parser('remove', help='remove the roots make printed')
+    remove_ap.add_argument('roots', type=Path, nargs='+', metavar='root')
     remove_ap.add_argument('--drop-proofs', action='store_true',
                            help='delete the proof tests graders kept instead of refusing while they are there')
     args = ap.parse_args()
     try:
         if args.command == 'remove':
-            print(remove(args.root, args.drop_proofs))
+            refused = []
+            for root in args.roots:
+                try:
+                    print(remove(root, args.drop_proofs))
+                except SystemExit as refusal:
+                    refused.append(str(refusal.code))
+                except OSError as failed:
+                    refused.append(f'{root}: not fully removed: {failed}')
+            if refused:
+                sys.exit('\n'.join(refused))
             return
         repo = repo_root()
         sha = git(repo, 'rev-parse', '--verify', f'{args.sha}^{{commit}}').strip()

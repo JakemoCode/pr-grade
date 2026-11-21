@@ -1,0 +1,28 @@
+Four things look wrong in this branch, going by git alone.
+
+### 1. A bin code with a trailing space no longer matches its shelf
+`src/stock/bins.py:41`
+
+`find_bin` now compares `code == shelf.code` where it used to strip both sides. Codes typed at the scanner keep a trailing space, so `"A-12 "` finds nothing and the pick is reported as missing stock.
+
+### 2. The nightly export skips the last page of rows
+`tools/export_csv.py:88`
+
+The loop stops when a page holds fewer than `PAGE` rows, but it breaks before writing that page.
+
+- **Input:** 1,050 rows with `PAGE = 500`.
+- **Result:** the file holds 1,000 rows and no error is printed.
+
+### 3. A negative quantity passes the new check
+`src/stock/adjust.py:17`
+
+`if qty is None` replaced `if not qty or qty < 0`, so an adjustment of `-5` is accepted and the count goes below zero.
+
+### 4. The cache key ignores the warehouse (possible)
+`src/stock/cache.py:30`
+
+The key is the SKU alone. Two warehouses that stock the same SKU would share a cached count.
+
+#### Why it may not bite yet
+
+I did not find a caller that asks for two warehouses in one process, so this may not happen today.

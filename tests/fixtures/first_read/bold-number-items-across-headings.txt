@@ -1,0 +1,48 @@
+Notes on the shipping rate rework, grouped by file.
+
+### Rates
+
+**1. The guard never fires on the change that motivated it** (`src/shipping/rates.py:48-56` and `:61-63`)
+
+It runs when the carrier set differs from yesterday's. The outage it was added for came from a new rate table under an unchanged carrier set.
+
+- **Possible fix:** trigger on any rate table edit.
+
+**2. The guard and the loader read a rate row two ways** (`src/shipping/rates.py:70`)
+
+An empty zone cell is fine for the guard and skipped by the loader, so a table with one blank zone validates and then loses that row.
+
+- **Possible fix:** one row parser, called from both places.
+
+### `src/shipping/zones.py`
+
+**3. Repeating a zone name overwrites the earlier zone** (line 85)
+
+The second definition wins without a warning.
+
+- **Possible fix:** reject a zone name already seen.
+
+**4. `load --from` takes `~` literally while `save` expands it** (line 112)
+
+A path that saves fine cannot be loaded back.
+
+**5. A stray editor swap file stops the reload** (line 71)
+
+Everything in the folder is parsed, `.zones.csv.swp` included.
+
+### Minor
+
+**6. Zone names in other scripts get past the name check** (`src/shipping/zones.py:84-85`)
+
+`str.isalnum` is true for Greek and Cyrillic letters too.
+
+- **Possible fix:** an ASCII-only pattern.
+
+**7. A repeated header row is read as data** (`src/shipping/zones.py:57`)
+
+It becomes a zone with no rates.
+
+### Outside the code
+
+- **The sample table would now be refused.** `docs/rates-sample.csv` has a blank zone.
+- **A test helper leaks state:** `tests/test_zones.py:26` replaces a fixture that the following test relies on.

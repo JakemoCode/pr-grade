@@ -1,0 +1,17 @@
+Read through with git, plus the surrounding module.
+
+## Findings
+
+### 1. A zip the tool fails to open still counts as imported: `tools/import_archive.py:84-85`
+`entries = archive.list() or []` turns a failed listing (`None`) into an empty one, and the run then announces success with zero rows.
+
+### 2. Names with spaces arrive wrapped in quotes: `tools/import_archive.py:81`
+The listing quotes such names, and the code opens the quoted string as a path.
+
+### 3. The "only new entries" test does not start from a fresh archive: `tests/test_import_archive.py:303`
+It picks up an archive left by the test before it, so it passes for a reason unrelated to the code.
+
+## Looked at, no problem
+- **Missing zip:** the tool exits with code 2 and a message, which the caller reports.
+- **Slow zip:** a timeout falls back to the cached listing.
+- **Fixture path:** setting it in `setUp` leaves the older tests unchanged.

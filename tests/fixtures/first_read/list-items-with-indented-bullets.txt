@@ -1,0 +1,27 @@
+From the diff of the invoice work:
+
+### Findings
+
+1. **`src/billing/invoice.py:326`: the template lint passes a title the renderer will not print.**
+   Lint wants `Invoice` to open the line; the renderer wants `Invoice:` with its colon.
+   - **Failure:** a template that loses the colon is green in CI and renders a blank page.
+   - **Fix:** demand the exact title in both, or relax both alike.
+
+2. **`src/billing/batch.py:207-212`: a crash mid-batch writes some invoices and no batch row.**
+   Invoices go out first; the row recording the batch comes last.
+   - **Failure:** a rerun sees no batch and sends the early invoices a second time.
+
+3. **`src/billing/batch.py:190`: a Thumbs.db file in the output folder stops a rerun.**
+   Every file there is parsed as an invoice.
+   - **Failure:** reruns on a shared Windows drive fail at that file.
+
+4. **`src/billing/batch.py:228-230`: `verify --against` reports files the batch never wrote.**
+   It compares the entire folder.
+   - **Failure:** someone's unrelated edit shows up as a batch fault.
+   - **Fix:** compare only the files listed in the batch row.
+
+5. **`docs/templates/invoice.md:68-77`: the example only fits one currency.**
+   - **Failure:** a multi-currency invoice built from it puts the totals in the wrong place.
+
+6. **`tests/test_batch.py:408`: a test replaces a helper its base class provides.**
+   - **Failure:** later tests in the class get the replacement instead of the original.

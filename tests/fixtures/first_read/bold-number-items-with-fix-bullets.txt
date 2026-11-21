@@ -1,0 +1,16 @@
+Four items on the manual-count changes.
+
+**1. Daily and weekly views disagree on how many SKUs were hand-adjusted**: `src/stock/report.py:234` and `:265`
+Daily tallies every manual edit; weekly tallies distinct SKUs.
+- **Example:** one SKU edited twice on Monday reads 2 in the daily view and 1 in the weekly view.
+- **Fix:** pick one unit for both, or rename the daily column.
+
+**2. `correct` invents a count for a SKU nobody has counted**: `src/stock/correct.py:88`
+With no prior count, the correction becomes the first count, and the SKU appears in reports it never belonged to.
+- **Fix:** refuse a correction where no count exists.
+
+**3. Setting a count to its current value logs a manual edit**: `src/stock/correct.py:102`
+- **Fix:** do nothing when old and new values match.
+
+**4. SKUs on a truck cannot be corrected**: `src/stock/correct.py:55-56` and `src/stock/report.py:40`
+The lookup needs a bin, and goods in transit have no bin yet.

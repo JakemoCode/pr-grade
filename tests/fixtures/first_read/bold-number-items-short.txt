@@ -1,0 +1,11 @@
+Two small items.
+
+**1. The discontinued flag also catches notes that merely begin with the word** (nit), `src/stock/flags.py:9` and `src/stock/flags.py:31`
+
+The pattern `^disc` is meant for the marker `disc:` and also fires on a note reading `discount pending`. That SKU is then hidden from the catalogue.
+
+Matching the full marker, colon included, would leave the note alone.
+
+**2. Backorders on a discontinued SKU vanish from the weekly summary** (nit), `src/stock/report.py:193-197`
+
+The summary filters discontinued SKUs out before it collects their backorders.

@@ -1,0 +1,22 @@
+One issue will break the build. Everything after it is lower risk, mostly cases that current data never hits.
+
+Nothing could be executed in this session, so `tools/rebuild_index.py check` and its tests are unconfirmed. Reading by hand, I compared the sort order with the spec and the sample index with its sources; both agree.
+
+## Bugs
+
+1. **The new tests need a fixture the change never adds: `tests/test_rebuild_index.py:54` onward.** Every test opens `catalog.json` from the fixtures folder. On a clean clone it is absent, so each one errors with `FileNotFoundError`.
+
+## Lower risk
+
+2. **`check` only proves the index exists: `tools/rebuild_index.py:201`.** It never compares the entries with the catalogue, so an out-of-date index is reported as fine.
+
+3. **A SKU is taken from the full `source` path: `tools/rebuild_index.py:134`.** A source in a subfolder yields a SKU containing a slash.
+
+4. **One catalogue per folder is assumed: `tools/rebuild_index.py:103`, `:114`, `:77`.**
+   The glob takes its first match, and any second file in the folder is ignored without a word.
+
+5. **The README and a test give opposite answers about price edits: `tests/test_rebuild_index.py:102`.** The README says a price edit rebuilds the entry; the test expects no rebuild.
+
+6. **A missing `--root` is reported as an empty catalogue: `tools/rebuild_index.py:84`.**
+
+7. **Nit: `tools/rebuild_index.py:149-151`.** `entry_key` comes after its only caller, which works but reads backwards.

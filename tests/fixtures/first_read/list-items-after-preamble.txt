@@ -1,0 +1,13 @@
+The change adds a thumbnail cache to the product image service, with an expiry sweep.
+
+Five items:
+
+1. **`src/images/cache.py:97-101`: an interrupted sweep leaves expired thumbnails served forever.** `sweep()` deletes entries one by one and records the cursor only at the end. Kill the process mid-sweep and the next run starts after the old cursor, so the entries in between are never visited again.
+
+2. **`src/images/cache.py:126` with `131-135`: a failed delete is logged as done.** `drop()` catches `PermissionError` and returns `True`.
+
+3. **`src/images/cache.py:99-101`: a recycled file name can delete a fresh thumbnail.** Names are hashes of the product id only, so a re-uploaded image reuses the name the sweep has queued for deletion.
+
+4. **`src/images/resize.py:149-152`: a resize that fails to start leaves its lock file behind.** The lock is created first and removed only on success.
+
+5. **`tests/test_cache.py`, `test_an_entry_added_during_the_sweep_survives`: the test holds without the fix.** It adds the entry before the sweep begins, so it never covers one added during it.

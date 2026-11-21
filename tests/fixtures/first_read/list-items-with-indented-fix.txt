@@ -1,0 +1,17 @@
+Five items on the price feed cache.
+
+1. **A stalled feed blocks every page that shows a price.** `src/prices/feed.py:40` waits on the supplier's socket with no deadline, and the page handler calls it inline.
+   - **Failure:** when the supplier hangs, product pages hang with it until the load balancer gives up.
+   - **Fix:** a read timeout, then the last cached price with a staleness flag.
+
+2. **A cached price is reused for a different currency.** `src/prices/feed.py:61-66`
+   The cache key is the SKU; the currency is not part of it.
+   - **Fix:** key on SKU and currency together.
+
+3. **The ops guide tells staff to clear the cache with a command the change removed.** `docs/ops.md:140-144`
+   - **Fix:** name the replacement command.
+
+4. **The guide's expiry section gives two different lifetimes.** `docs/ops.md:154-156`
+   One sentence says ten minutes, the next says an hour.
+
+5. **Nit: one log message is three times the width of the rest.** `src/prices/feed.py:19`

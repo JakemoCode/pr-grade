@@ -1,0 +1,34 @@
+Six items, then a note on the docs.
+
+### 1. The return window quotes an outdated policy
+- **File:** `src/returns/policy.py:12`
+- The code says 45 days and cites the 2025 policy, which says 30.
+- **Consequence:** when the policy moves again, nothing notices, and the code goes on citing a number nobody stands behind.
+
+### 2. Undelivered orders can be returned
+- **File:** `src/returns/open.py:40`
+- Eligibility is `order.status != "cancelled"`, which includes parcels still on the road.
+- **Consequence:** a refund is issued for goods that have not arrived yet.
+
+### 3. `open_return` trusts the warehouse it is handed
+- **File:** `src/returns/open.py:28`
+- It is an argument instead of a lookup on the order.
+- **Consequence:** pass the wrong warehouse and the return is filed there, with no complaint.
+
+### 4. The courier's tracking number is stored unchecked
+- **File:** `src/returns/labels.py:61`
+- Nothing confirms the reply is for this return.
+- **Consequence:** a crossed reply files someone else's tracking number.
+
+### 5. Duplicates are spotted by reading the exception text (possible)
+- **File:** `src/returns/open.py:52`
+- It searches the message for `"already exists"`.
+- **Consequence:** a reworded store error lets the duplicate in.
+
+### 6. `reason` has no length cap (minor)
+- **File:** `src/returns/open.py:19`
+- Megabytes of text go straight into the row.
+
+### Docs
+- **File:** `docs/decisions/returns.md:8`
+- The record still says only support staff may open a return.

@@ -425,6 +425,12 @@ class AgentTest(unittest.TestCase):
             with self.subTest(word=word):
                 self.assertNotIn(word, body)
 
+    def test_the_scan_runs_nothing_but_git(self) -> None:
+        # The test's reader ran nothing. Given auto mode, the 0.19.0 smoke grade's scan ran the suites and probe scripts
+        # in the author's checkout and took 453 s against the test's 150 s median.
+        body = self.AGENT.split('---\n', 2)[2]
+        self.assertIn('Run nothing but git', body)
+
     def test_the_prompt_the_scan_is_given_is_the_tested_one(self) -> None:
         self.assertEqual(grade_mode.SCAN_PROMPT, PROMPT)
 

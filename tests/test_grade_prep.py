@@ -724,6 +724,28 @@ class LensSliceCliTest(unittest.TestCase):
         self.assertNotIn('## 4. What a finding must carry', a)
         self.assertIn('sections 3 to 5', a)
 
+    def test_a_skill_file_that_cannot_be_read_is_named_and_a_stray_one_drops_no_text(self) -> None:
+        self.commit('{"silent": ["store.py"]}\n', FS_SHAPED)
+        skill = Path(self.tmp.name) / 'skill'
+        shutil.copytree(SCRIPTS.parent, skill, ignore=shutil.ignore_patterns('__pycache__'))
+        groups = ('--base', 'main', '--groups', 'a=L9,L15', '--groups', 'b=L16,L17')
+        scoring = (skill / 'scoring.md').read_bytes()
+        (skill / 'scoring.md').write_bytes(scoring + b'\xff\xfe\n')
+        run = self.run_cli('--skill', str(skill))
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn(str(skill / 'scoring.md'), run.stderr)
+        self.assertEqual(list(self.proofs.iterdir()), [])
+        out = self.prep_with(*groups, script=skill / 'scripts')
+        self.assertRegex(out, r'(?m)^notice: no skill beside ')
+        self.assertRegex(out, rf"(?m)^notice: .*{re.escape(str(skill / 'scoring.md'))}")
+        (skill / 'scoring.md').write_bytes(scoring)
+        # A stray file beside the skill, such as a Latin-1 README.md, costs the graders none of the skill's text.
+        (skill / 'README.md').write_bytes('# Notes, caf\xe9\n'.encode('latin-1'))
+        out = self.prep_with(*groups, script=skill / 'scripts')
+        self.assertNotIn('notice: no skill beside', out)
+        self.assertRegex(out, rf"(?m)^notice: .*{re.escape(str(skill / 'README.md'))}")
+        self.assertIn(self.SKILL_L9, self.prompts(out)['a'])
+
 
 class SurfaceTest(unittest.TestCase):
     """One commit on main, graded by path: no branch touched `src`."""

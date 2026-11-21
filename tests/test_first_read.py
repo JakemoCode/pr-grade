@@ -250,6 +250,33 @@ class DecisionTest(Repo):
         self.assertIn('651 changed lines', self.decision())
         self.assertIn('151 changed lines', self.decision('--exclude-path', 'kept/'))
 
+    def test_a_rename_across_an_excluded_prefix_counts_as_the_graders_read_it(self) -> None:
+        # The graders' pathspec leaves the excluded side out, so the other side reads as all added or all deleted.
+        (self.repo / 'docs').mkdir()
+        (self.repo / 'docs/x.py').write_text('Z = 0\n' * 200)
+        git(self.repo, 'add', '-A')
+        git(self.repo, 'commit', '-q', '-m', 'docs')
+        before = git(self.repo, 'rev-parse', 'HEAD').strip()
+        (self.repo / 'src').mkdir()
+        git(self.repo, 'mv', 'docs/x.py', 'src/x.py')
+        git(self.repo, 'commit', '-q', '-m', 'move')
+        self.assertEqual(grade_mode.graded_lines(self.repo, before, 'HEAD'), 0)
+        self.assertEqual(grade_mode.graded_lines(self.repo, before, 'HEAD', ('docs/',)), 200)
+        self.assertEqual(grade_mode.graded_lines(self.repo, before, 'HEAD', ('src/',)), 200)
+        self.assertEqual(grade_mode.graded_lines(self.repo, before, 'HEAD', ('docs/', 'src/')), 0)
+
+    def test_a_local_branch_base_with_a_slash_is_not_read_as_a_remote(self) -> None:
+        # `release/c0` is a local branch, so an unrelated local `c0` says nothing about where this branch began.
+        git(self.repo, 'branch', 'release/c0', 'main')
+        self.assertEqual(self.decision('--branch-base', 'release/c0'),
+                         'scan: yes (151 changed lines, over scanAbove 150, in round 1 of a subagent grade)')
+        graded = git(self.repo, 'rev-parse', 'HEAD').strip()
+        (self.repo / 'store.py').write_text((self.repo / 'store.py').read_text() + 'Y = 2\n' * 200)
+        git(self.repo, 'commit', '-q', '-am', 'fix')
+        git(self.repo, 'branch', 'c0', graded)
+        out = self.ok('grade_mode.py', '--base', graded, '--branch-base', 'release/c0', '--scan')
+        self.assertIn(f'scan: no (a re-grade: {graded} is after where the branch left release/c0)', out)
+
     def test_uncommitted_edits_stop_it(self) -> None:
         (self.repo / 'store.py').write_text('dirty\n')
         run = self.run_script('grade_mode.py', '--base', 'main', '--scan')

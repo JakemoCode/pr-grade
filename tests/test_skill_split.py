@@ -66,7 +66,7 @@ class SkillTextTest(unittest.TestCase):
     """grade_prep.py reads sections 3 to 5 from whichever of the skill's files holds each."""
 
     def test_the_shipped_files_give_every_lens_and_sections_4_and_5(self) -> None:
-        lenses, rules = grade_prep.skill_lens_text(grade_prep.skill_texts(SKILL_DIR))
+        lenses, rules = grade_prep.skill_lens_text(grade_prep.skill_texts(SKILL_DIR)[0])
         sections = {lens: piece for lens, piece in grade_prep.lens_pieces(lenses) if lens}
         self.assertEqual(list(sections), grade_prep.grade_block.DEFAULT_LENSES)
         self.assertTrue(lenses.startswith('## 3. The fourteen lenses\n'))
@@ -91,9 +91,9 @@ class SkillTextTest(unittest.TestCase):
         self.assertIsNone(grade_prep.skill_lens_text([one, '## 5. S again\n\ns\n']))
 
     def test_a_directory_gives_its_markdown_files_and_a_file_gives_itself(self) -> None:
-        self.assertEqual(len(grade_prep.skill_texts(SKILL_DIR)), len(PLACES))
-        self.assertEqual(grade_prep.skill_texts(SKILL_DIR / 'lenses.md'), [(SKILL_DIR / 'lenses.md').read_text()])
-        self.assertEqual(grade_prep.skill_texts(SKILL_DIR / 'absent'), [])
+        self.assertEqual(len(grade_prep.skill_texts(SKILL_DIR)[0]), len(PLACES))
+        self.assertEqual(grade_prep.skill_texts(SKILL_DIR / 'lenses.md'), ([(SKILL_DIR / 'lenses.md').read_text()], []))
+        self.assertEqual(grade_prep.skill_texts(SKILL_DIR / 'absent'), ([], []))
 
     def test_a_dotfile_or_a_directory_named_like_markdown_is_not_skill_text(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -104,12 +104,26 @@ class SkillTextTest(unittest.TestCase):
             (copy / 'notes.md').mkdir()
             self.assertEqual(grade_prep.skill_texts(copy), grade_prep.skill_texts(SKILL_DIR))
 
-    def test_a_skill_file_that_is_not_text_gives_no_skill_text(self) -> None:
+    def test_a_stray_file_that_is_not_text_is_named_and_the_others_are_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / 'skill'
+            shutil.copytree(SKILL_DIR, copy, ignore=shutil.ignore_patterns('scripts', 'templates'))
+            (copy / 'README.md').write_bytes('# Notes, caf\xe9\n'.encode('latin-1'))
+            texts, unread = grade_prep.skill_texts(copy)
+            self.assertEqual(unread, [copy / 'README.md'])
+            self.assertEqual(texts, grade_prep.skill_texts(SKILL_DIR)[0])
+            self.assertIsNotNone(grade_prep.skill_lens_text(texts))
+
+    def test_a_section_file_that_cannot_be_read_is_named_and_gives_no_skill(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             copy = Path(tmp) / 'skill'
             shutil.copytree(SKILL_DIR, copy, ignore=shutil.ignore_patterns('scripts', 'templates'))
             (copy / 'scoring.md').write_bytes(b'## 5. Score\n\xff\xfe\n')
-            self.assertEqual(grade_prep.skill_texts(copy), [])
+            texts, unread = grade_prep.skill_texts(copy)
+            self.assertEqual(unread, [copy / 'scoring.md'])
+            self.assertEqual(len(texts), len(PLACES) - 1)
+            # Section 5 lived there, so skipping the file can never hand a grader sections 3 and 4 alone.
+            self.assertIsNone(grade_prep.skill_lens_text(texts))
 
 
 if __name__ == '__main__':

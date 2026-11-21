@@ -230,12 +230,29 @@ def make(repo: Path, sha: str, names: list[str], config: dict, parent: Path, sin
     return lines
 
 
-def remove(root: Path, drop_proofs: bool = False) -> str:
+def proof_roots(roots: list[Path]) -> tuple[Path, ...]:
+    """Those of `roots` that are proof roots now, read before a remove deletes any of them."""
+    return tuple(root for root in roots if not root.is_symlink() and (root / MARKER).is_file())
+
+
+def _made_here(root: Path, line: tuple[Path, ...]) -> bool:
+    """Whether a missing `root` is one `make` printed: named with PREFIX, and in the temp directory, or in the
+    directory of a root in `line`, the proof roots its remove: line held when the run began, for a line run where
+    TMPDIR is not what it was for make."""
+    if not root.name.startswith(PREFIX):
+        return False
+    parent = os.path.realpath(root.parent)
+    return parent == os.path.realpath(tempfile.gettempdir()) or any(
+        os.path.realpath(other.parent) == parent for other in line if other != root)
+
+
+def remove(root: Path, drop_proofs: bool = False, line: tuple[Path, ...] = ()) -> str:
     """Deletes a root `make` printed. A link inside it is unlinked, never followed. A proof test a grader
     kept under `<name>/proofs/` is the repair's starting point, so the root stays until each one is moved
-    out, unless `drop_proofs` says to delete them. A root that no longer exists was removed already: a second
-    run of a remove: line that refused one root finds the others gone."""
-    if not root.exists() and not root.is_symlink():
+    out, unless `drop_proofs` says to delete them. A root that no longer exists was removed already when
+    `_made_here` says `make` printed it, given the other roots on its `line`: a second run of a remove: line that
+    refused one root finds the others gone. Any other missing path is refused, so a typo never reads as cleaned up."""
+    if not root.exists() and not root.is_symlink() and _made_here(root, line):
         return f'already removed: {root}'
     if root.is_symlink() or not (root / MARKER).is_file():
         sys.exit(f'{root} holds no {MARKER}, so it is not a proof root; nothing was removed')
@@ -263,10 +280,10 @@ def main() -> None:
     args = ap.parse_args()
     try:
         if args.command == 'remove':
-            refused = []
+            refused, line = [], proof_roots(args.roots)
             for root in args.roots:
                 try:
-                    print(remove(root, args.drop_proofs))
+                    print(remove(root, args.drop_proofs, line))
                 except SystemExit as refusal:
                     refused.append(str(refusal.code))
                 except OSError as failed:

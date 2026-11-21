@@ -227,7 +227,7 @@ All live in `skills/pr-grade/scripts/`. The skill calls them; you rarely run one
 
 `check_then_act.py --whole` scans every function in the changed files, and `--json` prints the list as data. `PR_GRADE_TYPESCRIPT` points the scanner at a `typescript` package when the repository has none.
 
-The `pr-grade:grade` agent runs on Sonnet at `high` effort with 50 turns, and is read-only on the repository: it proves findings in its own clone. The `pr-grade:scan` agent, the first read, runs on Opus at `high` with 50 turns and no `CLAUDE.md`, reads no lens and no skill text, and writes one file, its report.
+The `pr-grade:grade` agent runs on Sonnet at `high` effort with 50 turns, and is read-only on the repository: it proves findings in its own clone. The `pr-grade:scan` agent, the first read, runs on Opus at `high` with 50 turns and no `CLAUDE.md`, reads no lens and no skill text, runs nothing but git, and writes one file, its report.
 
 ### Embedding the checks
 

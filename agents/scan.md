@@ -10,4 +10,6 @@ maxTurns: 50
 
 Answer the question your prompt asks about the change, as asked.
 
+Run nothing but git. Read the code with git and your read tools, and run no test, script, or interpreter: the repository is the author's checkout, and a run there can change it.
+
 Write your whole answer, once, with the Write tool, to the path your prompt names. Then reply with that path alone. Do not edit, stage, or commit anything in the repository, and write no other file.

@@ -18,7 +18,7 @@ Each entry says what changed, where, and why. Under it, **Before** is the old be
 - `skills/pr-grade/scoring.md`: added to section 5 what the merge prints for each kind of suspect line, and what the coordinator does with each.
   - **Before:** section 5 had no rule for suspects.
   - **Seen on:** the scan-then-proof test, ForgeSmith-OS PR 910, whose proven suspect was ranked P3 for a reason about today's callers.
-- `agents/scan.md`: added the first read, an Opus agent at effort `high` with 50 turns, no `CLAUDE.md` and no lens or skill text, given the scan-then-proof test's bare prompt and told to write its report to one file, to put an Opus reading of a large change in front of the graders.
+- `agents/scan.md`: added the first read, an Opus agent at effort `high` with 50 turns, no `CLAUDE.md` and no lens or skill text, given the scan-then-proof test's bare prompt and told to run nothing but git and to write its report to one file, to put an Opus reading of a large change in front of the graders.
   - **Before:** only the Sonnet graders read a change, and on 27 recorded escapes the grader alone expects 8.3 catches a pass.
   - **Seen on:** the scan-then-proof test, where the read then the grader proved 13 of the 27 at P2 or higher.
 - `skills/pr-grade/scripts/grade_mode.py`: added `--scan`, which prints `scan: yes` or `scan: no` with its reason, from the mode, the round and `scanAbove` (default 150 changed lines), and on a yes prints the scan's prompt and the prep's `--suspects <dir>`, to start the scan before the prep with no judgment left to the coordinator.

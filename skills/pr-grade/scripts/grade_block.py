@@ -345,8 +345,9 @@ def is_run(command: str) -> bool:
 def _suspects(items: list[str]) -> list[dict]:
     """The `Suspects:` field's items as `id`, `number`, `verdict` (`proven`, `refuted`, `could not verify`, or None
     for a line naming none of them), `rank` (the first `P<n>` on the line, or None), `text` (the words after the
-    verdict on the item's first line), `commands` (each `Command:` in it, in order), `output` (the text after the first
-    `Output:` past the first command, or the lines after that command; None when absent), and `item`, the whole of it."""
+    verdict on the item's first line), `runs` (each `Command:` in it, in order, as `command` and its own `output`: the
+    text after an `Output:` before the next `Command:`, or else the lines between the two; None when there is none),
+    and `item`, the whole of it."""
     read = []
     for item in items:
         first, _, rest = item.partition('\n')
@@ -354,20 +355,18 @@ def _suspects(items: list[str]) -> list[dict]:
         if not head:
             continue
         verdict = VERDICT.match(head[2])
-        commands = [found.strip().strip('`').strip() for found in COMMAND.findall(item)]
-        command = COMMAND.search(item)
-        output = None
-        if command:
-            after = item[command.end():]
-            said = OUTPUT.search(after)
-            lines = (said[1] if said else after).splitlines()
+        found = list(COMMAND.finditer(item))
+        runs = []
+        for command, after in zip(found, found[1:] + [None]):
+            span = item[command.end():after.start() if after else len(item)]
+            said = OUTPUT.search(span)
+            lines = (said[1] if said else span).splitlines()
             output = '\n'.join(line for line in lines if line.strip() and not FENCE.match(line.strip())).strip() or None
+            runs.append({'command': command[1].strip().strip('`').strip(), 'output': output})
         rank = RANK.search(first)
         read.append({'id': f'S{int(head[1])}', 'number': int(head[1]),
                      'verdict': verdict[1].lower() if verdict else None, 'rank': rank[0] if rank else None,
-                     'text': (verdict[2] if verdict else head[2]).strip(),
-                     'commands': commands, 'output': output,
-                     'item': item})
+                     'text': (verdict[2] if verdict else head[2]).strip(), 'runs': runs, 'item': item})
     return read
 
 
@@ -718,7 +717,7 @@ def settle_suspects(group: str, handed: int, report: dict, roots: tuple[str, ...
             claims.append(f'{sid} could not verify: {text}')
             lines.append(f'  {group} {sid} could not verify, ' + (suspect['rank'] or 'no rank') + ': see could not verify')
         elif verdict == 'refuted':
-            ran = next((command for command in suspect['commands'] if is_run(command)), None) if suspect['output'] else None
+            ran = next((run['command'] for run in suspect['runs'] if run['output'] and is_run(run['command'])), None)
             if ran:
                 lines.append(f'  {group} {sid} refuted by a run: {ran}')
             else:

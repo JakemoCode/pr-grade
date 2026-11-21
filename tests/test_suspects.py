@@ -61,8 +61,7 @@ class ReadTest(unittest.TestCase):
             'S3 could not verify: P3, the fixture needs a database the copy cannot start.\n'))
         self.assertEqual([(s['id'], s['verdict']) for s in read['suspects']],
                          [('S1', 'proven'), ('S2', 'refuted'), ('S3', 'could not verify')])
-        self.assertEqual(read['suspects'][1]['commands'], ['python3 -c "import a; a.f(); a.f()"'])
-        self.assertEqual(read['suspects'][1]['output'], '`2`')
+        self.assertEqual(read['suspects'][1]['runs'], [{'command': 'python3 -c "import a; a.f(); a.f()"', 'output': '`2`'}])
         self.assertEqual(read['suspects'][2]['rank'], 'P3')
         self.assertEqual(len(read['fields']['Suspects']), 3)
 
@@ -71,7 +70,7 @@ class ReadTest(unittest.TestCase):
             'S1 refuted: P2, the empty list.\nCommand: `pytest tests/test_a.py`\n```\nScore: 1 passed\nL4: ok\n```\n'
             'S2 could not verify: P3, no run.\n'))
         self.assertEqual([s['id'] for s in read['suspects']], ['S1', 'S2'])
-        self.assertIn('Score: 1 passed', read['suspects'][0]['output'])
+        self.assertIn('Score: 1 passed', read['suspects'][0]['runs'][0]['output'])
         self.assertNotIn('L4', read['fields'])
 
     def test_a_verdict_is_read_whatever_its_case_or_punctuation(self) -> None:

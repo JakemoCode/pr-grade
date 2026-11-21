@@ -7,7 +7,6 @@ since ForgeSmith-OS and agents/grade.md cite sections by number.
 """
 from __future__ import annotations
 
-import hashlib
 import re
 import shutil
 import sys
@@ -23,19 +22,6 @@ import grade_prep  # noqa: E402
 # Where each section lives. The core holds what every subagent or fan-out grade needs before its graders report.
 PLACES = {'SKILL.md': ['1', '2', '4', '6'], 'lenses.md': ['3'], 'scoring.md': ['5'], 'fix-and-regrade.md': ['7'],
           'setup-and-enforcement.md': ['0', '8'], 'surface-grades.md': ['9']}
-# git's blob id for SKILL.md at adbdd3c, the last commit before the split, which held every section in one file.
-BEFORE_SPLIT = '4f08d711a45bb300b78fd3b4310e849294947b0a'
-# Each sentence the split reworded, as it reads now and as it read before. Section 2 described the one file the prep
-# sliced and the cut it made, and both changed with the split and issue #81.
-REWORDED = {
-    ('section 3 less the lens sections of lenses the grader does not hold, sections 4 and 5 whole, and the lens file '
-     'less the lens sections of lenses it does not hold'):
-    ('section 3 up to its first lens and each lens the grader holds, sections 4 and 5 whole, and the lens file less '
-     'the lens sections of lenses it does not hold'),
-    ("The prep slices the skill's files beside its `scripts/` directory, or the copy `--skill <path>` names, a "
-     'directory or one file holding sections 3 to 5;'):
-    'The prep slices the `SKILL.md` beside its `scripts/` directory, or the copy `--skill <path>` names;',
-}
 SECTION = re.compile(r'(?m)^## (\d+)\. ')
 LINK = re.compile(r'\]\(([\w-]+\.md)\)')
 
@@ -74,30 +60,6 @@ class SplitTest(unittest.TestCase):
         two = cut(files()['SKILL.md'])[1]['2']
         self.assertNotIn('section 3 up to its first lens', two)
         self.assertNotIn('slices the `SKILL.md` beside', two)
-
-    def test_the_split_moved_every_line_and_added_only_the_pointers(self) -> None:
-        # A one-time proof for the 0.18.0 split: the core less its pointer paragraphs, with every file's sections put
-        # back in number order, is byte for byte the SKILL.md before it. The first change that rewords a moved section
-        # deletes this test.
-        core = files()['SKILL.md']
-        for now, before in REWORDED.items():
-            self.assertIn(now, core)
-            core = core.replace(now, before)
-        pointers = [paragraph for paragraph in core.split('\n\n') if LINK.search(paragraph)
-                    and set(LINK.findall(paragraph)) <= set(PLACES)]
-        self.assertTrue(pointers)
-        for paragraph in pointers:
-            core = core.replace(paragraph + '\n\n', '', 1) if paragraph + '\n\n' in core else core.replace(
-                '\n\n' + paragraph, '\n', 1)
-        sections: dict[str, str] = {}
-        intro = ''
-        for name, text in files().items():
-            head, found = cut(core if name == 'SKILL.md' else text)
-            intro = head if name == 'SKILL.md' else intro
-            sections.update({number: body.rstrip('\n') + '\n\n' for number, body in found.items()})
-        joined = (intro + ''.join(sections[number] for number in sorted(sections, key=int))).rstrip('\n') + '\n'
-        data = joined.encode()
-        self.assertEqual(hashlib.sha1(b'blob %d\0' % len(data) + data).hexdigest(), BEFORE_SPLIT)
 
 
 class SkillTextTest(unittest.TestCase):

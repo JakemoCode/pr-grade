@@ -40,8 +40,14 @@ nearest changed line and the function it sits in, and never refuses one: a defec
 the change left alone. The block keeps each grader's notes in `Verified and clear` and writes a lens
 grade_prep.py skipped as `L2 (not applicable)`. It settles nothing that needs judgment: two lines with
 one cause, a clearance against a proof, a 3 for a design decision, or a 1. While a duplicate line, an
-`anchor:` flag, an open claim that would block, a defect outside its lens, an unassessed lens, or a
-proof test with no repository path is open, its `Score` reads `<floor>/5 floor; ...`, which `check` refuses until the coordinator writes one.
+`anchor:` flag, an open claim that would block, a defect outside its lens, an unassessed lens, a
+proof test with no repository path, a handed suspect with no line, or a proven suspect naming no finding is open, its `Score` reads
+`<floor>/5 floor; ...`, which `check` refuses until the coordinator writes one.
+
+`grade.json` may hold `suspects`, each group's count of suspects its prompt file numbered `S1` to `S<n>` under
+`Suspects from a first read:`. The merge reads each grader's `Suspects:` lines: a `could not verify` line is an open
+claim at its rank, and a `refuted` line is one too, as refuted without a run, unless a command in it gives the code an
+input and its output follows. A group with no `suspects` count and no `Suspects:` field merges as it did before.
 """
 from __future__ import annotations
 
@@ -95,7 +101,7 @@ LENS_HEADING = re.compile(r'(?m)^###[ \t]+(L\d+)\.')
 LENS_ID = re.compile(r'L\d+\b')
 LEAD_ID = re.compile(r'(L\d+)\b[ \t]*')
 SHA = re.compile(r'[0-9a-f]{40}')
-REPORT_LINE = re.compile(r'^(Score|Blocking|Verified and clear|Could not verify|Outside my lenses|L7 candidates|L\d+):'
+REPORT_LINE = re.compile(r'^(Score|Blocking|Verified and clear|Could not verify|Outside my lenses|L7 candidates|Suspects|L\d+):'
                          r'[ \t]*(.*)$')
 # `P1 L4 <file>:<line> in <symbol> - <title>`, or `<file>:<start>-<end>`. The symbol runs to the first ` - `,
 # so a symbol written with words after it still parses, and a finding without one still reads. A column
@@ -113,6 +119,25 @@ NEW_ITEM = re.compile(r'([-*+]|\d+[.)])[ \t]|(L\d+|P[123])\b')
 LENS_POSSESSIVE = re.compile(r"L\d+['’]s\b")
 RANK = re.compile(r'\bP[123]\b')
 SKIPPED = 'not applicable: skipped by grade_prep.py --skip'
+# A line of the `Suspects:` field: `S3 proven: ...`, `S3 - Proven, ...`, `S3. could not verify ...`.
+SUSPECT = re.compile(r'^S(\d+)\b[ \t]*[.:)-]?[ \t]*(.*)$')
+VERDICT = re.compile(r'^(proven|refuted|could not verify)\b[ \t]*[:,.-]?[ \t]*(.*)$', re.I)
+COMMAND = re.compile(r'\bCommand:[ \t]*(.*?)(?=[ \t]+Output:|$)', re.M)
+OUTPUT = re.compile(r'\bOutput:[ \t]*(.*)', re.S)
+FILE_LINE = re.compile(r'([^\s`(]+?):(\d+)')
+# Programs that execute code. A refutation is a run only when one of its commands starts one of these, or a script in
+# the repository: a grep that shows a guard exists is an argument, and the defect PR 1435 lost was refuted that way.
+# A runner missing here fails closed, to the coordinator's list; a reader missing from a list of readers would not.
+RUNNER = re.compile(r'(python|pypy)[\d.]*|node|npx|npm|pnpm|yarn|bun|deno|tsx|ts-node|pytest|py\.test|vitest|jest|'
+                    r'mocha|go|cargo|rustc|make|ruby|rake|rspec|perl|php|phpunit|java|mvn|gradle|dotnet|uv|uvx|poetry|'
+                    r'pipenv|tox|nox|swift|gcc|cc|clang|sqlite3|psql|docker')
+SEPARATORS = {'&&', '||', '|', ';', '&', '(', ')', ';;', '|&'}
+# Commands that start the program after their own words, and the options among those words that take a value.
+WRAPPERS = {'env', 'xargs', 'timeout', 'nice', 'command', 'time', 'sudo', 'nohup', 'exec'}
+WRAPPER_VALUES = {'-u', '-C', '-S', '-s', '-k', '-n', '-I', '-L', '-P', '-d', '-E', '-a', '-g', '--unset', '--chdir',
+                  '--signal', '--kill-after'}
+DURATION = re.compile(r'\d+(\.\d+)?[smhd]?')
+SHELLS = {'sh', 'bash', 'zsh', 'dash'}
 
 
 def without_code(markdown: str) -> str:
@@ -266,6 +291,85 @@ def _inside(path: str, roots: tuple[str, ...]) -> str:
     return path
 
 
+def _program(words: list[str]) -> list[str]:
+    """`words` from the program they start: past `NAME=value` words, and past each wrapper with its options, the
+    values those options take, and a duration, so `env -u HOME grep` and `timeout -s KILL 5 cat` start at the read."""
+    i = 0
+    while i < len(words):
+        if re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', words[i]):
+            i += 1
+        elif os.path.basename(words[i]) in WRAPPERS:
+            i += 1
+            while i < len(words) and (words[i].startswith('-') or '=' in words[i] or DURATION.fullmatch(words[i])):
+                i += 2 if words[i] in WRAPPER_VALUES else 1
+        else:
+            break
+    return words[i:]
+
+
+def is_run(command: str) -> bool:
+    """Whether `command` gives the code an input: some command in it, split at `&&`, `|`, `;` and the like, starts a
+    program RUNNER names or a script by a path inside the repository (relative, such as `./scripts/check.sh`). A
+    shell's `-c` text, in any flag holding `c` such as `-lc`, is judged the same way. Anything else, a search, a read,
+    or prose, is not a run, so a runner this does not know fails closed."""
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        tokens = re.sub(r'(&&|\|\||[|;&()])', r' \1 ', command).split()
+    segments, segment = [], []
+    for token in tokens + [';']:
+        if token in SEPARATORS:
+            segments.append(segment)
+            segment = []
+        else:
+            segment.append(token)
+    for words in segments:
+        words = _program([word for word in words if word.strip()])
+        if not words:
+            continue
+        program, name = words[0], os.path.basename(words[0])
+        if name in SHELLS:
+            flag = next((i for i, word in enumerate(words[1:], 1) if re.fullmatch(r'-[A-Za-z]*c[A-Za-z]*', word)), None)
+            if flag is not None:
+                if flag + 1 < len(words) and is_run(words[flag + 1]):
+                    return True
+            elif any(not word.startswith('-') for word in words[1:]):
+                return True
+        elif RUNNER.fullmatch(name) or ('/' in program and not program.startswith(('/', '~'))):
+            return True
+    return False
+
+
+def _suspects(items: list[str]) -> list[dict]:
+    """The `Suspects:` field's items as `id`, `number`, `verdict` (`proven`, `refuted`, `could not verify`, or None
+    for a line naming none of them), `rank` (the first `P<n>` on the line, or None), `text` (the words after the
+    verdict on the item's first line), `runs` (each `Command:` in it, in order, as `command` and its own `output`: the
+    text after an `Output:` before the next `Command:`, or else the lines between the two; None when there is none),
+    and `item`, the whole of it."""
+    read = []
+    for item in items:
+        first, _, rest = item.partition('\n')
+        head = SUSPECT.match(first)
+        if not head:
+            continue
+        verdict = VERDICT.match(head[2])
+        found = list(COMMAND.finditer(item))
+        runs = []
+        for command, after in zip(found, found[1:] + [None]):
+            span = item[command.end():after.start() if after else len(item)]
+            said = OUTPUT.search(span)
+            lines = (said[1] if said else span).splitlines()
+            output = '\n'.join(line for line in lines if line.strip() and not FENCE.match(line.strip())).strip() or None
+            runs.append({'command': command[1].strip().strip('`').strip(), 'output': output})
+        rank = RANK.search(first)
+        read.append({'id': f'S{int(head[1])}', 'number': int(head[1]),
+                     'verdict': verdict[1].lower() if verdict else None, 'rank': rank[0] if rank else None,
+                     'text': (verdict[2] if verdict else head[2]).strip(), 'runs': runs, 'item': item})
+    return read
+
+
 def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
     """A grader's report as its fields and findings. A field runs on to the next field, finding, or
     closing line, and each of its lines is one item, joined by any more-indented lines that follow it:
@@ -277,7 +381,9 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
     indent past the finding's own, since output reads verbatim only inside its fence. A line inside such a
     fence is output even when it is shaped like a field or a finding. A `Proof test:` line among them
     names the test the grader kept, with any words after its paths kept as `proof_note`. A finding's file written
-    from one of `roots`, the repository or a proof copy, reads as the path inside it."""
+    from one of `roots`, the repository or a proof copy, reads as the path inside it. Under `Suspects:` an item starts
+    at each `S<n>` line and runs on, through its `Command:`, `Output:` and fenced lines, to the next one, the next
+    field, or a finding; `suspects` is those items as `_suspects` reads them, empty for a report without the field."""
     fields: dict[str, list[str]] = {}
     findings, current, indent, last_finding, finding_depth, fence = [], None, None, None, 0, None
     for raw in text.splitlines():
@@ -290,6 +396,15 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
             # Inside a finding's fence every line is its output, never a field or a finding. A fence left open
             # holds the rest of the report, so its lenses read unaccounted: the merge fails closed.
             last_finding['body'].append(body_line)
+            if not fence:
+                fence = opens[1]
+            elif line.startswith(fence):
+                fence = None
+            continue
+        joins_suspect = current == 'Suspects' and bool(fields[current]) and bool(line) and not SUSPECT.match(line)
+        if joins_suspect and (fence or opens):
+            # A suspect's output, fenced, is part of it, even a line shaped like a field.
+            fields[current][-1] += '\n' + line
             if not fence:
                 fence = opens[1]
             elif line.startswith(fence):
@@ -320,6 +435,9 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
             inline = field[2].strip()
             fields.setdefault(current, []).extend([inline] if inline else [])
             indent = depth if inline else None
+        elif joins_suspect:
+            # A suspect runs on to the next `S<n>` line or field, its `Command:` and `Output:` lines included.
+            fields[current][-1] += '\n' + line
         elif in_body and line:
             last_finding['body'].append(body_line)
         elif (current and line and fields[current] and indent is not None and depth > indent
@@ -328,7 +446,7 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
         elif current and line:
             fields[current].append(line)
             indent = depth if indent is None else indent
-    return {'fields': fields, 'findings': findings}
+    return {'fields': fields, 'findings': findings, 'suspects': _suspects(fields.get('Suspects', []))}
 
 
 def _functions(repo: Path, head: str, paths: list[str]) -> dict[str, list[dict]]:
@@ -444,6 +562,7 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
     lenses, status, notes = meta['lenses'], {}, {}
     findings: list[dict] = []
     open_claims, outside, scores, out = [], [], [], []
+    suspect_lines, unread_suspects, no_finding = [], [], []
     for group, held in meta['groups'].items():
         path = proof_root / group / 'grade.md'
         if group in given:
@@ -468,9 +587,11 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
             if found['rank'] != 'P3':
                 for lens in found['lenses'] or held:
                     status[lens] = f"{found['rank']} at {found['where']}"
-        for claim in fields.get('Could not verify', []):
-            if claim.lower().rstrip('.') == 'none':
-                continue
+        claims = [claim for claim in fields.get('Could not verify', []) if claim.lower().rstrip('.') != 'none']
+        handed = int((meta.get('suspects') or {}).get(group, 0))
+        if handed or report['suspects']:
+            claims += settle_suspects(group, handed, report, roots, suspect_lines, unread_suspects, no_finding)
+        for claim in claims:
             # A claim with no rank is counted as one that would block, and says so.
             blocking = blocks(claim)
             open_claims.append((group, claim, blocking))
@@ -528,6 +649,9 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
                 'which refuses while one is still here:']
         out += [f"  mv {shlex.quote(f['proof_test']['path'])} {shlex.quote(repo + '/' + f['proof_test']['at'])}"
                 for f in kept]
+    if suspect_lines:
+        handed = ', '.join(f'{group} {n}' for group, n in (meta.get('suspects') or {}).items() if n) or 'none'
+        out += ['', f'suspects (handed: {handed}):', *suspect_lines]
     out += ['', 'could not verify:']
     out += [f"  {group}: {claim}{'' if blocking else '  (P3, does not block)'}"
             for group, claim, blocking in open_claims] or ['  none']
@@ -538,7 +662,8 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
             'The Score line is yours to raise or lower.']
     pathless = sum(1 for f in findings if f.get('proof_test') and not f['proof_test']['at'])
     settle = to_settle(meta, status, unapplied, outside, sum(blocking for _, _, blocking in open_claims),
-                       shared_count, sum(1 for anchor in anchor_notes if anchor), unchecked, pathless)
+                       shared_count, sum(1 for anchor in anchor_notes if anchor), unchecked, pathless,
+                       unread_suspects=unread_suspects, no_finding=no_finding)
     if settle:
         out += ['left to your judgment; settle each, then edit only the lines it touches in the block below:']
         out += [f'  {item}' for item in settle]
@@ -573,6 +698,52 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
     return '\n'.join(out)
 
 
+def settle_suspects(group: str, handed: int, report: dict, roots: tuple[str, ...], lines: list[str],
+                    unread: list[str], no_finding: list[str]) -> list[str]:
+    """The open claims one group's `Suspects:` lines add, with a line each printed to `lines`. A `could not verify`
+    line is a claim at its rank. A `refuted` line is one too, as refuted without a run, unless it carries a `Command:`
+    that `is_run` and its output. A `proven` line must name a finding of its report at the finding's file:line, and
+    one ranked P3 prints its reason, for the coordinator to re-rank. Each handed suspect with no line the merge reads
+    goes on `unread`, and a proven one naming no finding on `no_finding`, so the block's Score stays a floor."""
+    claims, read, unverdicted = [], set(), set()
+    for suspect in report['suspects']:
+        sid, verdict, text = suspect['id'], suspect['verdict'], suspect['text']
+        if verdict is None:
+            lines.append(f'  {group} {sid} names no verdict: {text}')
+            unverdicted.add(suspect['number'])
+            continue
+        read.add(suspect['number'])
+        if verdict == 'could not verify':
+            claims.append(f'{sid} could not verify: {text}')
+            lines.append(f'  {group} {sid} could not verify, ' + (suspect['rank'] or 'no rank') + ': see could not verify')
+        elif verdict == 'refuted':
+            ran = next((run['command'] for run in suspect['runs'] if run['output'] and is_run(run['command'])), None)
+            if ran:
+                lines.append(f'  {group} {sid} refuted by a run: {ran}')
+            else:
+                claims.append(f'{sid} refuted without a run: {text}')
+                lines.append(f'  {group} {sid} refuted without a run: moved to could not verify')
+        else:
+            cited = [(_inside(file[2:] if file.startswith('./') else file, roots), int(line))
+                     for file, line in FILE_LINE.findall(suspect['item'].partition('\n')[0])]
+            at = [f for f in report['findings'] for file, line in cited if f['file'] == file and f['start'] <= line <= f['end']]
+            # Two findings can share a line: the one at the rank the suspect's line gives is its finding.
+            finding = next((f for f in at if f['rank'] == suspect['rank']), at[0] if at else None)
+            if finding is None:
+                no_finding.append(f'{group} {sid}')
+                lines.append(f'  {group} {sid} proven, names no finding in its report: {text}')
+            elif finding['rank'] == 'P3':
+                lines.append(f"  {group} {sid} proven, P3 at {finding['where']}: {text}  "
+                             '(P3: re-rank it if its reason does not hold)')
+            else:
+                lines.append(f"  {group} {sid} proven, {finding['rank']} at {finding['where']}")
+    missing = [f'S{n}' for n in range(1, handed + 1) if n not in read]
+    if missing:
+        unread.append(f"{group} {', '.join(missing)}")
+        lines += [f'  {group} {sid} has no line' for sid in missing if int(sid[1:]) not in unverdicted]
+    return claims
+
+
 def _inert(line: str) -> str:
     """A finding's line as the block prints it, so that `parse` reads it as neither a field nor the heading
     that ends the section. A field name goes in code, which `parse` drops, and a heading's `#` is escaped.
@@ -584,7 +755,8 @@ def _inert(line: str) -> str:
 
 
 def to_settle(meta: dict, status: dict[str, str], unapplied: list[str], outside: list[str], open_blocking: int,
-              shared: int, flagged: int, unchecked: str | None, pathless: int) -> list[str]:
+              shared: int, flagged: int, unchecked: str | None, pathless: int, *, unread_suspects: list[str] = (),
+              no_finding: list[str] = ()) -> list[str]:
     """What the skill's section 5, in scoring.md, leaves to the coordinator in this merge, one line each. A P3 claim
     is not on it: it leaves the score where it is."""
     def counted(n: int, one: str, many: str) -> str:
@@ -616,6 +788,12 @@ def to_settle(meta: dict, status: dict[str, str], unapplied: list[str], outside:
     if pathless:
         items.append(counted(pathless, 'proof test names', 'proof tests name') + ' no repository path: write the '
                      'path it was committed at')
+    if unread_suspects:
+        items.append('suspects handed with no line the merge reads: ' + '; '.join(unread_suspects)
+                     + '; ask its grader for each line, in one message')
+    if no_finding:
+        items.append(counted(len(no_finding), 'proven suspect names', 'proven suspects name') + ' no finding in its '
+                     'report: ' + '; '.join(no_finding) + '; ask its grader which finding, or carry it to Could not verify')
     return items
 
 

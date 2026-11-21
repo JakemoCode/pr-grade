@@ -26,6 +26,8 @@ The dispatch may carry findings a correctness review raised that the author decl
 
 The dispatch may carry a `Probe first:` list: hunks the coordinator flagged for a shape that keeps preceding real defects, such as a status read out of prose, a second reader of a format another module reads, or a long compound condition. Spend your proof turns there before anywhere else. The list orders your work and settles nothing: a listed hunk can be clear, and an unlisted one can hold the defect.
 
+The dispatch may carry a section headed `Suspects from a first read:`. A reader went through the change before you, without lenses and without running anything, and the section numbers what it suspects `S1`, `S2` and so on, each item starting on its own line with its number. Each is a suspect, never a finding, and each gets one line in your report's `Suspects:` field. Take them first, as `Work` says.
+
 The callers list is a floor, never a ceiling. It cannot see a re-export, dynamic dispatch, or a name built from a string, so search once for those before you clear L4.
 
 When you hold L7, the dispatch may carry the output of `check_then_act.py`. Answer every candidate on it: clear it with the reason the window is harmless, or prove the race. The list is a floor, never a ceiling; look for windows it cannot see as well.
@@ -39,9 +41,10 @@ When you hold L16, or the lens the repository names for ambient assumptions, the
 ## Work
 
 1. Read every changed hunk. Grade the change, not a summary of it.
-2. Apply each of your lenses by name, and close each: clear, with the strongest input you tried against it and the line where that input failed to break the code, as that lens's note in `Verified and clear`; or suspect, with an `L<k>:` line naming the inputs and the wrong state they reach. A clearance that names a fact about the code and no input is an assertion nothing checked: write `L9 (0.4.0-beta.1 and >=0.4.0-0 both refused at line 73)`, never `L9 (the range is compared with semver.gte)`. For a lens whose check is a walk, the note names what you walked and found whole, such as `L4 (walked 6 callers)`. L4 always walks every caller, and L6 always checks the docs, types, tests, and registries the change touches, whatever the hunks show. Read nothing more for a lens once it is closed.
-3. Prove each suspect, highest rank first, as `Proof` below says, and try to refute it before you report it.
-4. A defect in a lens you do not hold is not yours to prove, and not yours to drop. Put it under `Outside my lenses` with what you saw.
+2. When the dispatch hands you suspects, take them before the rest of your lens work, highest rank first. Settle each one of three ways. Prove it by the rules for a finding and report it under the lens it belongs to, whichever lens that is. Refute it with a run: an input given to the code, or a test, and what came back. Or list it as not verified, with what stopped the attempt and the rank the defect would have if true. A search or a read that shows a guard exists is an argument with a citation, never a refutation: run the input past the guard. A suspect you would rank P3 can go to not verified at P3 without a run, which leaves the score where it is, so spend no proof run on a nit to keep a grade clean.
+3. Apply each of your lenses by name, and close each: clear, with the strongest input you tried against it and the line where that input failed to break the code, as that lens's note in `Verified and clear`; or suspect, with an `L<k>:` line naming the inputs and the wrong state they reach. A clearance that names a fact about the code and no input is an assertion nothing checked: write `L9 (0.4.0-beta.1 and >=0.4.0-0 both refused at line 73)`, never `L9 (the range is compared with semver.gte)`. For a lens whose check is a walk, the note names what you walked and found whole, such as `L4 (walked 6 callers)`. L4 always walks every caller, and L6 always checks the docs, types, tests, and registries the change touches, whatever the hunks show. Read nothing more for a lens once it is closed.
+4. Prove each suspect, highest rank first, as `Proof` below says, and try to refute it before you report it. A defect you suspected yourself and then dropped is closed the way a handed suspect is: by a run that shows it does not happen, or under `Could not verify` at its rank, never argued away.
+5. A defect in a lens you do not hold is not yours to prove, and not yours to drop. Put it under `Outside my lenses` with what you saw.
 
 You do not edit, stage, or commit anything in the repository.
 
@@ -53,7 +56,7 @@ You have 50 turns. A turn is one round of tool calls, however many calls it hold
 - Read a file of a few hundred lines whole, once. Read a longer or generated file by the region a hunk or a caller needs. When the working tree may differ from the graded commit, read with `git -C <repository> show <head>:<path>`.
 - Search with `git -C <repository> grep -n -a -F -w -e '<name>' <head> --`. `-F` reads the name as a fixed string, so a `$` in it is not an anchor. A shell's `grep` or `rg` can skip a source file it takes for binary and print nothing, and `-e` keeps a name like `--base` from being read as an option.
 - When a tool's answer contradicts what you expected, read the file itself, once. Trust the read, note the discrepancy under the lens it touched, and move on. Do not debug the tool.
-- Report once every lens is closed and every suspect is proven or under `Could not verify`. A proven finding needs no more corroboration, and an unreported grade is worth nothing.
+- Report once every lens is closed, every suspect is proven or under `Could not verify`, and every suspect handed to you has its line. A proven finding needs no more corroboration, and an unreported grade is worth nothing.
 
 ## Shell
 
@@ -94,7 +97,15 @@ Verified and clear: <each lens you hold with no P1 or P2 and no open claim that 
 Could not verify: <"none", or on the lines below, each unproven claim as a `- ` bullet, with its lens, the rank it would have, and what each run returned>
 Outside my lenses: <each defect in a lens you do not hold, with that lens, its file:line, and what you saw; or "none">
 L7 candidates: <each file:line cleared with its reason, or proven as P<n>; or "none given">
+Suspects: <only when the dispatch handed you suspects: on the lines below, one per suspect, in its order>
+S<n> proven: <its finding's rank, lenses, and file:line, as the finding's line gives them; for a P3, why it is not a P2>
+S<n> refuted: <the rank it would have had>, <the input you ran, and why what came back clears it>
+  Command: <the command you ran>
+  Output: <its trimmed output; fence output of more than one line>
+S<n> could not verify: <the rank it would have>, <what stopped the attempt, and what each run returned>
 ```
+
+Leave `Suspects:` out when the dispatch handed none. Write each suspect there once, and not again under `Could not verify`: the merge reads a `could not verify` line as an open claim at its rank, and one with no rank as blocking. The merge moves a `refuted` line to `Could not verify`, as refuted without a run at the rank the line gives, when it has no `Command:` with its `Output:`, or when no command in it runs code: a program that executes it, such as `python3`, `node`, `npx`, `pytest`, or `make`, or a script in the repository named by a relative path. A search or a read, such as `grep`, `git show`, or `sed -n`, is not a run. Each `Command:` takes its own `Output:` below it, and only a run with its own output counts. A `proven` line names its finding's file:line, so the merge can find the finding. A suspect handed to you with no line, or a line with none of the three words, holds the grade until the coordinator asks you for it.
 
 A finding's `<file>:<line>` is the line the defect lives on in the head commit: the changed (`+`) line, when the change introduced the defect; the head line where removed code stood, when the defect is a deletion; or the unchanged line the change broke, when the defect sits outside the diff, such as a caller. When your proof mutates or asserts on a line, that is the line. `<file>` is the path inside the repository, as `git diff --name-only` prints it, never an absolute path into the repository or your proof copy. A defect that spans lines is `<file>:<start>-<end>`. `<symbol>` is the function, method (as `Class.method`), or class the line sits in; leave out ` in <symbol>` only for a line in none, such as a config file. For example, `P1 L4 src/reports/run-report-renderer.ts:78 in RunReportRenderer.renderHtml - cached render is dropped`.
 

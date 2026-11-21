@@ -21,13 +21,16 @@ class IsRunSecondSpan(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIn('refuted without a run', self.refuted(command))
 
-    def test_a_fenced_command_and_output_pair_is_a_run(self) -> None:
+    def test_a_command_and_output_pair_inside_a_fence_is_output_and_not_a_run(self) -> None:
+        # A fence holds what a run printed, and a read can print a Command/Output pair, so a pair the grader fenced
+        # is read the same way: it fails closed, to the coordinator.
         block = self.block(ts.report('S1 refuted: P2, ran it.\n  ```\n  Command: pytest t.py\n  Output: 1 passed\n  ```\n'))
-        self.assertNotIn('refuted without a run', block['Could not verify'])
+        self.assertIn('refuted without a run', block['Could not verify'])
 
     def test_option_values_before_a_subcommand_still_run(self) -> None:
         for command in ('pnpm --filter api test', 'npm --prefix web test', 'docker compose run app pytest',
-                        'yarn --cwd web test', 'pnpm -C web test', 'cargo nextest run', 'yarn test:unit'):
+                        'yarn --cwd web test', 'pnpm -C web test', 'cargo nextest run', 'yarn test:unit',
+                        'docker compose -f x.yml run app pytest'):
             with self.subTest(command=command):
                 self.assertEqual(self.refuted(f'`{command}`'), 'none')
 

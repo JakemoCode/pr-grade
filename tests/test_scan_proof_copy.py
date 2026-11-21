@@ -41,6 +41,8 @@ class ScanCopyTest(Repo):
         self.assertIn(f'Your scratch directory: {scratch}', line)
         # The bare question comes first, unchanged.
         self.assertTrue(line.startswith(grade_mode.SCAN_PROMPT.split('{base}')[0]))
+        # The report's directory lives under the same root, so whatever removes or sweeps the root removes it too.
+        self.assertEqual(self.scan_dir(out).parent, root)
 
     def test_the_copy_gets_the_dependency_links_a_graders_copy_gets(self) -> None:
         (self.repo / '.venv').mkdir()
@@ -54,8 +56,11 @@ class ScanCopyTest(Repo):
         self.configure(scanProofCopy=False)
         out = self.scan()
         self.assertNotIn('proof copy', self.dispatch(out))
-        self.assertNotIn('proof', json.loads((self.scan_dir(out) / 'scan.json').read_text()))
-        self.assertEqual([p.name.startswith('pr-grade-proof-') for p in self.temp.iterdir()], [False])
+        root = Path(json.loads((self.scan_dir(out) / 'scan.json').read_text())['proof'])
+        # Still a root, for the remove: line and the sweep, holding the report's directory and no copy.
+        self.assertTrue((root / MARKER).is_file())
+        self.assertFalse((root / 'scan').exists())
+        self.assertEqual(self.scan_dir(out).parent, root)
 
     def test_a_scan_proof_copy_that_is_not_true_or_false_stops_the_run(self) -> None:
         self.configure(scanProofCopy='no')
@@ -100,12 +105,40 @@ class ScanCopyTest(Repo):
         self.assertFalse(scan_root.exists())
         self.assertFalse(grade_root.exists())
 
-    def test_without_a_scan_copy_the_remove_line_names_one_root(self) -> None:
+    def test_without_a_scan_copy_the_remove_line_still_removes_the_scans_directory(self) -> None:
         self.configure(scanProofCopy=False)
         scan = self.scan_dir(self.scan())
         out = self.ok('grade_prep.py', '--base', 'main', '--suspects', str(scan))
         remove = re.search(r'^remove: (.+)$', out, re.M).group(1)
-        self.assertEqual(len(re.findall(r'pr-grade-proof-', remove)), 1)
+        self.assertEqual(len(re.findall(r'pr-grade-proof-', remove)), 2)
+        run = subprocess.run(remove, shell=True, cwd=self.repo, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertFalse(scan.exists())
+        self.assertEqual(list(self.temp.iterdir()), [])
+
+    def test_after_the_attach_the_remove_line_leaves_nothing(self) -> None:
+        scan = self.scan_dir(self.scan())
+        out = self.ok('grade_prep.py', '--base', 'main', '--suspects', str(scan))
+        self.ok('grade_prep.py', '--attach', re.search(r'--attach (\S+)$', out, re.M).group(1))
+        run = subprocess.run(re.search(r'^remove: (.+)$', out, re.M).group(1), shell=True, cwd=self.repo,
+                             capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(list(self.temp.iterdir()), [])
+
+    def test_a_second_run_of_the_remove_line_after_a_refusal_succeeds(self) -> None:
+        # A kept proof test refuses its root; once it is moved out, the same line runs again over a scan root gone.
+        scan = self.scan_dir(self.scan())
+        out = self.ok('grade_prep.py', '--base', 'main', '--suspects', str(scan))
+        remove = re.search(r'^remove: (.+)$', out, re.M).group(1)
+        kept = Path(re.search(r'^merge: .* merge (\S+)$', out, re.M).group(1)) / 'grade/proofs/test_kept.py'
+        kept.write_text('')
+        first = subprocess.run(remove, shell=True, cwd=self.repo, capture_output=True, text=True)
+        self.assertNotEqual(first.returncode, 0)
+        kept.unlink()
+        second = subprocess.run(remove, shell=True, cwd=self.repo, capture_output=True, text=True)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn('already removed', second.stdout)
+        self.assertEqual(list(self.temp.iterdir()), [])
 
     def test_the_scan_never_writes_in_the_authors_checkout(self) -> None:
         self.scan()

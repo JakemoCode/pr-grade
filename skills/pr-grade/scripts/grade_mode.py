@@ -33,9 +33,9 @@ with the reason. A first read runs in round 1 of a `subagent` or `fan-out` grade
 more than `scanAbove` changed lines (default 150; `false` turns it off, and 0 scans every change). Changed lines are
 the additions plus the deletions in the diff the graders read: committed, from where the branch left `--base` to
 HEAD, with lock files and each `--exclude-path` prefix left out, and a binary file counted as none. A round is a
-re-grade when the commit it starts from is on the branch, after where the branch left `--branch-base` (default
-origin/main, or `--base` when there is none), unless `--base` names a branch, such as a local main ahead of a stale
-origin/main. A `--branch-base` git cannot read stops the run. On a yes it makes a directory for the report and prints the scan's
+re-grade when the commit it starts from is a commit neither of `--branch-base` (default origin/main, or `--base` when
+there is none) nor of its local branch, so a local main ahead of a stale origin/main is still round 1. A
+`--branch-base` git cannot read stops the run. On a yes it makes a directory for the report and prints the scan's
 prompt and the `--suspects <dir>` to pass the prep.
 """
 from __future__ import annotations
@@ -267,11 +267,11 @@ def graded_lines(root: Path, fork: str, head: str, kept: tuple[str, ...] = ()) -
     return total
 
 
-def round_one(root: Path, base: str, fork: str, branch_base: str) -> bool:
-    """Whether the round starting at `fork`, where HEAD left `base`, is the branch's first. A re-grade's base is the
-    last commit graded, which is on the branch, so its fork is no commit of `branch_base`. A base that names a branch,
-    such as a local main a fetch has not yet brought origin/main up to, is round 1 too. A ref git cannot read stops the
-    run: it says nothing about the round."""
+def round_one(root: Path, fork: str, branch_base: str) -> bool:
+    """Whether the round starting at `fork` is the branch's first. A re-grade starts at the last commit graded, which is
+    on the branch, however it is written: a SHA, `topic~1`, or the pushed `origin/topic`. So round 1 is a fork that is a
+    commit of `branch_base`, or of the local branch of the same name, such as a local main a fetch has not yet brought
+    origin/main up to. A `branch_base` git cannot read stops the run: it says nothing about the round."""
     on_main = subprocess.run(['git', 'merge-base', '--is-ancestor', fork, branch_base], cwd=root, capture_output=True,
                              text=True)
     if on_main.returncode not in (0, 1):
@@ -279,8 +279,10 @@ def round_one(root: Path, base: str, fork: str, branch_base: str) -> bool:
                  f'{on_main.stderr.strip()}')
     if on_main.returncode == 0:
         return True
-    return any(subprocess.run(['git', 'rev-parse', '--verify', '--quiet', ref], cwd=root,
-                              capture_output=True).returncode == 0 for ref in (f'refs/heads/{base}', f'refs/remotes/{base}'))
+    # origin/main's local branch is main: the exact ref, so no revision suffix can stand in for it.
+    local = f"refs/heads/{branch_base.split('/', 1)[1]}" if '/' in branch_base else None
+    return bool(local) and subprocess.run(['git', 'show-ref', '--verify', '--quiet', local], cwd=root).returncode == 0 \
+        and subprocess.run(['git', 'merge-base', '--is-ancestor', fork, local], cwd=root).returncode == 0
 
 
 def scan_decision(root: Path, base: str, branch_base: str, config: dict,
@@ -298,7 +300,7 @@ def scan_decision(root: Path, base: str, branch_base: str, config: dict,
         return False, 'an in-thread grade', fork
     if config.get('promptFiles', True) is False:
         return False, 'promptFiles is false, and the first read reaches a grader only through its prompt file', fork
-    if not round_one(root, base, fork, branch_base):
+    if not round_one(root, fork, branch_base):
         return False, f'a re-grade: {base} is after where the branch left {branch_base}', fork
     lines = graded_lines(root, fork, 'HEAD', kept)
     if above == 0:

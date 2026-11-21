@@ -203,10 +203,7 @@ def attach(proof_root: Path) -> None:
         return
     where = Path(waiting['dir'])
     report = where / grade_mode.SCAN_REPORT
-    try:
-        scanned = json.loads((where / 'scan.json').read_text()).get('head')
-    except (OSError, ValueError, AttributeError):
-        scanned = None
+    scanned = grade_mode.scanned_head(where)
     try:
         found = report.read_text(encoding='utf-8')
         why = f'the report at {report} is empty'
@@ -232,7 +229,7 @@ def attach(proof_root: Path) -> None:
     pending.unlink()
     # The report stays with the grade's records, and the scan's directory goes.
     if found is not None:
-        (proof_root / grade_mode.SCAN_REPORT).write_text(found)
+        (proof_root / grade_mode.SCAN_REPORT).write_text(found, encoding='utf-8')
     for path in (report, where / 'scan.json'):
         try:
             path.unlink()
@@ -528,7 +525,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--base')
     ap.add_argument('--branch-base', help='on a re-grade, where the whole branch began, for the Mode the grade '
-                                           'block keeps (default origin/main, or --base when that is not given)')
+                                           'block keeps (default origin/main, else a local main or master, else --base)')
     ap.add_argument('--surface', nargs='+', action='extend', metavar='PATH',
                     help='grade the code under these paths as it stands at HEAD, not a branch diff')
     ap.add_argument('--groups', action='append', default=[], metavar='NAME=L1,L2')
@@ -558,8 +555,7 @@ def main() -> None:
     if surface:
         args.branch_base = args.base
     elif args.branch_base is None:
-        has_main = git(root, 'rev-parse', '--verify', '--quiet', 'origin/main', check=False).returncode == 0
-        args.branch_base = 'origin/main' if has_main else args.base
+        args.branch_base = grade_mode.default_branch_base(root, args.base)
     if git(root, 'status', '--porcelain', '--untracked-files=no').stdout.strip():
         sys.exit('grade_prep: the change has uncommitted edits. Graders see commits only; commit, then run this again.')
     config = grade_mode.load_config(root)
@@ -630,10 +626,7 @@ def main() -> None:
     # The grader the first read goes to waits for it: the one holding the correctness lens, else the first.
     waits, first_read = None, None
     if args.suspects:
-        try:
-            scanned = json.loads((Path(args.suspects) / 'scan.json').read_text()).get('head')
-        except (OSError, ValueError, AttributeError):
-            scanned = None
+        scanned = grade_mode.scanned_head(Path(args.suspects))
         if mode == 'in-thread' or not prompt_files:
             first_read = 'did not run: the first read reaches a grader only through its prompt file'
         elif scanned is None:

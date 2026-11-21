@@ -33,6 +33,9 @@ Each entry says what changed, where, and why. Under it, **Before** is the old be
 - `SKILL.md`: changed section 2 to run `grade_mode.py --scan` first, dispatch the scan with the line it prints, add `--suspects` to the prep, and run the `attach:` line before the withheld grader.
   - **Before:** section 2 began with the prep.
   - **Seen on:** the scan-then-proof test.
+- `skills/pr-grade/scripts/grade_prep.py`: changed the default `--branch-base` to origin/main, else a local main or master, else `--base`, the same default `grade_mode.py --scan` reads, to keep a re-grade's Mode and its scan decision on the whole branch in a repository with no origin/main. `fix-and-regrade.md` says so.
+  - **Before:** with no origin/main the branch base was `--base`, so a re-grade's block kept only the fix commits' mode.
+  - **Seen on:** this release's grade, round 1, P3 L8.
 - `skills/pr-grade/templates/pr-grade.json`: added `"scanAbove": 150`, so that the template still shows every key.
   - **Before:** the template had no key for the first read.
   - **Seen on:** the scan-then-proof test.

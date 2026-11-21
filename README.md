@@ -102,7 +102,7 @@ Every key in `.claude/pr-grade.json` is optional. A key you set replaces its def
 | `ambientLens` | `L16` | The lens whose grader gets `ambient.py`'s output. |
 | `promptFiles` | `true` | The prep writes each grader's prompt to `prompt.md` under its proof root and prints one line naming it. `false` prints the blocks for the coordinator to paste, as 0.17 did. |
 | `sliceLenses` | `true` | Each prompt file also carries the skill's and the lens file's text for the grader's lenses, and every other piece of both, so the grader reads neither file. `false` leaves the lens text out, and the grader reads both itself. Off whenever `promptFiles` is. |
-| `scanAbove` | `150` | A first read runs on round 1 of a `subagent` or `fan-out` grade of more than this many changed lines: the additions plus the deletions in the graders' diff, lock files and `--exclude-path` prefixes left out, a binary file counting none. `0` scans every such grade and `false` none. Off whenever `promptFiles` is. |
+| `scanAbove` | `150` | A first read runs on round 1 of a `subagent` or `fan-out` grade of more than this many changed lines: the additions plus the deletions in the graders' diff, lock files and `--exclude-path` prefixes left out, a binary file counting none, and a rename counting its edits. `0` scans every such grade and `false` none. Off whenever `promptFiles` is. |
 | `proofDir` | `node_modules`, `.venv` | Installed dependencies to link into each proof clone, each with the files that pin it and the command that installs it. |
 | `requireGrade.branches` | every branch | A regex; the check only requires a grade on matching branches. |
 

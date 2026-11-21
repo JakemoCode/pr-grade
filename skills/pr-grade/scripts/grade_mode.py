@@ -32,10 +32,11 @@ and no lenses, whose report grade_prep.py hands one grader as numbered suspects.
 with the reason. A first read runs in round 1 of a `subagent` or `fan-out` grade with prompt files, on a change of
 more than `scanAbove` changed lines (default 150; `false` turns it off, and 0 scans every change). Changed lines are
 the additions plus the deletions in the diff the graders read: committed, from where the branch left `--base` to
-HEAD, with lock files and each `--exclude-path` prefix left out, and a binary file counted as none. A round is a
-re-grade when the commit it starts from is a commit neither of `--branch-base` (default origin/main, or `--base` when
-there is none) nor of its local branch, so a local main ahead of a stale origin/main is still round 1. A
-`--branch-base` git cannot read stops the run. On a yes it makes a directory for the report and prints the scan's
+HEAD, with lock files and each `--exclude-path` prefix left out, a binary file counted as none, and a rename counted
+by its edits. A round is round 1 when the commit it starts from is a commit of `--branch-base` (default origin/main,
+else a local main or master, else `--base`), or the commit where HEAD left that branch's local copy, so a local main
+ahead of a stale origin/main is still round 1. Any other start is a re-grade. A `--branch-base` git cannot read stops
+the run. On a yes it makes a directory for the report and prints the scan's
 prompt and the `--suspects <dir>` to pass the prep.
 """
 from __future__ import annotations
@@ -256,22 +257,45 @@ def scan_above(config: dict) -> int | None:
 
 def graded_lines(root: Path, fork: str, head: str, kept: tuple[str, ...] = ()) -> int:
     """Additions plus deletions from `fork` to `head`, as the graders' diff holds them: lock files and the `kept`
-    prefixes left out, and a binary file counted as none."""
-    out = _git(root, '-c', 'core.quotePath=false', 'diff', '--numstat', '-z', '--no-renames', fork, head)
-    total = 0
-    for record in out.split('\0'):
-        added, deleted, path = (record.split('\t', 2) + ['', '', ''])[:3]
-        if not path or added == '-' or posixpath.basename(path) in LOCKS or path.startswith(kept):
+    prefixes left out, a binary file counted as none, and a rename counted by its edits alone."""
+    tokens = _git(root, '-c', 'core.quotePath=false', 'diff', '--numstat', '-z', '--find-renames', fork, head).split('\0')
+    total, at = 0, 0
+    while at < len(tokens):
+        added, deleted, path = (tokens[at].split('\t', 2) + ['', '', ''])[:3]
+        # A rename's record leaves its path empty, and the old and new paths follow as tokens of their own.
+        paths = [path] if path else tokens[at + 1:at + 3]
+        at += 1 if path else 3
+        if not added or added == '-' or any(posixpath.basename(p) in LOCKS or p.startswith(kept) for p in paths):
             continue
         total += int(added) + int(deleted)
     return total
 
 
+def default_branch_base(root: Path, base: str) -> str:
+    """Where the whole branch began, when no `--branch-base` is given: origin/main, else a local main or master, else
+    `base`. The scan and the prep both read it, so they agree on the round."""
+    for ref in ('refs/remotes/origin/main', 'refs/heads/main', 'refs/heads/master'):
+        if subprocess.run(['git', 'show-ref', '--verify', '--quiet', ref], cwd=root).returncode == 0:
+            return ref.split('/', 2)[2]
+    return base
+
+
+def scanned_head(where: Path) -> str | None:
+    """The head `scan.json` in a scan's directory names, or None when the file is missing or holds no head."""
+    try:
+        head = json.loads((where / 'scan.json').read_text()).get('head')
+    except (OSError, ValueError, AttributeError):
+        return None
+    return head if isinstance(head, str) else None
+
+
 def round_one(root: Path, fork: str, branch_base: str) -> bool:
     """Whether the round starting at `fork` is the branch's first. A re-grade starts at the last commit graded, which is
     on the branch, however it is written: a SHA, `topic~1`, or the pushed `origin/topic`. So round 1 is a fork that is a
-    commit of `branch_base`, or of the local branch of the same name, such as a local main a fetch has not yet brought
-    origin/main up to. A `branch_base` git cannot read stops the run: it says nothing about the round."""
+    commit of `branch_base`, or the very commit where HEAD left the local branch of the same name, such as a local main
+    a fetch has not yet brought origin/main up to. Any later commit of that branch is a re-grade's, including one on
+    HEAD when the work is on that local branch itself. A `branch_base` git cannot read stops the run: it says nothing
+    about the round."""
     on_main = subprocess.run(['git', 'merge-base', '--is-ancestor', fork, branch_base], cwd=root, capture_output=True,
                              text=True)
     if on_main.returncode not in (0, 1):
@@ -281,8 +305,9 @@ def round_one(root: Path, fork: str, branch_base: str) -> bool:
         return True
     # origin/main's local branch is main: the exact ref, so no revision suffix can stand in for it.
     local = f"refs/heads/{branch_base.split('/', 1)[1]}" if '/' in branch_base else None
-    return bool(local) and subprocess.run(['git', 'show-ref', '--verify', '--quiet', local], cwd=root).returncode == 0 \
-        and subprocess.run(['git', 'merge-base', '--is-ancestor', fork, local], cwd=root).returncode == 0
+    if not local or subprocess.run(['git', 'show-ref', '--verify', '--quiet', local], cwd=root).returncode != 0:
+        return False
+    return fork == _git(root, 'merge-base', local, 'HEAD').strip()
 
 
 def scan_decision(root: Path, base: str, branch_base: str, config: dict,
@@ -333,7 +358,7 @@ def main() -> None:
     ap.add_argument('--base', default='origin/main')
     ap.add_argument('--scan', action='store_true', help='also say whether a first read runs, and print its dispatch')
     ap.add_argument('--branch-base', help='where the whole branch began, to tell a re-grade from round 1 '
-                                           '(default origin/main, or --base when there is none)')
+                                           '(default origin/main, else a local main or master, else --base)')
     ap.add_argument('--exclude-path', action='append', default=[], metavar='PREFIX',
                     help='leave paths starting with PREFIX out of the changed lines, as the prep does; repeats')
     args = ap.parse_args()
@@ -352,11 +377,7 @@ def main() -> None:
     for path, reason in sorted(reasons.items()):
         print(f'  {path}: {reason}')
     if args.scan:
-        branch_base = args.branch_base
-        if branch_base is None:
-            has_main = subprocess.run(['git', 'rev-parse', '--verify', '--quiet', 'origin/main'], cwd=root,
-                                      capture_output=True).returncode == 0
-            branch_base = 'origin/main' if has_main else args.base
+        branch_base = args.branch_base or default_branch_base(root, args.base)
         scan(root, args.base, branch_base, config, tuple(args.exclude_path))
 
 

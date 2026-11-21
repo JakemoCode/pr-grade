@@ -86,6 +86,10 @@ class SplitTest(unittest.TestCase):
         self.assertEqual(heading, ['S1 A title\nbody', 'S2 Another'])
         self.assertEqual(bold, ['S1 **A title** (nit)', 'S2 **Another**'])
 
+    def test_a_bold_number_alone_opens_an_item(self) -> None:
+        items, _ = grade_prep.suspect_items('**1.** a\n\n**2.** b\n')
+        self.assertEqual(items, ['S1 a', 'S2 b'])
+
     def test_a_number_out_of_order_stays_in_the_item_above_it(self) -> None:
         items, _ = grade_prep.suspect_items('1. one\n3. three\n2. two\n')
         self.assertEqual(items, ['S1 one\n3. three', 'S2 two'])
@@ -212,6 +216,22 @@ class DecisionTest(Repo):
         out = self.ok('grade_mode.py', '--base', 'main~1', '--branch-base', 'main', '--scan')
         self.assertIn('scan: yes (151 changed lines', out)
 
+    def test_a_branch_base_git_cannot_read_stops_the_run(self) -> None:
+        # `--is-ancestor` exits 128 for a ref it cannot read, which is no answer about the round.
+        run = self.run_script('grade_mode.py', '--base', 'main', '--branch-base', 'nosuchref', '--scan')
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn('nosuchref', run.stderr)
+        self.assertNotIn('re-grade', run.stdout)
+
+    def test_a_local_main_ahead_of_a_stale_origin_main_is_round_one(self) -> None:
+        # The branch left local main, which a fetch has not yet brought origin/main up to.
+        git(self.repo, 'update-ref', 'refs/remotes/origin/main', 'main')
+        (self.repo / 'store.py').write_text((self.repo / 'store.py').read_text() + 'Y = 2\n')
+        git(self.repo, 'commit', '-q', '-am', 'second')
+        git(self.repo, 'branch', '-f', 'main', 'HEAD~1')
+        self.configure(scanAbove=0)
+        self.assertIn('scan: yes (1 changed lines', self.decision())
+
     def test_lock_files_and_excluded_prefixes_do_not_count(self) -> None:
         (self.repo / 'package-lock.json').write_text('{}\n' * 500)
         (self.repo / 'kept').mkdir()
@@ -328,6 +348,7 @@ class HandOffTest(Repo):
         self.assertEqual(meta['firstRead'], why)
         self.assertIn(f'notice: the first read {why}', attached)
         self.assertIn(f'Read your pr-grade dispatch from {root / "grade/prompt.md"} ', attached)
+        self.assertFalse(scan.exists())
 
     def test_an_empty_report_is_no_report(self) -> None:
         scan, out = self.prep_with_scan()
@@ -348,16 +369,22 @@ class HandOffTest(Repo):
         self.assertEqual((root / 'grade/prompt.md').read_text(), before)
         self.assertIn(f'Read your pr-grade dispatch from {root / "grade/prompt.md"} ', again)
 
-    def test_a_scan_of_another_head_hands_nothing_and_withholds_nothing(self) -> None:
+    def test_a_scan_of_another_head_hands_nothing_and_its_directory_goes(self) -> None:
+        # The scan may still be writing, so the attach, run once it returns, refuses the report and removes it.
         scan = Path(re.search(r'^--suspects (\S+)$', self.scan(), re.M).group(1))
+        scanned = git(self.repo, 'rev-parse', 'HEAD').strip()
         (self.repo / 'store.py').write_text((self.repo / 'store.py').read_text() + 'Z = 3\n')
         git(self.repo, 'commit', '-q', '-am', 'later')
         out = self.ok('grade_prep.py', '--base', 'main', '--suspects', str(scan))
+        (scan / 'first-read.md').write_text(self.REPORT)
         root = self.proof_root(out)
-        self.assertIn('notice: the first read did not run: it read', out)
-        self.assertNotIn('attach:', out)
-        self.assertTrue((root / 'grade/prompt.md').is_file())
-        self.assertTrue(json.loads((root / 'grade.json').read_text())['firstRead'].startswith('did not run: it read'))
+        attached = self.ok('grade_prep.py', '--attach', str(root))
+        self.assertIn(f'notice: the first read did not run: it read {scanned}', attached)
+        self.assertNotIn('Suspects from a first read', (root / 'grade/prompt.md').read_text())
+        meta = json.loads((root / 'grade.json').read_text())
+        self.assertNotIn('suspects', meta)
+        self.assertTrue(meta['firstRead'].startswith(f'did not run: it read {scanned}'))
+        self.assertFalse(scan.exists())
 
     def test_the_merge_prints_what_the_first_read_did(self) -> None:
         for report, expected in ((self.REPORT, 'first read: 3 suspects attached to grade'),
@@ -409,6 +436,12 @@ class DocsTest(unittest.TestCase):
         order = [two.index(word) for word in ('grade_mode.py --scan', 'pr-grade:scan', '--suspects', 'attach:',
                                               'first read: did not run')]
         self.assertEqual(order, sorted(order))
+
+    def test_the_preps_usage_names_suspects_and_attach(self) -> None:
+        usage = grade_prep.__doc__.split('\n\n', 1)[1]
+        for option in ('--suspects DIR', '--attach PROOF_ROOT'):
+            with self.subTest(option=option):
+                self.assertIn(option, usage)
 
     def test_the_template_and_readme_name_scan_above(self) -> None:
         template = json.loads((ROOT / 'skills/pr-grade/templates/pr-grade.json').read_text())

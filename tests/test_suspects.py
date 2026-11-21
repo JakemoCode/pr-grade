@@ -230,7 +230,7 @@ class MergeTest(unittest.TestCase):
         self.assertIn('re-rank', line)
 
     def test_a_proven_p3_sharing_its_line_with_a_p2_is_matched_to_the_p3(self) -> None:
-        # The PR 1280 run: the grader's own P2 and the suspect's P3 both sat at run-report-store.ts:292.
+        # A real run met this: the grader's own P2 and the suspect's P3 both sat at one line.
         merged = self.merged(report('S1 proven: P3, L1, src/a.py:9; a P3 because only the error type reads wrong.\n',
                                     findings=FINDING + 'P3 L1 src/a.py:9 in f - throws TypeError\nwhat breaks\n'))
         line = next(line for line in merged.splitlines() if line.lstrip().startswith('grade S1'))
@@ -241,14 +241,15 @@ class MergeTest(unittest.TestCase):
         block = self.block(report('S1 proven: P2 L1 src/a.py:9, above.\nS2 refuted: P2, none.\n'))
         self.assertIn('S2', block['Could not verify'])
 
-    def test_the_refuted_by_argument_case_from_pr_1435_ends_under_could_not_verify(self) -> None:
-        # ForgeSmith-OS PR 1435: a true defect closed as refuted, "Not run as a test" beside it.
+    def test_a_suspect_refuted_by_argument_ends_under_could_not_verify(self) -> None:
+        # An invented report of the shape the scan-then-proof test met: a true defect closed as refuted, with
+        # "Not run as a test" beside it.
         lenses = grade_block.DEFAULT_LENSES
         (self.root / 'grade.json').write_text(json.dumps(
             {'mode': 'subagent', 'head': HEAD, 'lenses': lenses, 'groups': {'grade': lenses}, 'suspects': {'grade': 4}}))
-        merged = self.merged((FIXTURES / 'pr1435-refuted-by-argument.md').read_text())
+        merged = self.merged((FIXTURES / 'refuted-by-argument.md').read_text())
         block = printed(merged)
-        self.assertRegex(block['Could not verify'], r'S2 .*refuted without a run.*revert of a revert')
+        self.assertRegex(block['Could not verify'], r'S2 .*refuted without a run.*exchange of an exchange')
         self.assertNotRegex(merged, r'(?m)^  .*S[134]\b.*(ask|names no finding)')
         self.assertTrue(block['Score'].startswith('3/5'))
 

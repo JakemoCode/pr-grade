@@ -335,6 +335,19 @@ class HandOffTest(Repo):
         self.assertEqual((root / 'first-read.md').read_text(), self.REPORT)
         self.assertFalse(scan.exists())
 
+    def test_a_report_with_a_dash_attaches_under_a_latin_1_locale(self) -> None:
+        # The report is read as UTF-8 and the prompt written as bytes, so the copy kept beside them must be UTF-8 too.
+        scan, out = self.prep_with_scan()
+        (scan / 'first-read.md').write_text('1. store.py:3 — claim returns x unchecked.\n', encoding='utf-8')
+        root = self.proof_root(out)
+        env = {**os.environ, 'TMPDIR': str(self.temp), 'LC_ALL': 'en_US.ISO8859-1', 'LANG': 'en_US.ISO8859-1'}
+        env.pop('PYTHONUTF8', None)
+        env.pop('PYTHONIOENCODING', None)
+        run = subprocess.run([sys.executable, str(SCRIPTS / 'grade_prep.py'), '--attach', str(root)], cwd=self.repo,
+                             env=env, capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr[-300:])
+        self.assertIn('Read your pr-grade dispatch from', run.stdout)
+
     def test_a_report_that_numbers_nothing_goes_whole_with_a_notice(self) -> None:
         scan, out = self.prep_with_scan()
         (scan / 'first-read.md').write_text('Two things look off in store.py.\n')

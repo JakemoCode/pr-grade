@@ -26,7 +26,7 @@ The scripts need Python 3.9 or later and nothing outside the standard library. T
 Run your usual code review first, fix what it proves, and commit. Then run `/pr-grade`.
 
 1. **Prepare.** `grade_prep.py` reads the branch and picks a mode from what it touches: grade in the current thread, in one subagent, or fan out one subagent per lens group. It lists the callers of every function the branch modified, scans for check-then-act windows, runs each changed predicate against near misses, replays recorded state through any changed reader, and makes a throwaway clone of the head commit for each grader to run proofs in.
-2. **Grade.** Each `pr-grade:grade` agent applies its lenses to the diff. A finding counts only with a run behind it, usually a test that fails against the unfixed code. Anything a grader believes but cannot demonstrate goes under `Could not verify`.
+2. **Grade.** Each `pr-grade:grade` agent applies its lenses to the diff. A finding counts only with a run behind it, usually a test that fails against the unfixed code. Anything a grader believes but cannot demonstrate goes under `Could not verify`. On the first round of a change over 150 changed lines, one Opus `pr-grade:scan` agent reads it first, asked only to report every bug it finds, and its report reaches the grader holding L9 as numbered suspects to prove, refute with a run, or list as not verified.
 3. **Merge and score.** `grade_block.py merge` combines the graders' reports and prints the lowest score the rules allow, what it leaves to your judgment, and the whole `## Grade` block with every finding and its proof, ready to paste into the PR body.
 4. **Fix and re-grade.** Move each finding's proof test to its repository path and commit it alone, then commit the fixes and grade the fix commits alone with `grade_prep.py --base <last graded commit>`. Repeat until a round finds no P1 or P2.
 5. **Enforce.** `grade_block.py check <pr>` refuses a PR whose grade is missing, below 5/5, missing a lens, in a cheaper mode than its files need, or older than its code.
@@ -102,6 +102,7 @@ Every key in `.claude/pr-grade.json` is optional. A key you set replaces its def
 | `ambientLens` | `L16` | The lens whose grader gets `ambient.py`'s output. |
 | `promptFiles` | `true` | The prep writes each grader's prompt to `prompt.md` under its proof root and prints one line naming it. `false` prints the blocks for the coordinator to paste, as 0.17 did. |
 | `sliceLenses` | `true` | Each prompt file also carries the skill's and the lens file's text for the grader's lenses, and every other piece of both, so the grader reads neither file. `false` leaves the lens text out, and the grader reads both itself. Off whenever `promptFiles` is. |
+| `scanAbove` | `150` | A first read runs on round 1 of a `subagent` or `fan-out` grade of more than this many changed lines: the additions plus the deletions in the graders' diff, lock files and `--exclude-path` prefixes left out, a binary file counting none. `0` scans every such grade and `false` none. Off whenever `promptFiles` is. |
 | `proofDir` | `node_modules`, `.venv` | Installed dependencies to link into each proof clone, each with the files that pin it and the command that installs it. |
 | `requireGrade.branches` | every branch | A regex; the check only requires a grade on matching branches. |
 
@@ -214,8 +215,8 @@ All live in `skills/pr-grade/scripts/`. The skill calls them; you rarely run one
 
 | Script | What it does |
 |---|---|
-| `grade_prep.py` | Prepares a grade in one call: mode, lens groups (minus any `--skip`), callers, the L7 scan, the L9 near misses, the L14 replay, the L16 exit codes and env sweep, proof clones, and every grader's prompt. `--surface <path ...>` grades the code under paths with no diff (section 9, in `surface-grades.md`). |
-| `grade_mode.py` | Picks the mode alone and prints the files that decided it. |
+| `grade_prep.py` | Prepares a grade in one call: mode, lens groups (minus any `--skip`), callers, the L7 scan, the L9 near misses, the L14 replay, the L16 exit codes and env sweep, proof clones, and every grader's prompt. `--surface <path ...>` grades the code under paths with no diff (section 9, in `surface-grades.md`). With `--suspects <dir>` it holds back the line of the grader holding L9 and prints an `attach:` line, `--attach <proof root>`, which numbers the scan's report into that grader's prompt file and prints its line. |
+| `grade_mode.py` | Picks the mode alone and prints the files that decided it. `--scan` also says whether a first read runs, and on a yes prints the scan's prompt and the prep's `--suspects` option. |
 | `proof_dir.py` | Makes and removes the proof clones outside the repository, with dependencies linked in, and a `proofs` directory per grader for the tests that proved its findings. `remove` refuses while a kept test is still there. Nothing is registered in the repository. |
 | `check_then_act.py` | Lists check-then-act windows (L7) in the functions a branch changed: a check, then an `await`, transaction boundary, or external call, then the write the check guards. A grader clears each one or proves the race. It never gates anything, and an empty list clears nothing. |
 | `near_miss.py` | Runs every predicate a change adds or modifies, in Python, JavaScript, or TypeScript, against near misses of a string it accepts, and lists every other file that holds a parse anchor the change touches (L9). `near_misses()` is the generator, importable alone. |
@@ -226,7 +227,7 @@ All live in `skills/pr-grade/scripts/`. The skill calls them; you rarely run one
 
 `check_then_act.py --whole` scans every function in the changed files, and `--json` prints the list as data. `PR_GRADE_TYPESCRIPT` points the scanner at a `typescript` package when the repository has none.
 
-The `pr-grade:grade` agent runs on Sonnet at `high` effort with 50 turns, and is read-only on the repository: it proves findings in its own clone.
+The `pr-grade:grade` agent runs on Sonnet at `high` effort with 50 turns, and is read-only on the repository: it proves findings in its own clone. The `pr-grade:scan` agent, the first read, runs on Opus at `high` with 50 turns and no `CLAUDE.md`, reads no lens and no skill text, and writes one file, its report.
 
 ### Embedding the checks
 

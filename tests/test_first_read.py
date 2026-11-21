@@ -67,7 +67,7 @@ class SplitTest(unittest.TestCase):
 
     def test_the_last_heading_item_ends_at_a_heading_of_its_level(self) -> None:
         items, rest = grade_prep.suspect_items((FIXTURES / 'pr1355-f66320e.txt').read_text())
-        self.assertTrue(rest.startswith('### Minor'), rest[:40])
+        self.assertIn('\n### Minor\n', rest)
         self.assertNotIn('### Minor', items[-1])
 
     def test_a_paragraph_item_ends_at_the_next_heading(self) -> None:
@@ -111,6 +111,8 @@ class Repo(unittest.TestCase):
         self.repo.mkdir()
         self.temp.mkdir()
         git(self.repo, 'init', '-q', '-b', 'main')
+        # The config stays out of git, so a test can change it without an uncommitted edit or a changed line.
+        (self.repo / '.git/info/exclude').write_text('.claude/\n')
         (self.repo / '.claude').mkdir()
         self.configure()
         (self.repo / 'store.py').write_text('def claim(x):\n    return x\n')

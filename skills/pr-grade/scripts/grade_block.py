@@ -652,6 +652,9 @@ def merge(proof_root: Path, given: dict[str, str] | None = None) -> str:
     if suspect_lines:
         handed = ', '.join(f'{group} {n}' for group, n in (meta.get('suspects') or {}).items() if n) or 'none'
         out += ['', f'suspects (handed: {handed}):', *suspect_lines]
+    if meta.get('firstRead'):
+        # The coordinator says below the block when it did not run.
+        out += ['', f"first read: {meta['firstRead']}"]
     out += ['', 'could not verify:']
     out += [f"  {group}: {claim}{'' if blocking else '  (P3, does not block)'}"
             for group, claim, blocking in open_claims] or ['  none']

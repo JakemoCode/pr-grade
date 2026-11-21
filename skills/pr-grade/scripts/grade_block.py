@@ -124,6 +124,7 @@ SUSPECT = re.compile(r'^S(\d+)\b[ \t]*[.:)-]?[ \t]*(.*)$')
 VERDICT = re.compile(r'^(proven|refuted|could not verify)\b[ \t]*[:,.-]?[ \t]*(.*)$', re.I)
 COMMAND = re.compile(r'\bCommand:[ \t]*(.*?)(?=[ \t]+Output:|$)', re.M)
 OUTPUT = re.compile(r'\bOutput:[ \t]*(.*)', re.S)
+OUTPUT_FENCE = re.compile(r'\bOutput:[ \t]*(`{3,}|~{3,})[^`\n]*$')
 FILE_LINE = re.compile(r'([^\s`(]+?):(\d+)')
 # Programs that execute code. A refutation is a run only when one of its commands starts one of these, or a script in
 # the repository: a grep that shows a guard exists is an argument, and the defect PR 1435 lost was refuted that way.
@@ -512,6 +513,8 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
                 fence = None
             continue
         joins_suspect = current == 'Suspects' and bool(fields[current]) and bool(line) and not SUSPECT.match(line)
+        # `_suspects` reads a fence opened after `Output:` on its line as output, so this reader does too.
+        opens = opens or (OUTPUT_FENCE.search(line) if joins_suspect else None)
         if joins_suspect and (fence or opens):
             # A suspect's output, fenced, is part of it, even a line shaped like a field.
             fields[current][-1] += '\n' + line

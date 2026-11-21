@@ -131,13 +131,40 @@ FILE_LINE = re.compile(r'([^\s`(]+?):(\d+)')
 RUNNER = re.compile(r'(python|pypy)[\d.]*|node|npx|npm|pnpm|yarn|bun|deno|tsx|ts-node|pytest|py\.test|vitest|jest|'
                     r'mocha|go|cargo|rustc|make|ruby|rake|rspec|perl|php|phpunit|java|mvn|gradle|dotnet|uv|uvx|poetry|'
                     r'pipenv|tox|nox|swift|gcc|cc|clang|sqlite3|psql|docker')
+# Runners whose first word is a subcommand, with the subcommands that run code. Any other, such as `npm ls` or
+# `docker ps`, is a read, and so is one missing here. A subcommand that is itself a runner, as in `yarn jest`, or
+# a script file, as in `bun t.ts`, runs too.
+SUBCOMMANDS = {'npm': {'run', 'run-script', 'test', 't', 'start', 'exec', 'x'},
+               'pnpm': {'run', 'test', 't', 'start', 'exec', 'dlx'}, 'yarn': {'run', 'test', 'start', 'exec', 'dlx', 'node'},
+               'bun': {'run', 'test', 'x', 'exec'}, 'deno': {'run', 'test', 'eval', 'task', 'bench'},
+               'docker': {'run', 'exec'}, 'go': {'run', 'test'}, 'cargo': {'run', 'test', 'bench'}, 'uv': {'run'},
+               'poetry': {'run'}, 'pipenv': {'run'}, 'dotnet': {'run', 'test'}, 'swift': {'run', 'test'}}
+# PROBES, PROSE and PERL_FILTER only ever turn a run into a read, so a word missing from them fails open only as far
+# as the program it follows already would. A runner given only PROBES words prints its version or help, except that
+# `-v` is verbose to the runners in VERBOSE, so `pytest -v` runs the suite.
+PROBES = {'--version', '-version', '-V', '-v', 'version', '--help', '-h', 'help'}
+VERBOSE = {'pytest', 'py.test', 'tox'}
+# Words a sentence holds bare and a command line does not, so `make sure no caller passes it` is prose.
+PROSE = {'the', 'is', 'are', 'no', 'not', 'it', 'that', 'shows', 'sure', 'because'}
+# perl's -n and -p loop a one-liner over a file's lines, as sed does.
+PERL_FILTER = re.compile(r'-(?![IMmx])[A-Za-z]*[np][A-Za-z]*')
+SCRIPT = re.compile(r'\.(sh|bash|zsh|py|js|mjs|cjs|ts|mts|rb|pl|php)$')
 SEPARATORS = {'&&', '||', '|', ';', '&', '(', ')', ';;', '|&'}
-# Commands that start the program after their own words, and the options among those words that take a value.
-WRAPPERS = {'env', 'xargs', 'timeout', 'nice', 'command', 'time', 'sudo', 'nohup', 'exec'}
-WRAPPER_VALUES = {'-u', '-C', '-S', '-s', '-k', '-n', '-I', '-L', '-P', '-d', '-E', '-a', '-g', '--unset', '--chdir',
-                  '--signal', '--kill-after'}
+# Shell words that open a command without being its program: `if python3 t.py`, `do pytest $f`.
+KEYWORDS = {'if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{'}
+# Commands that start the program after their own words, each with the options among those words that take a value.
+WRAPPERS = {'env': {'-u', '-C', '-S', '--unset', '--chdir', '--split-string'},
+            'xargs': {'-I', '-L', '-P', '-d', '-n', '-s', '-E', '-a'},
+            'timeout': {'-s', '-k', '--signal', '--kill-after'}, 'nice': {'-n', '--adjustment'}, 'command': set(),
+            'time': {'-f', '-o', '--format', '--output'},
+            'sudo': {'-u', '-g', '-C', '-h', '-p', '-r', '-t', '-D', '-U', '-T', '--user', '--group', '--chdir',
+                     '--host', '--prompt'},
+            'nohup': set(), 'exec': {'-a'}}
 DURATION = re.compile(r'\d+(\.\d+)?[smhd]?')
 SHELLS = {'sh', 'bash', 'zsh', 'dash'}
+# A shell option that takes the next word as its value: `-o pipefail`, `-euo pipefail`, `--rcfile f`.
+SHELL_VALUE = re.compile(r'[-+][A-Za-z]*[oO]|--(rcfile|init-file)')
+CODE_SPAN = re.compile(r'(`+)(.+?)\1')
 
 
 def without_code(markdown: str) -> str:
@@ -292,26 +319,61 @@ def _inside(path: str, roots: tuple[str, ...]) -> str:
 
 
 def _program(words: list[str]) -> list[str]:
-    """`words` from the program they start: past `NAME=value` words, and past each wrapper with its options, the
-    values those options take, and a duration, so `env -u HOME grep` and `timeout -s KILL 5 cat` start at the read."""
+    """`words` from the program they start: past shell keywords such as `do`, `NAME=value` words, and each wrapper
+    with its options, the values that wrapper's options take, and a duration, so `env -u HOME grep` and
+    `timeout -s KILL 5 cat` start at the read. `command -v` looks a name up and starts nothing, so it gives none."""
     i = 0
     while i < len(words):
-        if re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', words[i]):
+        wrapper = os.path.basename(words[i])
+        if words[i] in KEYWORDS or re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', words[i]):
             i += 1
-        elif os.path.basename(words[i]) in WRAPPERS:
+        elif wrapper in WRAPPERS:
             i += 1
             while i < len(words) and (words[i].startswith('-') or '=' in words[i] or DURATION.fullmatch(words[i])):
-                i += 2 if words[i] in WRAPPER_VALUES else 1
+                if wrapper == 'command' and words[i] in ('-v', '-V'):
+                    return []
+                i += 2 if words[i] in WRAPPERS[wrapper] else 1
         else:
             break
     return words[i:]
 
 
+def _script(word: str) -> bool:
+    """Whether `word` names a script to run: a path inside the repository (relative, such as `./scripts/check.sh`),
+    or a script file by any path, such as `/work/copy/scripts/check.sh`."""
+    return '/' in word and (not word.startswith(('/', '~')) or bool(SCRIPT.search(word)))
+
+
+def _runs(words: list[str]) -> bool:
+    """Whether one command, from its program on, runs code: a shell with a `-c` text that runs, or with a script; a
+    runner RUNNER names, past a probe, a subcommand that reads, or a perl filter; or a script by its path."""
+    program, name, args = words[0], os.path.basename(words[0]), words[1:]
+    if PROSE.intersection(words):
+        return False
+    if name in SHELLS:
+        # Options come before the script: a `-c` after it is the script's own argument.
+        i = 0
+        while i < len(args) and args[i].startswith(('-', '+')):
+            if re.fullmatch(r'-[A-Za-z]*c[A-Za-z]*', args[i]):
+                return i + 1 < len(args) and is_run(args[i + 1])
+            i += 2 if SHELL_VALUE.fullmatch(args[i]) else 1
+        return i < len(args)
+    if RUNNER.fullmatch(name):
+        if args and all(arg in PROBES and not (arg == '-v' and name in VERBOSE) for arg in args):
+            return False
+        if name in SUBCOMMANDS:
+            # Past options and a toolchain such as cargo's `+nightly`.
+            sub = next((arg for arg in args if not arg.startswith(('-', '+'))), '')
+            return sub in SUBCOMMANDS[name] or bool(RUNNER.fullmatch(sub) or SCRIPT.search(sub))
+        return not (name == 'perl' and any(PERL_FILTER.fullmatch(arg) for arg in args))
+    return _script(program)
+
+
 def is_run(command: str) -> bool:
     """Whether `command` gives the code an input: some command in it, split at `&&`, `|`, `;` and the like, starts a
-    program RUNNER names or a script by a path inside the repository (relative, such as `./scripts/check.sh`). A
-    shell's `-c` text, in any flag holding `c` such as `-lc`, is judged the same way. Anything else, a search, a read,
-    or prose, is not a run, so a runner this does not know fails closed."""
+    program RUNNER names or a script, as `_runs` reads it. A shell's `-c` text, in any flag holding `c` such as
+    `-lc`, is judged the same way. Anything else, a search, a read, a version probe, or prose, is not a run, so a
+    runner this does not know fails closed."""
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
@@ -327,17 +389,7 @@ def is_run(command: str) -> bool:
             segment.append(token)
     for words in segments:
         words = _program([word for word in words if word.strip()])
-        if not words:
-            continue
-        program, name = words[0], os.path.basename(words[0])
-        if name in SHELLS:
-            flag = next((i for i, word in enumerate(words[1:], 1) if re.fullmatch(r'-[A-Za-z]*c[A-Za-z]*', word)), None)
-            if flag is not None:
-                if flag + 1 < len(words) and is_run(words[flag + 1]):
-                    return True
-            elif any(not word.startswith('-') for word in words[1:]):
-                return True
-        elif RUNNER.fullmatch(name) or ('/' in program and not program.startswith(('/', '~'))):
+        if words and _runs(words):
             return True
     return False
 
@@ -345,9 +397,9 @@ def is_run(command: str) -> bool:
 def _suspects(items: list[str]) -> list[dict]:
     """The `Suspects:` field's items as `id`, `number`, `verdict` (`proven`, `refuted`, `could not verify`, or None
     for a line naming none of them), `rank` (the first `P<n>` on the line, or None), `text` (the words after the
-    verdict on the item's first line), `runs` (each `Command:` in it, in order, as `command` and its own `output`: the
-    text after an `Output:` before the next `Command:`, or else the lines between the two; None when there is none),
-    and `item`, the whole of it."""
+    verdict on the item's first line), `runs` (each `Command:` in it outside a fence, in order, as `command`, the code
+    in its code spans or else its text, and its own `output`: the text after an `Output:` before the next `Command:`,
+    or else the lines between the two; None when there is none), and `item`, the whole of it."""
     read = []
     for item in items:
         first, _, rest = item.partition('\n')
@@ -355,14 +407,18 @@ def _suspects(items: list[str]) -> list[dict]:
         if not head:
             continue
         verdict = VERDICT.match(head[2])
-        found = list(COMMAND.finditer(item))
+        # A `Command:` line inside a fence is a line a run printed. Blanking the fences keeps every offset in place.
+        unfenced = re.sub(r'(?ms)^[ \t]*(`{3,}|~{3,}).*?^[ \t]*\1[^\n]*$', lambda m: re.sub(r'[^\n]', ' ', m[0]), item)
+        found = list(COMMAND.finditer(unfenced))
         runs = []
         for command, after in zip(found, found[1:] + [None]):
             span = item[command.end():after.start() if after else len(item)]
             said = OUTPUT.search(span)
             lines = (said[1] if said else span).splitlines()
             output = '\n'.join(line for line in lines if line.strip() and not FENCE.match(line.strip())).strip() or None
-            runs.append({'command': command[1].strip().strip('`').strip(), 'output': output})
+            # Words after a code span, such as `in the proof copy`, are prose about the command, not part of it.
+            code = [text.strip() for _, text in CODE_SPAN.findall(command[1])]
+            runs.append({'command': ' ; '.join(code) if code else command[1].strip().strip('`').strip(), 'output': output})
         rank = RANK.search(first)
         read.append({'id': f'S{int(head[1])}', 'number': int(head[1]),
                      'verdict': verdict[1].lower() if verdict else None, 'rank': rank[0] if rank else None,

@@ -21,7 +21,7 @@ class IsRunGaps(unittest.TestCase):
                 'cd /tmp/x && .venv/bin/python scripts/run-logged.py -- .venv/bin/python -m unittest m',
                 "FOO=1 python3 -c 'print(1)'", 'npx vitest run a.test.ts', '/work/copy/.venv/bin/python t.py',
                 'node --test a.test.mjs', 'bash scripts/check.sh', "sh -c 'printf x | python3 parse.py'",
-                'npm run test -- a', 'uv run pytest t.py')
+                'npm run test -- a', 'uv run pytest t.py', 'pytest -v', 'cargo +nightly test')
         for command in runs:
             with self.subTest(run=command):
                 self.assertEqual(self.refuted(f'`{command}`'), 'none')

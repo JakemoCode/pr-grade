@@ -131,24 +131,31 @@ FILE_LINE = re.compile(r'([^\s`(]+?):(\d+)')
 RUNNER = re.compile(r'(python|pypy)[\d.]*|node|npx|npm|pnpm|yarn|bun|deno|tsx|ts-node|pytest|py\.test|vitest|jest|'
                     r'mocha|go|cargo|rustc|make|ruby|rake|rspec|perl|php|phpunit|java|mvn|gradle|dotnet|uv|uvx|poetry|'
                     r'pipenv|tox|nox|swift|gcc|cc|clang|sqlite3|psql|docker')
-# Runners whose first word is a subcommand, with the subcommands that run code. Any other, such as `npm ls` or
-# `docker ps`, is a read, and so is one missing here. A subcommand that is itself a runner, as in `yarn jest`, or
-# a script file, as in `bun t.ts`, runs too.
+# Runners whose first word is a subcommand, with the subcommands that run code, a nested one as its two words. Any
+# other, such as `npm ls` or `docker ps`, is a read, and so is one missing here. A package script such as
+# `test:unit` is read by the part before its colon, and a script file, as in `bun t.ts`, runs.
 SUBCOMMANDS = {'npm': {'run', 'run-script', 'test', 't', 'start', 'exec', 'x'},
                'pnpm': {'run', 'test', 't', 'start', 'exec', 'dlx'}, 'yarn': {'run', 'test', 'start', 'exec', 'dlx', 'node'},
                'bun': {'run', 'test', 'x', 'exec'}, 'deno': {'run', 'test', 'eval', 'task', 'bench'},
-               'docker': {'run', 'exec'}, 'go': {'run', 'test'}, 'cargo': {'run', 'test', 'bench'}, 'uv': {'run'},
-               'poetry': {'run'}, 'pipenv': {'run'}, 'dotnet': {'run', 'test'}, 'swift': {'run', 'test'}}
+               'docker': {'run', 'exec', 'compose run', 'compose exec'}, 'go': {'run', 'test'},
+               'cargo': {'run', 'test', 'bench', 'nextest run'}, 'uv': {'run'}, 'poetry': {'run'}, 'pipenv': {'run'},
+               'dotnet': {'run', 'test'}, 'swift': {'run', 'test'}}
+# Package managers that run a package's bin by its name, as in `yarn jest`.
+PACKAGE_BINS = {'pnpm', 'yarn', 'bun'}
+# Words that hand the rest of a command to another runner: `python3 -m pytest`, `uv run pytest`.
+LAUNCH = {'-m', 'run', 'exec', 'x', 'dlx'}
 # PROBES, PROSE and PERL_FILTER only ever turn a run into a read, so a word missing from them fails open only as far
-# as the program it follows already would. A runner given only PROBES words prints its version or help, except that
-# `-v` is verbose to the runners in VERBOSE, so `pytest -v` runs the suite.
+# as the program it follows already would. A runner given only PROBES words, past runners and LAUNCH words, prints
+# its version or help, except that `-v` is verbose to the runners in VERBOSE, so `pytest -v` runs the suite.
 PROBES = {'--version', '-version', '-V', '-v', 'version', '--help', '-h', 'help'}
 VERBOSE = {'pytest', 'py.test', 'tox'}
 # Words a sentence holds bare and a command line does not, so `make sure no caller passes it` is prose.
 PROSE = {'the', 'is', 'are', 'no', 'not', 'it', 'that', 'shows', 'sure', 'because'}
 # perl's -n and -p loop a one-liner over a file's lines, as sed does.
 PERL_FILTER = re.compile(r'-(?![IMmx])[A-Za-z]*[np][A-Za-z]*')
-SCRIPT = re.compile(r'\.(sh|bash|zsh|py|js|mjs|cjs|ts|mts|rb|pl|php)$')
+SCRIPT = re.compile(r'\.(sh|bash|zsh|py|js|mjs|cjs|jsx|ts|mts|cts|tsx|rb|pl|php|swift)$')
+# A redirection operator: it and the word after it, its target, are not words of the command.
+REDIRECT = re.compile(r'[<>]+&?|&>>?|>\|')
 SEPARATORS = {'&&', '||', '|', ';', '&', '(', ')', ';;', '|&'}
 # Shell words that open a command without being its program: `if python3 t.py`, `do pytest $f`.
 KEYWORDS = {'if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{'}
@@ -340,7 +347,7 @@ def _program(words: list[str]) -> list[str]:
 
 def _script(word: str) -> bool:
     """Whether `word` names a script to run: a path inside the repository (relative, such as `./scripts/check.sh`),
-    or a script file by any path, such as `/work/copy/scripts/check.sh`."""
+    or a file with a script's extension by any path, such as `/work/copy/scripts/check.sh`."""
     return '/' in word and (not word.startswith(('/', '~')) or bool(SCRIPT.search(word)))
 
 
@@ -359,14 +366,32 @@ def _runs(words: list[str]) -> bool:
             i += 2 if SHELL_VALUE.fullmatch(args[i]) else 1
         return i < len(args)
     if RUNNER.fullmatch(name):
-        if args and all(arg in PROBES and not (arg == '-v' and name in VERBOSE) for arg in args):
+        rest = [arg for arg in args if not (RUNNER.fullmatch(os.path.basename(arg)) or arg in LAUNCH)]
+        verbose = any(os.path.basename(word) in VERBOSE for word in words)
+        if rest and all(arg in PROBES for arg in rest) and any(not (verbose and arg == '-v') for arg in rest):
             return False
         if name in SUBCOMMANDS:
-            # Past options and a toolchain such as cargo's `+nightly`.
-            sub = next((arg for arg in args if not arg.startswith(('-', '+'))), '')
-            return sub in SUBCOMMANDS[name] or bool(RUNNER.fullmatch(sub) or SCRIPT.search(sub))
-        return not (name == 'perl' and any(PERL_FILTER.fullmatch(arg) for arg in args))
+            return _subcommand_runs(name, args)
+        switches = args[:next((i for i, arg in enumerate(args) if not arg.startswith('-')), len(args))]
+        return not (name == 'perl' and any(PERL_FILTER.fullmatch(arg) for arg in switches))
     return _script(program)
+
+
+def _subcommand_runs(name: str, args: list[str]) -> bool:
+    """Whether a runner SUBCOMMANDS names is given a subcommand that runs code. The subcommand is the first word
+    past options and a toolchain such as cargo's `+nightly`, or the word after it when an option right before the
+    first may have taken that one as its value, as `--prefix` does in `npm --prefix web test`."""
+    words = [i for i, arg in enumerate(args) if not arg.startswith(('-', '+'))]
+    if not words:
+        return False
+    first = words[0]
+    taken = first > 0 and args[first - 1].startswith('-') and '=' not in args[first - 1]
+    for i in words[:2] if taken else words[:1]:
+        sub, after = args[i], args[i + 1] if i + 1 < len(args) else ''
+        if {sub, sub.partition(':')[0], f'{sub} {after}'} & SUBCOMMANDS[name]:
+            return True
+    sub = args[first]
+    return (name in PACKAGE_BINS and bool(RUNNER.fullmatch(sub))) or bool(SCRIPT.search(sub))
 
 
 def is_run(command: str) -> bool:
@@ -380,11 +405,18 @@ def is_run(command: str) -> bool:
         tokens = list(lexer)
     except ValueError:
         tokens = re.sub(r'(&&|\|\||[|;&()])', r' \1 ', command).split()
-    segments, segment = [], []
+    segments, segment, target = [], [], False
     for token in tokens + [';']:
         if token in SEPARATORS:
             segments.append(segment)
-            segment = []
+            segment, target = [], False
+        elif target:
+            target = False
+        elif REDIRECT.fullmatch(token):
+            # `2>&1` lexes as `2`, `>&`, `1`: the descriptor before the operator goes too.
+            if segment and segment[-1].isdigit():
+                segment.pop()
+            target = True
         else:
             segment.append(token)
     for words in segments:
@@ -398,7 +430,7 @@ def _suspects(items: list[str]) -> list[dict]:
     """The `Suspects:` field's items as `id`, `number`, `verdict` (`proven`, `refuted`, `could not verify`, or None
     for a line naming none of them), `rank` (the first `P<n>` on the line, or None), `text` (the words after the
     verdict on the item's first line), `runs` (each `Command:` in it outside a fence, in order, as `command`, the code
-    in its code spans or else its text, and its own `output`: the text after an `Output:` before the next `Command:`,
+    in its first code span or else its text, and its own `output`: the text after an `Output:` before the next `Command:`,
     or else the lines between the two; None when there is none), and `item`, the whole of it."""
     read = []
     for item in items:
@@ -407,8 +439,10 @@ def _suspects(items: list[str]) -> list[dict]:
         if not head:
             continue
         verdict = VERDICT.match(head[2])
-        # A `Command:` line inside a fence is a line a run printed. Blanking the fences keeps every offset in place.
-        unfenced = re.sub(r'(?ms)^[ \t]*(`{3,}|~{3,}).*?^[ \t]*\1[^\n]*$', lambda m: re.sub(r'[^\n]', ' ', m[0]), item)
+        # A fence opened under an `Output:` holds what the run printed, so a `Command:` line in it is output. Blanking
+        # those fences keeps every offset in place.
+        unfenced = re.sub(r'(?ms)(\bOutput:[ \t]*\n)([ \t]*(`{3,}|~{3,})[^`\n]*\n.*?^[ \t]*\3[ \t]*$)',
+                          lambda m: m[1] + re.sub(r'[^\n]', ' ', m[2]), item)
         found = list(COMMAND.finditer(unfenced))
         runs = []
         for command, after in zip(found, found[1:] + [None]):
@@ -416,9 +450,9 @@ def _suspects(items: list[str]) -> list[dict]:
             said = OUTPUT.search(span)
             lines = (said[1] if said else span).splitlines()
             output = '\n'.join(line for line in lines if line.strip() and not FENCE.match(line.strip())).strip() or None
-            # Words after a code span, such as `in the proof copy`, are prose about the command, not part of it.
-            code = [text.strip() for _, text in CODE_SPAN.findall(command[1])]
-            runs.append({'command': ' ; '.join(code) if code else command[1].strip().strip('`').strip(), 'output': output})
+            # The first code span is the command. Words and spans after it, such as `in the proof copy`, are prose.
+            code = CODE_SPAN.search(command[1])
+            runs.append({'command': code[2].strip() if code else command[1].strip().strip('`').strip(), 'output': output})
         rank = RANK.search(first)
         read.append({'id': f'S{int(head[1])}', 'number': int(head[1]),
                      'verdict': verdict[1].lower() if verdict else None, 'rank': rank[0] if rank else None,

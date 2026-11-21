@@ -333,9 +333,9 @@ def scan_copy(where: Path) -> str | None:
 def round_one(root: Path, fork: str, branch_base: str) -> bool:
     """Whether the round starting at `fork` is the branch's first. A re-grade starts at the last commit graded, which is
     on the branch, however it is written: a SHA, `topic~1`, or the pushed `origin/topic`. So round 1 is a fork that is a
-    commit of `branch_base`, or the very commit where HEAD left the local branch of the same name, such as a local main
-    a fetch has not yet brought origin/main up to. Any later commit of that branch is a re-grade's, including one on
-    HEAD when the work is on that local branch itself. A `branch_base` git cannot read stops the run: it says nothing
+    commit of `branch_base`, or, for a remote-tracking `branch_base`, the very commit where HEAD left the local branch
+    of the same name, such as a local main a fetch has not yet brought origin/main up to. Any later commit of that
+    branch is a re-grade's, including one on HEAD when the work is on that local branch itself. A `branch_base` git cannot read stops the run: it says nothing
     about the round."""
     on_main = subprocess.run(['git', 'merge-base', '--is-ancestor', fork, branch_base], cwd=root, capture_output=True,
                              text=True)

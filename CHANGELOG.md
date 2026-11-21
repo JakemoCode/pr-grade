@@ -27,6 +27,15 @@ Each entry says what changed, where, and why. Under it, **Before** is the old be
 - `skills/pr-grade/templates/pr-grade.json`: added `"scanProofCopy": true`, the key that turns the scan's copy off, so the template still shows every key. `false` keeps the 0.19.0 git-only scan, and anything but true or false stops `--scan`.
   - **Before:** nothing configured the scan's copy.
   - **Seen on:** issue #89.
+- `skills/pr-grade/scripts/grade_prep.py`: fixed `skill_texts` with a per-file read that skips a file it cannot read as UTF-8 text and names it, in the `--skill` exit and in a `notice:` line, so one stray file no longer drops the skill's text and the messages point at the file instead of the sections.
+  - **Before:** one unreadable `*.md` beside the skill gave no skill text at all, and both messages blamed sections 3 to 5.
+  - **Seen on:** PR #83's round 2, P3 L8 (issue #82).
+- `skills/pr-grade/scripts/grade_mode.py`: fixed `round_one` with a check that git resolves `--branch-base` to `refs/remotes/<branch base>` before it reads the part after the slash as a local branch, so a local base such as `release/c0` no longer reads a re-grade as round 1. Its docstring now says the local-branch case is for a remote-tracking base (issue #91).
+  - **Before:** an unrelated local `c0` at the re-grade's fork made a re-grade against `release/c0` read as round 1 and scan again.
+  - **Seen on:** PR #88's grade, P3 L9 (issue #86).
+- `skills/pr-grade/scripts/grade_mode.py`: fixed `graded_lines` with a literal-path, whole-file count of the kept side of a rename whose other side is excluded, so the count matches the lines the graders' diff shows.
+  - **Before:** such a rename counted 0, so a round 1 over `scanAbove` could get no first read.
+  - **Seen on:** PR #88's grade, P3 L9 (issue #86).
 
 ## 0.19.0
 

@@ -362,6 +362,20 @@ class HandOffTest(Repo):
         self.assertEqual((root / 'first-read.md').read_text(), self.REPORT)
         self.assertFalse(scan.exists())
 
+    def test_suspects_land_before_the_lens_text_when_the_prompt_holds_a_cr(self) -> None:
+        # The offset is measured in bytes, so a CR in a block cannot move it.
+        scan, out = self.prep_with_scan('--settled', 'ok\r\n' * 300)
+        root = self.proof_root(out)
+        (scan / 'first-read.md').write_text('1. one\n2. two\n')
+        self.ok('grade_prep.py', '--attach', str(root))
+        prompt = (root / 'grade/prompt.md').read_text()
+        section = prompt.index('\nSuspects from a first read:\n')
+        self.assertLess(section, prompt.index('===== lens text ====='))
+        self.assertLess(prompt.index('- Write your report to:'), section)
+        # No line is cut in half.
+        before = prompt[:section]
+        self.assertTrue(before.endswith('\n') or before.endswith('grade.md'), before[-60:])
+
     def test_a_report_with_a_dash_attaches_under_a_latin_1_locale(self) -> None:
         # The report is read as UTF-8 and the prompt written as bytes, so the copy kept beside them must be UTF-8 too.
         scan, out = self.prep_with_scan()

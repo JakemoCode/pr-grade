@@ -408,10 +408,13 @@ def scan(root: Path, base: str, branch_base: str, config: dict, kept: tuple[str,
             # No copy was asked for, so what failed is the root that holds the report's directory.
             print(f"notice: no root for the scan's report, so its directory is one the attach alone removes: {why}")
         made = None
-    # Until scan.json names it, nothing else names the directory this makes, so a failure here removes it.
-    owned = Path(tempfile.mkdtemp(prefix='pr-grade-scan-')) if made is None else None
+    # Until scan.json names it, nothing else names the directory this makes, so a failure here, an interrupt
+    # included, removes it.
+    owned = None
     try:
-        if made is not None:
+        if made is None:
+            owned = where = Path(tempfile.mkdtemp(prefix='pr-grade-scan-'))
+        else:
             fields = dict(made_line.split(': ', 1) for made_line in made if ': ' in made_line)
             owned = Path(fields['root'])
             record['proof'] = fields['root']
@@ -424,13 +427,14 @@ def scan(root: Path, base: str, branch_base: str, config: dict, kept: tuple[str,
                 refused = [made_line for made_line in made if made_line.startswith(('not linked', 'missing'))]
                 if refused:
                     copy += f" In your copy: {'; '.join(refused)}."
-        else:
-            where = owned
         (where / 'scan.json').write_text(json.dumps(record) + '\n')
-    except OSError as failed:
-        shutil.rmtree(owned, ignore_errors=True)
-        sys.exit(f"grade_mode: could not write the scan's directory, so {owned} is removed and no scan is "
-                 f'dispatched: {failed}')
+    except BaseException as failed:
+        if owned is not None:
+            shutil.rmtree(owned, ignore_errors=True)
+        if not isinstance(failed, OSError):
+            raise
+        sys.exit("grade_mode: could not write the scan's directory" + (f', so {owned} is removed' if owned else '')
+                 + f' and no scan is dispatched: {failed}')
     line = (SCAN_PROMPT.format(base=fork, head=head) + f' Write the report to {where / SCAN_REPORT} with the Write tool.'
             + copy)
     print('Dispatch one pr-grade:scan agent now, with this line as its prompt, unchanged:')

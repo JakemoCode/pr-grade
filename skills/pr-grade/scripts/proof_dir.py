@@ -12,7 +12,8 @@ and resolved, for the dispatch to carry as printed, and ends with the `remove` c
 every grader has reported. Copies go under the temp directory, or under TMPDIR when it is set. Beside
 each copy is a `proofs` directory for the tests that proved the grader's findings; `remove` refuses
 while one is still there, since the repair starts from it, unless `--drop-proofs` says to delete them.
-Given several roots, as the prep's `remove:` line gives the graders' and the first read's, it removes each one it
+The first read's root is the exception: nothing keeps a proof the scan writes, so `remove` drops it whatever
+its `proofs` directory holds. Given several roots, as the prep's `remove:` line gives the graders' and the first read's, it removes each one it
 can and exits non-zero naming the ones it refused.
 
 Each copy is a local clone of the repository, checked out detached at the graded commit. Git hardlinks
@@ -64,6 +65,8 @@ load_config, repo_root = grade_mode.load_config, grade_mode.repo_root
 
 PREFIX = 'pr-grade-proof-'
 MARKER = '.pr-grade-proof'
+# A root's name as `tempfile.mkdtemp` makes it: PREFIX and eight characters from its alphabet.
+ROOT_NAME = re.compile(re.escape(PREFIX) + r'[a-z0-9_]{8}')
 # The marker's third line on a root whose proofs nothing keeps, the first read's: its runs are scratch.
 SCRATCH = 'scratch'
 STALE_AFTER = 7 * 24 * 60 * 60
@@ -239,10 +242,12 @@ def proof_roots(roots: list[Path]) -> tuple[Path, ...]:
 
 
 def _made_here(root: Path, line: tuple[Path, ...]) -> bool:
-    """Whether a missing `root` is one `make` printed: named with PREFIX, and in the temp directory, or in the
-    directory of a root in `line`, the proof roots its remove: line held when the run began, for a line run where
-    TMPDIR is not what it was for make."""
-    if not root.name.startswith(PREFIX):
+    """Whether a missing `root` is shaped like one `make` printed: PREFIX and mkdtemp's eight-character suffix, in the
+    temp directory, or in the directory of a root in `line`, the proof roots its remove: line held when the run
+    began, for a line run where TMPDIR is not what it was for make. A truncated name refuses. A suffix with one
+    character changed, or a line run twice where TMPDIR differs, cannot be told from a root removed already
+    without a record of what make printed, which nothing keeps."""
+    if not ROOT_NAME.fullmatch(root.name):
         return False
     parent = os.path.realpath(root.parent)
     return parent == os.path.realpath(tempfile.gettempdir()) or any(

@@ -51,6 +51,14 @@ class OutputFence(unittest.TestCase):
         found = grade_block.read_report(HEAD + '  Output:\n  ```\nS2 refuted: P3, printed\n' + TAIL)
         self.assertEqual(found['fields']['Verified and clear'], ['L1 (a)'])
 
+    def test_a_fence_and_its_closer_on_the_output_line_is_code_and_opens_nothing(self) -> None:
+        # CommonMark: a backtick fence's info string holds no backtick, so this is a code span, and the fields after
+        # it are read rather than swallowed into the suspect.
+        found = grade_block.read_report('Score: 5/5\nSuspects:\nS1 refuted: P3, Command: `python3 t.py` '
+                                        'Output: ```3 passed```\nVerified and clear: L1 (a)\n')
+        self.assertEqual(found['fields']['Verified and clear'], ['L1 (a)'])
+        self.assertEqual(found['suspects'][0]['runs'][0]['output'], '```3 passed```')
+
     def test_a_longer_run_of_the_marker_closes_the_fence(self) -> None:
         # CommonMark closes a fence at a run of its marker at least as long, so the field after it is read.
         found = grade_block.read_report(HEAD + '  Output:\n  ```\n  printed\n  ````\nVerified and clear: L2 (b)\n')

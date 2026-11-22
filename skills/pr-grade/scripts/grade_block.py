@@ -348,11 +348,25 @@ def is_run(command: str) -> bool:
 def fence_after(line: str, fence: str | None, output: bool = False) -> str | None:
     """The fence still open after the stripped `line`, given `fence`, the one open before it. A fence opens at a line's
     start, or with `output` after `Output:` on the line too, and closes only at a line that holds a run of its marker
-    at least as long and nothing else, as CommonMark has it, so a ```` ```python ```` line inside output is output."""
+    at least as long and nothing else, as CommonMark has it, so a ```` ```python ```` line inside output is output.
+    A backtick run with a backtick after it on the line, as in ```` ```3 passed``` ````, is code and opens nothing."""
     if fence:
         return None if re.fullmatch(re.escape(fence[0]) + '{%d,}' % len(fence), line) else fence
     opens = FENCE.match(line) or (OUTPUT_FENCE.search(line) if output else None)
-    return opens[1] if opens else None
+    if not opens or (opens[1][0] == '`' and '`' in line[opens.end(1):]):
+        return None
+    return opens[1]
+
+
+def _unfenced(item: str) -> str:
+    """`item` with every line inside a fence, its closer included, blanked to spaces, so that a `Command:` or `Output:`
+    a run printed is never read as one and every offset stays where it was. A fence opens as `read_report` opens a
+    suspect's, after `Output:` on its line too."""
+    lines, fence = [], None
+    for line in item.split('\n'):
+        lines.append(' ' * len(line) if fence else line)
+        fence = fence_after(line.strip(), fence, output=True)
+    return '\n'.join(lines)
 
 
 def _suspects(items: list[str]) -> list[dict]:
@@ -368,18 +382,20 @@ def _suspects(items: list[str]) -> list[dict]:
         if not head:
             continue
         verdict = VERDICT.match(head[2])
-        found = list(COMMAND.finditer(item))
+        # Commands and Output: labels are found in the unfenced text, and what they hold is read from the item itself.
+        unfenced = _unfenced(item)
+        found = list(COMMAND.finditer(unfenced))
         runs = []
         for command, after in zip(found, found[1:] + [None]):
-            span = item[command.end():after.start() if after else len(item)]
-            said = OUTPUT.search(span)
+            start, end = command.end(), after.start() if after else len(item)
+            said = OUTPUT.search(unfenced, start, end)
             # A fence's opening and closing lines are not output, and every line between them is, as in read_report.
             kept, fence = [], None
-            for line in (said[1] if said else span).splitlines():
-                after = fence_after(line.strip(), fence)
-                if line.strip() and bool(fence) == bool(after):
+            for line in item[said.start(1) if said else start:end].splitlines():
+                then = fence_after(line.strip(), fence)
+                if line.strip() and bool(fence) == bool(then):
                     kept.append(line)
-                fence = after
+                fence = then
             output = '\n'.join(kept).strip() or None
             runs.append({'command': command[1].strip().strip('`').strip(), 'output': output})
         rank = RANK.search(first)
@@ -416,9 +432,11 @@ def read_report(text: str, roots: tuple[str, ...] = ()) -> dict:
             last_finding['body'].append(body_line)
             fence = fence_after(line, fence)
             continue
-        joins_suspect = current == 'Suspects' and bool(fields[current]) and bool(line) and not SUSPECT.match(line)
+        # Inside an open fence even an `S<n>` line is the suspect's output, never a suspect of its own.
+        joins_suspect = (current == 'Suspects' and bool(fields[current]) and bool(line)
+                         and (bool(fence) or not SUSPECT.match(line)))
         if joins_suspect and (fence or fence_after(line, None, output=True)):
-            # A suspect's output, fenced, is part of it, even a line shaped like a field.
+            # A suspect's output, fenced, is part of it, even a line shaped like a field or a suspect.
             fields[current][-1] += '\n' + line
             fence = fence_after(line, fence, output=True)
             continue

@@ -96,6 +96,21 @@ class ScanCopyTest(Repo):
         self.assertNotIn('proof copy:', self.dispatch(out))
         self.assertNotIn('proof', json.loads((self.scan_dir(out) / 'scan.json').read_text()))
 
+    def test_with_scan_proof_copy_false_a_failure_names_no_copy(self) -> None:
+        # Nobody asked for a copy, so the notice says what did fail: the root that holds the report's directory.
+        self.configure(scanProofCopy=False)
+        failing = mock.Mock()
+        failing.make.side_effect = OSError(28, 'No space left on device')
+        printed = io.StringIO()
+        with mock.patch.object(grade_mode, 'proof_copies', return_value=failing), \
+                mock.patch('tempfile.tempdir', str(self.temp)), redirect_stdout(printed):
+            grade_mode.scan(self.repo, 'main', 'main', grade_mode.load_config(self.repo), ())
+        notice = re.search(r'^notice: .*$', printed.getvalue(), re.M).group(0)
+        self.assertNotIn('proof copy', notice)
+        self.assertIn("no root for the scan's report", notice)
+        self.assertIn('No space left on device', notice)
+        self.assertTrue(self.scan_dir(printed.getvalue()).is_dir())
+
     def test_a_proof_dir_make_refuses_still_dispatches_the_scan(self) -> None:
         # proof_dir.make exits on a malformed proofDir rather than raising.
         self.configure(proofDir='node_modules')

@@ -37,15 +37,21 @@ class MissingRootTest(unittest.TestCase):
         self.assertIn('typo-root holds no .pr-grade-proof', run.stderr)
 
     def test_a_proof_root_name_outside_the_temp_directory_refuses(self) -> None:
-        run = self.remove(self.scratch / 'pr-grade-proof-abc123')
+        run = self.remove(self.scratch / 'pr-grade-proof-abc12345')
         self.assertEqual(run.returncode, 1, run.stdout)
 
     def test_another_name_in_the_temp_directory_refuses(self) -> None:
-        run = self.remove(self.temp / 'pr-grade-scan-abc123')
+        run = self.remove(self.temp / 'pr-grade-scan-abc12345')
         self.assertEqual(run.returncode, 1, run.stdout)
 
+    def test_a_truncated_proof_root_name_refuses(self) -> None:
+        # mkdtemp's suffix is eight characters, so a name cut short is no root make printed.
+        run = self.remove(self.temp / 'pr-grade-proof-abc')
+        self.assertEqual(run.returncode, 1, run.stdout)
+        self.assertIn('pr-grade-proof-abc holds no .pr-grade-proof', run.stderr)
+
     def test_a_proof_root_gone_from_the_temp_directory_was_removed_already(self) -> None:
-        gone = self.temp / 'pr-grade-proof-abc123'
+        gone = self.temp / 'pr-grade-proof-abc12345'
         run = self.remove(gone)
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(run.stdout, f'already removed: {gone}\n')
@@ -53,7 +59,7 @@ class MissingRootTest(unittest.TestCase):
     def test_a_root_gone_beside_a_live_root_on_the_line_was_removed_already_whatever_tmpdir_says(self) -> None:
         # The remove: line can run in a shell whose TMPDIR is not the prep's. The live root is listed first, as the
         # prep lists the graders' root before the scan's, so it is gone by the time the missing one is read.
-        live, gone = self.scratch / 'pr-grade-proof-live', self.scratch / 'pr-grade-proof-gone'
+        live, gone = self.scratch / 'pr-grade-proof-live1234', self.scratch / 'pr-grade-proof-gone1234'
         live.mkdir()
         (live / '.pr-grade-proof').write_text('repo\nsha\n')
         run = self.remove(live, gone)
@@ -61,7 +67,7 @@ class MissingRootTest(unittest.TestCase):
         self.assertEqual(run.stdout, f'removed: {live}\nalready removed: {gone}\n')
 
     def test_a_typo_beside_a_root_gone_still_refuses_the_typo_alone(self) -> None:
-        gone = self.temp / 'pr-grade-proof-abc123'
+        gone = self.temp / 'pr-grade-proof-abc12345'
         run = self.remove(gone, self.scratch / 'typo-root')
         self.assertEqual(run.returncode, 1)
         self.assertIn(f'already removed: {gone}', run.stdout)

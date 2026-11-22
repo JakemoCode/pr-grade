@@ -9,15 +9,15 @@ Each entry says what changed, where, and why. Under it, **Before** is the old be
 
 ## 0.20.1
 
-- `skills/pr-grade/scripts/grade_block.py`: fixed `read_report` with one fence rule, `fence_after`, that its finding and suspect readers and `_suspects` share: a fence closes only at a line holding a run of its marker at least as long and nothing else, as CommonMark has it, and a suspect's fence also opens after `Output:` on its line, so a field-shaped line a run printed stays output and clears no lens.
-  - **Before:** a ```` ```python ```` line inside fenced output closed the fence, and `` Output: ``` `` opened none, so a printed `Verified and clear: L2, L3` cleared lenses the grader never cleared.
-  - **Seen on:** issue #93, from rounds 3 and 4 of grading issue #84's parked branch.
-- `skills/pr-grade/scripts/proof_dir.py`: fixed `remove` with a check that a missing root is one `make` printed, a `pr-grade-proof-` directory in the temp directory or in the directory of another proof root on the same line, to refuse a mistyped root again while a second run of the two-root `remove:` line still succeeds.
+- `skills/pr-grade/scripts/grade_block.py`: fixed `read_report` with one fence rule, `fence_after`, that its finding and suspect readers and `_suspects` share: a fence closes only at a line holding a run of its marker at least as long and nothing else, as CommonMark has it, and a suspect's fence also opens after `Output:` on its line, unless a backtick follows on the line, which makes it a code span. Inside a suspect's open fence an `S<n>` line joins the suspect, and `_suspects` finds `Command:` and `Output:` only outside fences. So a field, suspect or run a script printed stays output and clears no lens or suspect.
+  - **Before:** a ```` ```python ```` line inside fenced output closed the fence, and `` Output: ``` `` opened none, so a printed `Verified and clear: L2, L3` cleared lenses the grader never cleared. A printed `S2` line read as a suspect, and a printed `Command:` and `Output:` pair as a run, so an unanswered suspect or a grep-only refutation read as settled by a run.
+  - **Seen on:** issue #93, from rounds 3 and 4 of grading issue #84's parked branch, and this release's round 1, two P2 L9.
+- `skills/pr-grade/scripts/proof_dir.py`: fixed `remove` with a check that a missing root is shaped like one `make` printed, `pr-grade-proof-` and an eight-character suffix, in the temp directory or in the directory of another proof root on the same line, to refuse a mistyped or truncated root again while a second run of the two-root `remove:` line still succeeds. A suffix with one character changed still reads as removed, since nothing records what `make` printed.
   - **Before:** any path that did not exist printed `already removed: <path>` and exited 0, so a typo read as cleaned up.
-  - **Seen on:** issue #94, PR #92's round 2, P3 L9.
-- `skills/pr-grade/scripts/grade_mode.py`: fixed `scan` with a `try` around the report directory and the `scan.json` write that removes the scan's root when either fails, and exits naming it, so a failure after the copy is made leaves nothing in the temp directory.
+  - **Seen on:** issue #94, PR #92's round 2, P3 L9, and this release's round 1, P3 L9.
+- `skills/pr-grade/scripts/grade_mode.py`: fixed `scan` with a `try` around the report directory, the git-only fallback's directory and the `scan.json` write that removes whichever was made when any of them fails or is interrupted, and on an `OSError` exits naming it, so a failure after the copy is made leaves nothing in the temp directory.
   - **Before:** an `OSError` there ended the run with the scan's root and clone left behind, and no `remove:` line could name them.
-  - **Seen on:** a read of `scan` as PR #92 merged it, after its grade.
+  - **Seen on:** a read of `scan` as PR #92 merged it, after its grade, and this release's round 1, P3 L3.
 - `skills/pr-grade/scripts/proof_dir.py`: changed `make` to mark a root `scratch` on the marker's third line when `keeps_proofs` is false, as `grade_mode.py` makes the scan's, and `remove` to drop such a root without the kept-proof refusal, since nothing in the grade flow keeps a proof the scan writes.
   - **Before:** a test the scan wrote under `<scan root>/scan/proofs/` made plain `remove` refuse the scan's root with exit 1, and `--drop-proofs` was the only way past it.
   - **Seen on:** a read of `scan` as PR #92 merged it, after its grade.

@@ -43,6 +43,27 @@ class ScanWriteFailsTest(Repo):
         self.scan_failing(scanProofCopy=False)
         self.assertEqual(list(self.temp.iterdir()), [])
 
+    def test_an_interrupt_after_the_copy_leaves_no_root(self) -> None:
+        def interrupted(path: Path, *args, **kwargs):
+            if path.name == 'scan.json':
+                raise KeyboardInterrupt
+            return WRITE_TEXT(path, *args, **kwargs)
+
+        with mock.patch.object(Path, 'write_text', interrupted), mock.patch('tempfile.tempdir', str(self.temp)), \
+                redirect_stdout(io.StringIO()), self.assertRaises(KeyboardInterrupt):
+            grade_mode.scan(self.repo, 'main', 'main', grade_mode.load_config(self.repo), ())
+        self.assertEqual(list(self.temp.iterdir()), [])
+
+    def test_a_fallback_directory_that_cannot_be_made_exits_with_a_message(self) -> None:
+        # make failed, and the temp directory refuses the git-only fallback's directory too.
+        failing = mock.Mock()
+        failing.make.side_effect = OSError(28, 'No space left on device')
+        with mock.patch.object(grade_mode, 'proof_copies', return_value=failing), \
+                mock.patch('tempfile.mkdtemp', side_effect=OSError(28, 'No space left on device')), \
+                redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as stopped:
+            grade_mode.scan(self.repo, 'main', 'main', grade_mode.load_config(self.repo), ())
+        self.assertIn("could not write the scan's directory", str(stopped.exception.code))
+
 
 if __name__ == '__main__':
     unittest.main()

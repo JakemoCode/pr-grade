@@ -402,7 +402,11 @@ def scan(root: Path, base: str, branch_base: str, config: dict, kept: tuple[str,
     except (subprocess.CalledProcessError, OSError, SystemExit) as failed:
         # A scan with no copy still reads; the grade never waits on a copy. A malformed proofDir exits in make.
         why = str(getattr(failed, 'stderr', None) or getattr(failed, 'code', None) or failed).strip()
-        print(f'notice: no proof copy for the scan, so it reads with git alone: {why}')
+        if copying:
+            print(f'notice: no proof copy for the scan, so it reads with git alone: {why}')
+        else:
+            # No copy was asked for, so what failed is the root that holds the report's directory.
+            print(f"notice: no root for the scan's report, so its directory is one the attach alone removes: {why}")
         made = None
     # Until scan.json names it, nothing else names the directory this makes, so a failure here removes it.
     owned = Path(tempfile.mkdtemp(prefix='pr-grade-scan-')) if made is None else None

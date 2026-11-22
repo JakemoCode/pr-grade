@@ -64,6 +64,8 @@ load_config, repo_root = grade_mode.load_config, grade_mode.repo_root
 
 PREFIX = 'pr-grade-proof-'
 MARKER = '.pr-grade-proof'
+# The marker's third line on a root whose proofs nothing keeps, the first read's: its runs are scratch.
+SCRATCH = 'scratch'
 STALE_AFTER = 7 * 24 * 60 * 60
 NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]*')
 DEFAULTS = [
@@ -191,10 +193,11 @@ def sweep(parent: Path, repo: Path, now: float) -> None:
             shutil.rmtree(old, ignore_errors=True)
 
 
-def make(repo: Path, sha: str, names: list[str], config: dict, parent: Path, since: str | None = None) -> list[str]:
+def make(repo: Path, sha: str, names: list[str], config: dict, parent: Path, since: str | None = None,
+         keeps_proofs: bool = True) -> list[str]:
     """One copy, one scratch directory, and one empty `proofs` directory per name under a new root in
-    `parent`; returns the lines to
-    print. A failure removes the root before it propagates."""
+    `parent`; returns the lines to print. A failure removes the root before it propagates. With `keeps_proofs`
+    false, as for the first read's root, the marker's third line says SCRATCH, and `remove` keeps nothing."""
     if not all(NAME.fullmatch(n) for n in names) or len(set(names)) != len(names):
         sys.exit(f"copy names must be distinct, made of letters, digits, '-' and '_': {' '.join(names)}")
     wanted = entries(config)
@@ -202,7 +205,7 @@ def make(repo: Path, sha: str, names: list[str], config: dict, parent: Path, sin
     common = (repo / git(repo, 'rev-parse', '--git-common-dir').strip()).resolve()
     root = Path(tempfile.mkdtemp(prefix=PREFIX, dir=parent)).resolve()
     try:
-        (root / MARKER).write_text(f'{repo}\n{sha}\n')
+        (root / MARKER).write_text(f'{repo}\n{sha}\n' + ('' if keeps_proofs else f'{SCRATCH}\n'))
         lines, copies = [f'root: {root}', f'commit: {sha}'], []
         # LFS content would be fetched from a remote; a pointer is enough to read, and no hook of the
         # author's, global or local, runs in a copy.
@@ -249,7 +252,8 @@ def _made_here(root: Path, line: tuple[Path, ...]) -> bool:
 def remove(root: Path, drop_proofs: bool = False, line: tuple[Path, ...] = ()) -> str:
     """Deletes a root `make` printed. A link inside it is unlinked, never followed. A proof test a grader
     kept under `<name>/proofs/` is the repair's starting point, so the root stays until each one is moved
-    out, unless `drop_proofs` says to delete them. A root that no longer exists was removed already when
+    out, unless `drop_proofs` says to delete them. A root marked scratch keeps none, so it goes whatever
+    is under its `proofs/`. A root that no longer exists was removed already when
     `_made_here` says `make` printed it, given the other roots on its `line`: a second run of a remove: line that
     refused one root finds the others gone. Any other missing path is refused, so a typo never reads as cleaned up."""
     if not root.exists() and not root.is_symlink() and _made_here(root, line):
@@ -257,7 +261,9 @@ def remove(root: Path, drop_proofs: bool = False, line: tuple[Path, ...] = ()) -
     if root.is_symlink() or not (root / MARKER).is_file():
         sys.exit(f'{root} holds no {MARKER}, so it is not a proof root; nothing was removed')
     kept = sorted(path for path in root.glob('*/proofs/**/*') if path.is_file() and not path.is_symlink())
-    if kept and not drop_proofs:
+    # Nothing in the grade flow moves a test out of a scratch root, so refusing it would only strand it.
+    scratch = (root / MARKER).read_text().split('\n')[2:3] == [SCRATCH]
+    if kept and not drop_proofs and not scratch:
         sys.exit('not removed: a grader kept a proof test here that nothing has moved out yet:\n'
                  + '\n'.join(f'  {path}' for path in kept)
                  + '\nMove each to the repository path the merge printed and commit it alone, then run this '

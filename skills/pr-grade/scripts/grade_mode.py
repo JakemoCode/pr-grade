@@ -396,8 +396,9 @@ def scan(root: Path, base: str, branch_base: str, config: dict, kept: tuple[str,
     # A root of its own, with a grader's copy linked the same way unless the key says none. The report's directory
     # sits inside it, so the prep's remove: line, or make's sweep of an idle root, removes both.
     try:
+        # The scan's root keeps no proofs, so remove drops it whatever the scan wrote in it.
         made = proof_copies().make(root, head, ['scan'] if copying else [], config, Path(tempfile.gettempdir()),
-                                   since=fork)
+                                   since=fork, keeps_proofs=False)
     except (subprocess.CalledProcessError, OSError, SystemExit) as failed:
         # A scan with no copy still reads; the grade never waits on a copy. A malformed proofDir exits in make.
         why = str(getattr(failed, 'stderr', None) or getattr(failed, 'code', None) or failed).strip()
